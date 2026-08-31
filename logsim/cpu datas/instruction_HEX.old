@@ -1,0 +1,36 @@
+--OUTDATED--
+
+instruction         code	language			description
+10xx                ADD     RA,RB               ADDITION
+11xx	            SUB	    RA,RB		        SUBTRACTION(RA-RB)
+12xx                MULT    RA,RB               MULTIPLICATION
+13xx                DIV     RA,RB               DIVISION(RA/RB) INTEGER
+14xx	            SHL     RA,RB               SHIFT LEFT RA AND STORE IN RB
+15xx	            SHR	    RA,RB  		        SHIFT RIGHT RA AND STORE IN RB
+16xx	            NOT	    RA,RB  		        BITWISE NOT RA AND STORE IN RB
+17xx	            AND	    RA,RB		        BITWISE RA AND RB 
+18xx	            OR	    RA,RB		        BITWISE RA OR RB
+19xx	            XOR	    RA,RB		        BITWISE EXCLUSIVE OR
+1axx                MOD     RA,RB               RA MODULUS RB
+1bxx                ++      RA,RB               INCREMENT RA AND STORE IN RB
+1cxx                --      RA,RB               DECREMENT RA AND STORE IN RB
+1dxx                NEG     RA,RB               2´S COMPLEMENT NEGATE RA AND STORE IN RB
+1exx                     
+1fxx	            CMP	    RA,RB		        COMPARE RA AND RB
+
+00 0000 0000        NOP     -----               NO OPERATION(DOES NOTHING)
+01 xxxx xxxx	    LD	    RA,RB		        LOAD RB FROM RAM ADDR IN RA
+02 xxxx xxxx	    ST	    RA,RB		        STORE RB TO RAM ADDR IN RA	
+03 0000 xxxx        DATA    RB      	        LOAD NEXT BYTE TO RB
+04 0000 xxxx        JMRB    RB		            JUMP TO THE ADDRESS IN RB
+05 0000 0000        JMP	    ----- 		        JUMP TO THE ADDRESS IN THE NEXT BYTE
+06 0000 caez        JIF     CAEZ  		        JUMP IF ANY TESTED FLAG IS ON
+07 0000 0000        CLF		-----               CLEAR ALL FLAGS IN FLAG REG
+08 00xx xxxx	    COMM    I/O,D/A,RB		    INPUT/OUTPUT DATA/ADDRESS FROM PERIPHERAL TO RB
+09 0000 xxxx        ADDR    RB                  GET ADDRESS FROM IAR
+0a 0000 xxxx        JNIF    N(CAEZ)             JUMP IF ANY TESTED FLAG IS OFF   
+0b 0xxx xxxx        STK     OP,RB               STACK MEMORY OPERATIONS, OP CAN BE PUSH, POP, CALL, RETURN, SET, GET //SET HAS INDEX IN RB AND VALUE IN R0
+0c xxxx xxxx        ALD     RA,RB               LOAD VALUE FROM ARRAY WITH ADDRESS IN RA AND INDEX IN RB, TO REGISTER 0
+0d xxxx xxxx        AST     RA,RB               STORE VALUE TO ARRAY WITH ADDRESS IN RA AND INDEX IN RB, FROM REGISTER 0
+0e xxxx xxxx        CPY     RA,RB               COPY CPU REGISTER RA TO RB
+0f 0000 0000        HALT    -----               HALT CPU UNTIL RESUME SIGNAL IS ENABLED

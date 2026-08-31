@@ -1,0 +1,451 @@
+from __future__ import annotations
+import json
+from enum import Enum, auto
+from dataclasses import dataclass, field
+import os
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_DEFAULT_KW = os.path.join(_HERE, "keywords.json")
+
+# ── Token types ──────────────────────────────────────────────────────────────
+
+class TokenType(Enum):
+    # Literals
+    INTEGER    = auto()   # 42, 0xFF, 0777, 1UL
+    FLOAT      = auto()   # 3.14, 2.0f, 1e-9
+    STRING     = auto()   # "hello"  (the content between quotes)
+    CHAR       = auto()   # 'a', '\n'  (the content between quotes)
+
+    # Words
+    IDENTIFIER = auto()   # any unrecognised name
+    KEYWORD    = auto()   # generic fallback when no sub-category matches
+
+    # Keyword sub-categories (populated from keywords.json)
+    CONTROL_FLOW        = auto()
+    TYPE_SPECIFIER      = auto()
+    TYPE_QUALIFIER      = auto()
+    STORAGE_CLASS       = auto()
+    STRUCTURE           = auto()
+    MEMORY              = auto()
+    PREPROCESSOR_KW     = auto()
+    BUILTIN_FUNCTION    = auto()
+    BUILTIN_TYPE        = auto()
+    C11_KEYWORD         = auto()
+
+    # Punctuation
+    SEPARATOR  = auto()   # ; ( ) [ ] { } , :
+    OPERATOR   = auto()   # + - * / % == != < > ...
+
+    # Meta
+    SPECIAL    = auto()   # escape sequences, EOF sentinel
+
+
+# Map JSON key → TokenType so the loader can resolve them
+_JSON_KEY_TO_TYPE: dict[str, TokenType] = {
+    "control_flow":        TokenType.CONTROL_FLOW,
+    "type_specifier":      TokenType.TYPE_SPECIFIER,
+    "type_qualifier":      TokenType.TYPE_QUALIFIER,
+    "storage_class":       TokenType.STORAGE_CLASS,
+    "structure":           TokenType.STRUCTURE,
+    "memory":              TokenType.MEMORY,
+    "preprocessor_keyword":TokenType.PREPROCESSOR_KW,
+    "builtin_function":    TokenType.BUILTIN_FUNCTION,
+    "builtin_type":        TokenType.BUILTIN_TYPE,
+    "c11_keyword":         TokenType.C11_KEYWORD,
+}
+
+
+# ── Token dataclass ───────────────────────────────────────────────────────────
+
+@dataclass
+class Token:
+    type:  TokenType
+    value: str
+
+    def __repr__(self) -> str:
+        return f"Token({self.type.name:<20} {self.value!r})"
+
+
+# ── Lexer ─────────────────────────────────────────────────────────────────────
+
+class Lexer:
+    """
+    Single-pass lexer for C source code.
+
+    Parameters
+    ----------
+    source       : raw C source text
+    keyword_file : path to a keywords.json file (optional).
+                   When provided, identifiers are reclassified according to
+                   the categories defined in that file.
+    """
+
+    def __init__(self, source: str, keyword_file: str | None = None):
+        self.source = source
+        self.pos    = 0
+        self.tokens: list[Token] = []
+
+        # word → TokenType, built from the JSON file
+        self._word_map: dict[str, TokenType] = {}
+        if keyword_file:
+            self._load_keywords(keyword_file)
+
+    # ── keyword file loading ─────────────────────────────────────────────────
+
+    def _load_keywords(self, path: str) -> None:
+        with open(path, encoding="utf-8") as f:
+            data: dict = json.load(f)
+
+        for json_key, words in data.items():
+            if json_key.startswith("_"):       # skip comment keys
+                continue
+            token_type = _JSON_KEY_TO_TYPE.get(json_key, TokenType.KEYWORD)
+            for word in words:
+                # first definition wins (avoids "if" being overridden by
+                # preprocessor_keyword which also lists "if")
+                self._word_map.setdefault(word, token_type)
+
+    # ── character navigation ─────────────────────────────────────────────────
+
+    def _peek(self, offset: int = 0) -> str:
+        idx = self.pos + offset
+        return self.source[idx] if idx < len(self.source) else "\x00"
+
+    def _advance(self) -> str:
+        ch = self._peek()
+        self.pos += 1
+        return ch
+
+    def _match(self, expected: str) -> bool:
+        """Consume the next char only if it equals `expected`."""
+        if self._peek() == expected:
+            self.pos += 1
+            return True
+        return False
+
+    # ── number reading ────────────────────────────────────────────────────────
+    #
+    #  Handles:
+    #    decimal integer   42
+    #    hex               0xFF  0XFF
+    #    octal             0777
+    #    float             3.14  .5  3.14e-2  3.14f  3.14L
+    #    integer suffixes  1U  1L  1UL  1LL  1ULL  (case-insensitive)
+
+    def _read_number(self) -> Token:
+        start  = self.pos
+        is_float = False
+
+        if self._peek() == "0" and self._peek(1) in ("x", "X"):
+            # hexadecimal: 0x[0-9a-fA-F]+
+            self._advance()   # '0'
+            self._advance()   # 'x'/'X'
+            while self._peek() in "0123456789abcdefABCDEF_":
+                self._advance()
+            # hex floats are rare (C99), skip for now
+        elif self._peek() == "0" and self._peek(1).isdigit():
+            # octal: 0[0-7]+
+            self._advance()   # leading '0'
+            while self._peek() in "01234567":
+                self._advance()
+        else:
+            # decimal integer or float
+            while self._peek().isdigit():
+                self._advance()
+
+            if self._peek() == "." and self._peek(1) != ".":
+                # fractional part  (guard against '...' operator)
+                is_float = True
+                self._advance()   # '.'
+                while self._peek().isdigit():
+                    self._advance()
+
+            if self._peek() in ("e", "E"):
+                # exponent part
+                is_float = True
+                self._advance()
+                if self._peek() in ("+", "-"):
+                    self._advance()
+                while self._peek().isdigit():
+                    self._advance()
+
+        # suffixes  (f F l L u U and combinations)
+        while self._peek().lower() in ("f", "l", "u"):
+            is_float = is_float or self._peek().lower() == "f"
+            self._advance()
+
+        value = self.source[start:self.pos]
+        kind  = TokenType.FLOAT if is_float else TokenType.INTEGER
+        return Token(kind, value)
+
+    # also handle leading-dot floats:  .5   .25e3
+    def _read_leading_dot_float(self) -> Token | None:
+        """Call when '.' is the current char and the next is a digit."""
+        if not self._peek(1).isdigit():
+            return None
+        start = self.pos
+        self._advance()   # '.'
+        while self._peek().isdigit():
+            self._advance()
+        if self._peek() in ("e", "E"):
+            self._advance()
+            if self._peek() in ("+", "-"):
+                self._advance()
+            while self._peek().isdigit():
+                self._advance()
+        while self._peek().lower() in ("f", "l"):
+            self._advance()
+        return Token(TokenType.FLOAT, self.source[start:self.pos])
+
+    # ── word reading & classification ─────────────────────────────────────────
+
+    def _read_word(self) -> Token:
+        start = self.pos
+        while self._peek().isalpha() or self._peek() in ("_", "0123456789"):
+            # identifiers can contain digits after the first char
+            if not (self._peek().isalnum() or self._peek() == "_"):
+                break
+            self._advance()
+        word      = self.source[start:self.pos]
+        tok_type  = self._word_map.get(word, TokenType.IDENTIFIER)
+        return Token(tok_type, word)
+
+    # ── string / char literals ────────────────────────────────────────────────
+
+    def _read_string(self) -> list[Token]:
+        tokens = [Token(TokenType.SEPARATOR, '"')]
+        buf: list[str] = []
+        while self._peek() not in ('"', "\x00"):
+            ch = self._advance()
+            buf.append(ch)
+            if ch == "\\" and self._peek() == '"':
+                buf.append(self._advance())   # escaped quote inside string
+        self._advance()   # closing "
+        tokens.append(Token(TokenType.STRING, "".join(buf)))
+        tokens.append(Token(TokenType.SEPARATOR, '"'))
+        return tokens
+
+    def _read_char_literal(self) -> list[Token]:
+        tokens = [Token(TokenType.SEPARATOR, "'")]
+        is_escape = self._peek() == "\\"
+        if is_escape:
+            self._advance()                    # consume backslash
+        ch = self._advance()                   # the actual character
+        tokens.append(Token(
+            TokenType.SPECIAL if is_escape else TokenType.CHAR,
+            ch
+        ))
+        self._advance()                        # closing '
+        tokens.append(Token(TokenType.SEPARATOR, "'"))
+        return tokens
+
+    # ── comment / preprocessor skipping ──────────────────────────────────────
+
+    def _skip_block_comment(self) -> None:
+        while not (self._peek() == "*" and self._peek(1) == "/"):
+            if self._peek() == "\x00":
+                break
+            self._advance()
+        self._advance()   # *
+        self._advance()   # /
+
+    def _skip_line(self) -> None:
+        """Skip to end of line (handles line continuations with backslash)."""
+        while self._peek() not in ("\n", "\x00"):
+            if self._peek() == "\\" and self._peek(1) == "\n":
+                self._advance()   # backslash
+                self._advance()   # newline  → continue on next line
+            else:
+                self._advance()
+
+    # ── operator / separator dispatch ────────────────────────────────────────
+
+    def _lex_symbol(self, ch: str) -> Token | None:
+        S = TokenType.SEPARATOR
+        O = TokenType.OPERATOR
+
+        match ch:
+            # --- plain separators ---
+            case ";" | "(" | ")" | "[" | "]" | "{" | "}" | "," | ":":
+                return Token(S, ch)
+
+            # --- bitwise OR / logical OR ---
+            case "|":
+                if self._match("|"): return Token(O, "||")
+                if self._match("="): return Token(O, "|=")
+                return Token(O, "|")
+
+            # --- bitwise AND / logical AND / address-of ---
+            case "&":
+                if self._match("&"): return Token(O, "&&")
+                if self._match("="): return Token(O, "&=")
+                return Token(O, "&")
+
+            # --- simple single-char operators ---
+            case "?": return Token(O, "?")
+            case "%":
+                return Token(O, "%=" if self._match("=") else "%")
+            case "^":
+                return Token(O, "^=" if self._match("=") else "^")
+            case "~": return Token(O, "~")
+
+            # --- not / not-equal ---
+            case "!":
+                return Token(O, "!=" if self._match("=") else "!")
+
+            # --- assignment / equality ---
+            case "=":
+                return Token(S, "==" if self._match("=") else "=")
+
+            # --- plus ---
+            case "+":
+                if self._match("="): return Token(O, "+=")
+                if self._match("+"): return Token(O, "++")
+                return Token(O, "+")
+
+            # --- minus / arrow ---
+            case "-":
+                if self._match(">"): return Token(O, "->")
+                if self._match("="): return Token(O, "-=")
+                if self._match("-"): return Token(O, "--")
+                return Token(O, "-")
+
+            # --- multiply / deref ---
+            case "*":
+                return Token(O, "*=" if self._match("=") else "*")
+
+            # --- divide (comments already stripped in tokenize) ---
+            case "/":
+                return Token(O, "/=" if self._match("=") else "/")
+
+            # --- less-than / left-shift ---
+            case "<":
+                if self._match("="):  return Token(O, "<=")
+                if self._match("<"):
+                    return Token(O, "<<=" if self._match("=") else "<<")
+                return Token(O, "<")
+
+            # --- greater-than / right-shift ---
+            case ">":
+                if self._match("="):  return Token(O, ">=")
+                if self._match(">"):
+                    return Token(O, ">>=" if self._match("=") else ">>")
+                return Token(O, ">")
+
+            # --- dot: member access OR leading-dot float (.5) ---
+            case ".":
+                float_tok = self._read_leading_dot_float()
+                return float_tok if float_tok else Token(O, ".")
+
+            case _:
+                return None   # unknown — skip silently
+
+    # ── main tokenise loop ────────────────────────────────────────────────────
+
+    def tokenize(self) -> list[Token]:
+        while self.pos < len(self.source):
+            ch = self._advance()
+
+            # whitespace
+            if ch in (" ", "\t", "\n", "\r"):
+                continue
+
+            # preprocessor lines  (#include, #define …)
+            if ch == "#":
+                self._skip_line()
+                continue
+
+            # block comment  /* … */
+            if ch == "/" and self._peek() == "*":
+                self._advance()
+                self._skip_block_comment()
+                continue
+
+            # line comment  // …
+            if ch == "/" and self._peek() == "/":
+                self._advance()
+                self._skip_line()
+                continue
+
+            # string literal
+            if ch == '"':
+                self.tokens.extend(self._read_string())
+                continue
+
+            # char literal
+            if ch == "'":
+                self.tokens.extend(self._read_char_literal())
+                continue
+
+            # numbers
+            if ch.isdigit():
+                self.pos -= 1
+                self.tokens.append(self._read_number())
+                continue
+
+            # identifiers / keywords
+            if ch.isalpha() or (ch == "_" and self._peek() != "'"):
+                self.pos -= 1
+                self.tokens.append(self._read_word())
+                continue
+
+            # everything else: operators, separators, leading-dot floats
+            if ch == ".":
+                float_tok = self._read_leading_dot_float()
+                if float_tok:
+                    self.tokens.append(float_tok)
+                else:
+                    self.tokens.append(Token(TokenType.OPERATOR, "."))
+                continue
+
+            tok = self._lex_symbol(ch)
+            if tok:
+                self.tokens.append(tok)
+
+        self.tokens.append(Token(TokenType.SPECIAL, "EOF"))
+        return self.tokens
+
+
+# ── convenience entry point ───────────────────────────────────────────────────
+
+def lex_file(path: str, keyword_file: str | None = _DEFAULT_KW) -> list[Token]:
+    with open(path, encoding="utf-8") as f:
+        source = f.read()
+    return Lexer(source, keyword_file).tokenize()
+
+
+def lex_string(source: str, keyword_file: str | None = _DEFAULT_KW) -> list[Token]:
+    return Lexer(source, keyword_file).tokenize()
+
+
+# ── demo ──────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    sample = r"""
+    #include <stdio.h>
+
+    /* compute factorial */
+    int factorial(int n) {
+        if (n <= 1) return 1;          // base case
+        return n * factorial(n - 1);
+    }
+
+    int main(void) {
+        float pi   = 3.14159f;
+        double big = 1.5e10;
+        int   hex  = 0xFF;
+        int   oct  = 0777;
+        int   bits = hex >> 2;
+        char  c    = '\n';
+        char *msg  = "hello, world";
+
+        printf("%d\n", factorial(5));
+        return 0;
+    }
+    """
+    
+    input = open(os.path.join(_HERE, "input.in")).read()
+    output = open(os.path.join(_HERE, "output.out"), "w")
+    tokens = lex_string(input)
+    for tok in tokens:
+        print(tok, file=output)

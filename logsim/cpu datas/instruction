@@ -1,0 +1,55 @@
+-- up to date --
+
+instruction             code	language			description
+x01 0000 xxxx xxxx      ADD     RA,RB               ADDITION AND STORE IN RB
+x01 0001 xxxx xxxx	    SUB     RA,RB		        SUBTRACTION(RA-RB) AND STORE IN RB
+x01 0010 xxxx xxxx      MULT    RA,RB               MULTIPLICATION AND STORE IN RB
+x01 0011 xxxx xxxx      DIV     RA,RB               DIVISION(RA/RB) INTEGER AND STORE IN RB
+x01 0100 0000 xxxx	    SHL     RB                  SHIFT LEFT RB AND STORE IN R0
+x01 0101 0000 xxxx	    SHR     RB     		        SHIFT RIGHT RB AND STORE IN R0
+001 0110 0000 xxxx	    NOT     RB     		        BITWISE NOT RB AND STORE IN R0
+x01 0111 xxxx xxxx	    AND     RA,RB		        BITWISE RA AND RB AND STORE IN R0
+x01 1000 xxxx xxxx	    OR	    RA,RB		        BITWISE RA OR RB AND STORE IN R0
+x01 1001 xxxx xxxx	    XOR     RA,RB		        BITWISE RA EXCLUSIVE OR RB AND STORE IN R0
+x01 1010 xxxx xxxx      MOD     RA,RB               RA MODULUS RB AND STORE IN R0           
+001 1011 0000 xxxx      ++      RB                  INCREMENT RB AND STORE IN R0
+001 1100 0000 xxxx      --      RB                  DECREMENT RB AND STORE IN R0
+001 1101 0000 xxxx      NEG     RB                  2´S COMPLEMENT NEGATE RB AND STORE IN R0
+001 1110 
+x01 1111 xxxx xxxx	    CMP	    RA,RB		        COMPARE RA AND RB
+
+x11 0000 xxxx xxxx      ADD     RA,RB               ADDITION AND STORE IN RB AND STORE IN R0
+x11 0001 xxxx xxxx	    SUB	    RA,RB		        SUBTRACTION(RA-RB) AND STORE IN RB AND STORE IN R0
+x11 0010 xxxx xxxx      MULT    RA,RB               MULTIPLICATION AND STORE IN RB AND STORE IN R0
+x11 0011 xxxx xxxx      DIV     RA,RB               DIVISION(RA/RB) FLOAT AND STORE IN RB AND STORE IN R0
+x11 0100 0000 xxxx	    SHL     RB                  SHIFT LEFT RB AND STORE IN R0
+x11 0101 0000 xxxx	    SHR	    RB     		        SHIFT RIGHT RB AND STORE IN R0
+011 0110 0000 xxxx	    FLOAT	RB     		        INT TO FLOAT RB AND STORE IN R0
+011 0111 0000 xxxx	    INT     RB   		        FLOAT TO INT RB AND STORE IN R0
+011 1000 xxxx xxxx	    	 		        
+011 1001 xxxx xxxx	    	 		        
+011 1010 xxxx xxxx                            
+011 1011 0000 xxxx      ++      RB                  INCREMENT RB AND STORE IN R0
+011 1100 0000 xxxx      --      RB                  DECREMENT RB AND STORE IN R0
+011 1101 0000 xxxx      NEG     RB                  2´S COMPLEMENT NEGATE RB AND STORE IN R0
+011 1110 
+x11 1111 xxxx xxxx	    CMP	    RA,RB		        COMPARE RA AND RB AND STORE IN R0
+ 
+000 0000 0000 0000      NOP     -----               NO OPERATION(DOES NOTHING)
+000 0001 xxxx xxxx  	LD	    RA,RB		        LOAD RB FROM RAM ADDR IN RA
+000 0010 xxxx xxxx  	ST	    RA,RB		        STORE RB TO RAM ADDR IN RA	
+000 0011 0000 xxxx      DATA    RB, 0xNN  	        LOAD NEXT BYTE TO RB
+000 0100 0000 0000      RJMP    0xNN    		    RELATIVE JUMP BY VALUE IN NEXT BYTE
+000 0101 0000 caez      RJF     CAEZ  		        JUMP IF ANY TESTED FLAG IS ON
+000 0110 0000 caez      RJNF    N(CAEZ)             JUMP IF ANY TESTED FLAG IS OFF
+000 0111 0000 0000      CLF	    -----               CLEAR ALL FLAGS IN FLAG REG
+000 1000 00yy xxxx  	COMM    I/O-D/A,RB		    INPUT/OUTPUT DATA/ADDRESS FROM PERIPHERAL TO RB
+000 1001 0000 xxxx      ADDR    RB                  GET ADDRESS FROM IAR TO RB
+000 1010 0000 xxxx      JMRB    RB		            JUMP TO THE ADDRESS IN RB   
+000 1011 0yyy xxxx      STK     OP,RB               STACK MEMORY OPERATIONS, OP CAN BE PUSH, POP, CALL, RETURN, SET, GET //SET AND GET HAS INDEX IN RB AND VALUE IN R0
+000 1100 xxxx xxxx      ALD     RA,RB               LOAD VALUE FROM ARRAY WITH ADDRESS IN RA AND INDEX IN RB, TO REGISTER 0
+000 1101 xxxx xxxx      AST     RA,RB               STORE VALUE TO ARRAY WITH ADDRESS IN RA AND INDEX IN RB, FROM REGISTER 0
+000 1110 xxxx xxxx      CPY     RA,RB               COPY CPU REGISTER RA TO RB
+000 1111 0000 0000      HALT    -----               HALT CPU UNTIL RESUME SIGNAL IS ENABLED
+
+**Addresses for memory need the 17th bit on to access RAM, otherwise ROM will be accesssed and an error will be raised**
