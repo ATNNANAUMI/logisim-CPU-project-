@@ -1,0 +1,25 @@
+ASSEMBLY LANG DEFINITIONS
+
+.ORG 0x00
+
+msg:
+    .STRING "Hello world"
+
+main:
+    DATA R1, msg
+    CALL print_string
+    HALT
+
+print_string:
+loop:
+    LD [R1], R2
+    CMP R2, 0
+    JE end
+
+    COMM OUTDATA, R2
+
+    INC R1
+    JMP loop
+
+end:
+    RET

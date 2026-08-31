@@ -1,0 +1,40 @@
+--OUTDATED--
+
+10000 xxxx xxxx     ADD     ADD rx, rx
+10001 xxxx xxxx	    SUB	    SUB rx, rx
+10010 xxxx xxxx     MULT    MULT rx, rx
+10011 xxxx xxxx     DIV     DIV rx, rx
+10100 xxxx xxxx	    SHL     SHL rx, rx
+10101 xxxx xxxx	    SHR	    SHR rx, rx
+10110 xxxx xxxx	    NOT	    NOT rx, rx
+10111 xxxx xxxx	    AND	    AND rx, rx
+11000 xxxx xxxx	    OR	    OR rx, rx
+11001 xxxx xxxx	    XOR	    XOR rx, rx
+11010 xxxx xxxx     MOD     MOD rx, rx
+11011 xxxx xxxx     ++      INC rx, rx
+11100 xxxx xxxx     --      DEC rx, rx
+11101 xxxx xxxx     NEG     NEG rx, rx
+11110 xxxx xxxx         
+11111 xxxx xxxx	    CMP	    CMP rx, rx
+
+00000 0000 0000     NOP     NOP
+00001 xxxx xxxx	    LD	    LD rx, rx
+00010 xxxx xxxx	    ST	    ST rx, rx
+00011 0000 xxxx     DATA    DT rx
+00100 0000 xxxx     JMRB    JTA rx
+00101 0000 0000     JMP	    JP ADDRESS
+00110 0000 caez     JIF     JIF 0xADDRESS,FLAGS
+00111 0000 0000     CLF	    CLF
+01000 00xx xxxx	    COMM    COMM IN/OUT, DATA/ADDR, rx
+01001 0000 xxxx     ADDR    ADDR rx
+01010 0000 xxxx     JNIF    JNIF 0xADDRESS, FLAGS       //jump if any of the tested flags is false,
+01011 0xxx xxxx     STK     PUSH                        //add value to stack from r0
+                            POP                         //remove value from stack and load to r0
+                            CALL FUNCTION               //call stack frame
+                            RET                         //return to previous stack frame
+                            SET rx, r0                  //index in rx, value in r0
+                            GET rx, r0                  //index in rx, value in r0
+01100 xxxx xxxx     ALD     ALD rx, rx                  //array address in left rx, index in right rx, load to r0
+01101 xxxx xxxx     AST     AST rx, rx                  //array address in left rx, index in right rx, store from r0
+01110 xxxx xxxx     CPY     CPY rx, rx                  //copy from left rx to right rx
+01111 0000 0000     HALT    HALT

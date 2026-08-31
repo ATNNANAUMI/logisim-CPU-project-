@@ -1,0 +1,118 @@
+CUSTOM CPU INSTRUCTION SET - ASSEMBLY LANGUAGE TABLE
+=====================================================
+-- up to date --
+
+🧮 INTEGER ARITHMETIC & LOGIC
+-----------------------------
+Mnemonic    Operands      Format            Description
+--------    --------      ------            -----------
+ADD         RA, RB        ADD Rn, Rn        Integer addition
+SUB         RA, RB        SUB Rn, Rn        Integer subtraction
+MULT        RA, RB        MULT Rn, Rn       Integer multiplication
+DIV         RA, RB        DIV Rn, Rn        Integer division
+MOD         RA, RB        MOD Rn, Rn        Modulo (RA % RB)
+SHL             RB        SHL Rn            Shift left
+SHR             RB        SHR Rn            Shift right
+NOT             RB        NOT Rn            Bitwise NOT
+AND         RA, RB        AND Rn, Rn        Bitwise AND
+OR          RA, RB        OR Rn, Rn         Bitwise OR
+XOR         RA, RB        XOR Rn, Rn        Bitwise XOR
+++              RB        ++ Rn             Increment
+--              RB        -- Rn             Decrement
+NEG             RB        NEG Rn            Two's complement negate
+CMP         RA, RB        CMP Rn, Rn        Compare, set flags
+**Results are stored in R0**
+
+🧮 FLOATING-POINT ARITHMETIC
+----------------------------
+Mnemonic    Operands      Format            Description
+--------    --------      ------            -----------
+ADD.F       RA, RB        ADD.F Rn, Rn      Float addition
+SUB.F       RA, RB        SUB.F Rn, Rn      Float subtraction
+MULT.F      RA, RB        MULT.F Rn, Rn     Float multiplication
+DIV.F       RA, RB        DIV.F Rn, Rn      Float division
+SHL.F           RB        SHL.F Rn          Float shift left (if valid)
+SHR.F           RB        SHR.F Rn          Float shift right (if valid)
+FLOAT           RB        FLOAT Rn          Convert int to float
+INT             RB        INT Rn            Convert float to int
+++F             RB        ++F Rn            Float increment
+--F             RB        --F Rn            Float decrement
+NEG.F           RB        NEG.F Rn          Float negate
+CMP.F       RA, RB        CMP.F Rn, Rn      Float compare
+**Results are stored in R0**
+
+🧮 IMEDIATE INTEGER ARITHMETIC & LOGIC
+-----------------------------
+Mnemonic    Operands      Format            Description
+--------    --------      ------            -----------
+IADD         RA, RB        ADD Rn, Rn        Integer addition
+ISUB         RA, RB        SUB Rn, Rn        Integer subtraction
+IMULT        RA, RB        MULT Rn, Rn       Integer multiplication
+IDIV         RA, RB        DIV Rn, Rn        Integer division
+IMOD         RA, RB        MOD Rn, Rn        Modulo (RA % RB)
+ISHL             RB        SHL Rn            Shift left
+ISHR             RB        SHR Rn            Shift right
+IAND         RA, RB        AND Rn, Rn        Bitwise AND
+IOR          RA, RB        OR Rn, Rn         Bitwise OR
+IXOR         RA, RB        XOR Rn, Rn        Bitwise XOR
+ICMP         RA, RB        CMP Rn, Rn        Compare, set flags
+**Results are stored in R0**
+
+🧮 IMEDIATE FLOATING-POINT ARITHMETIC
+----------------------------
+Mnemonic    Operands      Format            Description
+--------    --------      ------            -----------
+IADD.F       RA           IADD.F Rn, Rn      Float addition
+ISUB.F       RA           ISUB.F Rn, Rn      Float subtraction
+IMULT.F      RA           IMULT.F Rn, Rn     Float multiplication
+IDIV.F       RA           IDIV.F Rn, Rn      Float division
+ISHL.F                    ISHL.F Rn          Float shift left (if valid)
+ISHR.F                    ISHR.F Rn          Float shift right (if valid)
+IFLOAT                    IFLOAT Rn          Convert int to float
+IINT                      IINT               Convert float to int
+ICMP.F       RA           ICMP.F Rn, Rn      Float compare
+**Results are stored in R0**
+
+🗄️ MEMORY & RAM
+---------------
+Mnemonic    Operands      Format            Description
+--------    --------      ------            -----------
+--Memory access need the 17th bit to be on, up to the 16th bit is the address, the 17th is the ram/rom bit
+LD          RA, RB        LD Rn, Rn         Load RAM[RA] into RB
+ST          RA, RB        ST Rn, Rn         Store RB into RAM[RA]
+DATA        RB, .BYTE     DATA Rn, 0xNN     Load next byte into RB
+ALD         RA, RB        ALD Rn, Rn        Load from array RA and index RB to R0
+AST         RA, RB        AST Rn, Rn        Store R0 into array RA and index RB
+CPY         RA, RB        CPY Rn, Rn        Copy RA to RB
+
+🔁 FLOW CONTROL
+---------------
+Mnemonic    Operands      Format            Description
+--------    --------      ------            -----------
+JMRB        RB            JMRB Rn           Jump to address in RB
+RJF         FLAGS         RJF CANZ          Relative jump if flags are set  
+RJNF        FLAGS         RJNF CANZ         Relative jump if flags NOT set 
+RJMP        .BYTE         RJMP .BYTE        Relative jump to next byte
+CLF         (none)        CLF               Clear flags
+HALT        (none)        HALT              Halt CPU
+
+🧰 STACK OPERATIONS
+-------------------
+Mnemonic    Operands      Format             Description
+--------    --------      ------             -----------
+STK         PUSH, Rn      STK PUSH, Rn       Push Rn to stack
+STK         POP, Rn       STK POP, Rn        Pop stack to Rn
+STK         CALLF, Rn     STK CALLF          Call frame
+STK         RETF, Rn      STK RETF           Return frame
+STK         SET, Rn       STK SET, Rn        Stack set: Stack[Rn] = R0
+STK         GET, Rn       STK GET, Rn        Stack get: R0 = Stack[Rn]
+
+🔌 PERIPHERAL I/O
+-----------------
+Mnemonic    Operands        Format                Description
+--------    --------        ------                -----------
+COMM        INDATA, Rn      COMM INDATA, Rn       Peripheral input → Rn
+COMM        INADDR, Rn      COMM INADDR, Rn       Peripheral address input(not used really)
+COMM        OUTDATA, Rn     COMM OUTDATA, Rn      Peripheral output ← Rn
+COMM        OUTADDR, Rn     COMM OUTADDR, Rn      Peripheral address output
+ADDR        Rn              ADDR Rn               Load PC/IAR into Rn

@@ -1,0 +1,74 @@
+{
+  "_comment": "C language keyword classification file for the Python lexer.",
+
+  "control_flow": [
+    "if", "else", "switch", "case", "default",
+    "for", "while", "do",
+    "break", "continue", "return", "goto"
+  ],
+
+  "type_specifier": [
+    "void", "char", "short", "int", "long",
+    "float", "double", "signed", "unsigned",
+    "bool", "_Bool", "_Complex", "_Imaginary"
+  ],
+
+  "type_qualifier": [
+    "const", "volatile", "restrict", "_Atomic"
+  ],
+
+  "storage_class": [
+    "auto", "register", "static", "extern", "typedef"
+  ],
+
+  "structure": [
+    "struct", "union", "enum"
+  ],
+
+  "memory": [
+    "sizeof", "alignof", "_Alignof", "offsetof"
+  ],
+
+  "preprocessor_keyword": [
+    "define", "include", "undef", "ifdef", "ifndef",
+    "if", "elif", "else", "endif", "pragma",
+    "error", "warning", "line"
+  ],
+
+  "builtin_function": [
+    "printf", "fprintf", "sprintf", "snprintf",
+    "scanf", "fscanf", "sscanf",
+    "malloc", "calloc", "realloc", "free",
+    "memcpy", "memmove", "memset", "memcmp",
+    "strlen", "strcpy", "strncpy", "strcat", "strncat",
+    "strcmp", "strncmp", "strchr", "strrchr", "strstr",
+    "fopen", "fclose", "fread", "fwrite", "fseek", "ftell", "rewind",
+    "fgets", "fputs", "fgetc", "fputc", "feof", "ferror",
+    "exit", "abort", "atexit",
+    "atoi", "atof", "atol", "strtol", "strtod",
+    "rand", "srand", "abs", "labs",
+    "assert",
+    "isdigit", "isalpha", "isalnum", "isspace",
+    "isupper", "islower", "toupper", "tolower",
+    "sqrt", "pow", "fabs", "ceil", "floor", "round",
+    "sin", "cos", "tan", "log", "log2", "log10", "exp"
+  ],
+
+  "builtin_type": [
+    "size_t", "ptrdiff_t", "ssize_t",
+    "int8_t",  "int16_t",  "int32_t",  "int64_t",
+    "uint8_t", "uint16_t", "uint32_t", "uint64_t",
+    "intptr_t", "uintptr_t",
+    "FILE", "NULL", "EOF",
+    "INT_MAX", "INT_MIN", "UINT_MAX",
+    "LONG_MAX", "LONG_MIN",
+    "FLT_MAX", "DBL_MAX",
+    "true", "false"
+  ],
+
+  "c11_keyword": [
+    "_Alignas", "_Alignof", "_Atomic",
+    "_Generic", "_Noreturn", "_Static_assert",
+    "_Thread_local"
+  ]
+}

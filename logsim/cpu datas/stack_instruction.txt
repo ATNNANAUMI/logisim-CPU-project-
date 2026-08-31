@@ -1,0 +1,27 @@
+0000 ebp = stack[ebp]
+
+0001 value = stack[mar]
+
+0010 stack[esp] = value
+set mar to address in esp
+set ram address data to value
+
+0011 stack[esp] = ebp
+set mar to address in esp
+set ram address data to ebp
+
+0100 esp += 1
+enable adder
+set esp
+
+0101 esp -= 1
+
+0110 ebp = esp
+set ebp to esp
+
+0111 esp = ebp
+
+1000 stack[ebp + value]
+mar = ebp + value
+
+1001 value = stack[esp]
