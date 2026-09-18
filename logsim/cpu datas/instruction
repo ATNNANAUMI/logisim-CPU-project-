@@ -18,10 +18,10 @@ x01 1010 xxxx xxxx      MOD     RA,RB               RA MODULUS RB AND STORE IN R
 001 1110 
 x01 1111 xxxx xxxx	    CMP	    RA,RB		        COMPARE RA AND RB
 
-x11 0000 xxxx xxxx      ADD     RA,RB               ADDITION AND STORE IN RB AND STORE IN R0
-x11 0001 xxxx xxxx	    SUB	    RA,RB		        SUBTRACTION(RA-RB) AND STORE IN RB AND STORE IN R0
-x11 0010 xxxx xxxx      MULT    RA,RB               MULTIPLICATION AND STORE IN RB AND STORE IN R0
-x11 0011 xxxx xxxx      DIV     RA,RB               DIVISION(RA/RB) FLOAT AND STORE IN RB AND STORE IN R0
+x11 0000 xxxx xxxx      ADD     RA,RB               ADDITION AND STORE IN R0
+x11 0001 xxxx xxxx	    SUB	    RA,RB		        SUBTRACTION(RA-RB) AND STORE IN R0
+x11 0010 xxxx xxxx      MULT    RA,RB               MULTIPLICATION AND STORE IN R0
+x11 0011 xxxx xxxx      DIV     RA,RB               DIVISION(RA/RB) FLOAT STORE IN R0
 x11 0100 0000 xxxx	    SHL     RB                  SHIFT LEFT RB AND STORE IN R0
 x11 0101 0000 xxxx	    SHR	    RB     		        SHIFT RIGHT RB AND STORE IN R0
 011 0110 0000 xxxx	    FLOAT	RB     		        INT TO FLOAT RB AND STORE IN R0

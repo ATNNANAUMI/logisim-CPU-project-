@@ -1,0 +1,4 @@
+v2.0 raw
+# prints a..z, updated for "every ALU result goes to R0"
+0300 005c 0830 0301 0061 0302 007b
+0821 1b01 0e01 1f12 0601 fffffffb 0f00
