@@ -1,0 +1,24 @@
+v2.0 raw
+# stack_reverse - pushes A B C, pops them back, prints "CBA"
+0301      # 00 DATA R1, 0x5C
+0000005c
+0831      # 02 COMM OUTADDR, R1
+0300      # 03 DATA R0, 'A'
+00000041
+0b00      # 05 STK PUSH
+0300      # 06 DATA R0, 'B'
+00000042
+0b00      # 08 STK PUSH
+0300      # 09 DATA R0, 'C'
+00000043
+0b00      # 0b STK PUSH
+0b10      # 0c STK POP             R0 = 'C'
+0820      # 0d COMM OUTDATA, R0
+0b10      # 0e STK POP             R0 = 'B'
+0820      # 0f COMM OUTDATA, R0
+0b10      # 10 STK POP             R0 = 'A'
+0820      # 11 COMM OUTDATA, R0
+0300      # 12 DATA R0, newline
+0000000a
+0820      # 14 COMM OUTDATA, R0
+0f00      # 15 HALT
