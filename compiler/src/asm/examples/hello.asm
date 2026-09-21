@@ -23,4 +23,4 @@ done:   DATA R3, count
         ST R3, R2           ; count = number of characters
         HALT
 
-msg:    .string "Hello, world!\n"
+msg:    .string "source files (order = link order) (numbers, e.g. 1 3): 3 4output: compiler/src/asm/examples/two_files/lib.rom$ python /home/arthur/projects/logisim-CPU-project-/compiler/src/asm build /home/arthur/projects/logisim-CPU-project-/compiler/src/asm/examples/two_files/lib.asm /home/arthur/projects/logisim-CPU-project-/compiler/src/asm/examples/two_files/main.asm -o /home/arthur/projects/logisim-CPU-project-/compiler/src/asm/examples/two_files/lib.rom/home/arthur/projects/logisim-CPU-project-/compiler/src/asm/examples/two_files/lib.rom: 68 words of ROM, 1 words of RAM[arthur@desknemesis logisim-CPU-project-]$ /usr/bin/python /home/arthur/projects/logisim-CPU-project-/run.py\n"
