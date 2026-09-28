@@ -96,8 +96,9 @@ ALU_OPS = {
     "FCMP":  (FLOAT_ALU, 0xF, "alu2"),
 }
 
-# Pseudo-instructions, expanded by the assembler: mnemonic -> size in words
-PSEUDO_OPS = {"CALL": 7, "RET": 6}
+# Pseudo-instructions, expanded by the assembler. Their size depends on the
+# operands, so the assembler works it out (see Assembler.pseudo_size).
+PSEUDO_OPS = {"CALL", "RET", "SAVE", "RESTORE"}
 
 # Flag letters for RJF / RJNF, as bits of the RB field (order C A N Z)
 FLAGS = {"C": 0b1000, "A": 0b0100, "N": 0b0010, "Z": 0b0001}
@@ -117,6 +118,14 @@ USAGE = {
     "alu2":     "{op} RA, RB   or   {op} RA, #value",
     "alu1":     "{op} RB",
 }
+
+
+def jump_offset(target, offset_word_address):
+    """The offset word for RJMP / RJF / RJNF.
+
+    The CPU adds the offset to the address of the offset word itself.
+    """
+    return (target - offset_word_address) & 0xFFFFFFFF
 
 
 def sys_word(name, ra=0, rb=0):
