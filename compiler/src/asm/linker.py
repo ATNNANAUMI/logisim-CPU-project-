@@ -10,6 +10,7 @@ Memory layout it builds:
 
 from dataclasses import dataclass
 
+import encoding as enc
 from errors import AsmError, AsmErrors
 
 MASK = 0xFFFFFFFF
@@ -70,7 +71,7 @@ def link(objects):
             else:
                 table[name] = sym
 
-    # 3. The entry jump at address 0. Its offset word sits at address 1.
+    # 3. The entry jump at address 0; its offset word is at address 1.
     start = table.get(ENTRY)
     if start is None:
         errors.append(AsmError("no file has '.global start', so the program "
@@ -78,7 +79,7 @@ def link(objects):
     elif start.section != "rom":
         errors.append(AsmError(f"'start' in {start.source} is a RAM label, "
                                "it must be in ROM"))
-    rom = [ENTRY_WORD, (start.address - 1) & MASK if start else 0]
+    rom = [ENTRY_WORD, enc.jump_offset(start.address, 1) if start else 0]
 
     # 4. Copy each file's words, filling in the relocations.
     reported = set()
@@ -103,7 +104,7 @@ def link(objects):
                 errors.append(AsmError(f"can't jump to '{r.symbol}': it is a RAM label",
                                        obj.source, r.line))
             else:
-                words[r.at] = (target - (base["rom"] + r.at)) & MASK
+                words[r.at] = enc.jump_offset(target, base["rom"] + r.at)
         rom.extend(words)
 
     if errors:
