@@ -183,8 +183,8 @@ def check_jumps_and_flags():
             RJNF CANZ, top
     end:    HALT
     """
-    # RJMP's offset word is at 2: 0 - 2 = -2.  RJF's at 4: 7 - 4 = 3.
-    # RJNF's at 6: 0 - 6 = -6.
+    # Offsets count from the offset word:
+    # RJMP's is at 2: 0 - 2 = -2.  RJF's at 4: 7 - 4 = 3.  RJNF's at 6: 0 - 6 = -6.
     assert words_of(src) == [0x0000, 0x0400, 0xFFFFFFFE, 0x0503, 3, 0x060F,
                              0xFFFFFFFA, 0x0F00]
 
@@ -200,6 +200,27 @@ def check_call_and_ret():
     return_reloc, target_reloc = obj.relocs
     assert (return_reloc.at, return_reloc.section, return_reloc.addend) == (7, "rom", 13)
     assert (target_reloc.at, target_reloc.section, target_reloc.addend) == (11, "rom", 0)
+
+
+def check_save_restore_and_call_cleanup():
+    obj, _ = assemble("""
+    f:      RET
+            SAVE R2, R5
+            CALL f, 2
+            RESTORE R2, R5
+            RESTORE R0, R3
+            CALL f, 0
+    """, "t.asm")
+    rom = obj.rom[6:]
+    assert rom[0:4] == [0x0E20, 0x0B00, 0x0E50, 0x0B00]              # SAVE
+    assert rom[4:11] == [0x0300, 0, 0x0B00, 0x0B20, 0x0300, 0, 0x0A00]
+    assert rom[11:15] == [0x0E0F, 0x0B10, 0x0B10, 0x0EF0]            # drop 2 args
+    assert rom[15:21] == [0x0E0F, 0x0B10, 0x0E05, 0x0B10, 0x0E02, 0x0EF0]
+    assert rom[21:25] == [0x0B10, 0x0E03, 0x0B10, 0x0E00]            # R0 listed
+    assert len(rom[25:]) == 7                                        # CALL f, 0
+    # the return address still points just after JMRB, before the cleanup
+    ret = [r for r in obj.relocs if r.at == 6 + 5][0]
+    assert (ret.section, ret.addend) == ("rom", 6 + 11)
 
 
 def check_linking():
@@ -224,11 +245,11 @@ def check_linking():
     rom = build(main, lib).rom
     # ROM: entry jump 0-1, main 2-14, lib from 15 (helper = 15).
     # RAM: var 0x14000-0x14001, table 0x14002.
-    assert rom[0:2] == [0x0400, 1]                    # RJMP start (start = 2)
+    assert rom[0:2] == [0x0400, 1]                    # RJMP start: 2 - 1
     assert rom[2:4] == [0x0301, 0x14001]              # DATA R1, var + 1
     assert rom[5] == 11                               # CALL's return address
     assert rom[9] == 15                               # CALL's target: helper
-    assert rom[12] == 15 - 12                         # RJMP helper, relative
+    assert rom[12] == 15 - 12                         # RJMP helper, from its offset word at 12
     assert rom[13:15] == [0x0302, 0x14002]            # DATA R2, table
 
 
@@ -266,6 +287,12 @@ def check_errors():
     expect_error("        .equ X, later\nlater: NOP", "defined above")
     expect_error("        .bogus", "unknown directive")
     expect_error("        DATA R1, 1.5 + 1", "float can't be added")
+    expect_error("        SAVE", "expected SAVE register")
+    expect_error("        RESTORE R1, R1", "listed twice")
+    expect_error("        SAVE R1, 5", "not a register")
+    expect_error("f: RET\n        CALL f, -1", "0 or more")
+    expect_error("f: RET\n        CALL f, f", "is a label")
+    expect_error("f: RET\n        CALL f, 1, 2", "expected CALL label")
 
 
 def check_warnings():
@@ -351,6 +378,7 @@ CHECKS = [
     check_strings_and_space,
     check_jumps_and_flags,
     check_call_and_ret,
+    check_save_restore_and_call_cleanup,
     check_linking,
     check_entry_when_start_is_not_first,
     check_errors,
