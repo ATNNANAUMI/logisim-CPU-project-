@@ -18,6 +18,11 @@
 ;   first argument at ebp-(N+1) ... last argument at ebp-2
 ;   (ebp-1 = return address, ebp+0 = old ebp)
 ;
+; ASSUMES
+;   INT truncates towards zero, so for a value that is not negative it is
+;   already the floor. floor_pos relies on that; if INT is ever changed to
+;   round, floor_pos needs a correction step back.
+;
 ; BUILD
 ;   python compiler/src/asm build yourprog.asm stdlib.asm -o yourprog.rom
 ;
@@ -51,7 +56,7 @@
 ; ==================================================================
 
         .equ DISPLAY, 0x5C
-        .equ KEYBOARD, 0x0F
+        .equ KEYBOARD, 0xF0
         .equ IN_SIZE, 32            ; line buffer for read_int / read_float
 
         .global print_char, print_string, print_int, print_newline
@@ -178,21 +183,14 @@ pf_digit:
         RET
 
 ; floor_pos(f): whole part of a float >= 0, as an int (private helper)
-; Works whether INT truncates or rounds.
+; INT truncates towards zero, so for f >= 0 it already is the floor. An
+; earlier version corrected a rounding INT by testing the sign of
+; (f - FLOAT(INT(f))); that is gone, because it made the result depend on
+; the sign of a float subtraction (see the note at the top of the file).
 floor_pos:
         DATA R1, -2
         STK GET, R1
-        CPY R0, R1                  ; R1 = f
-        INT R1
-        CPY R0, R2                  ; R2 = INT(f)
-        FLOAT R2
-        CPY R0, R3
-        FSUB R1, R3                 ; f - R2
-        RJNF N, fp_done
-        -- R2                       ; INT rounded up: take one off
-        CPY R0, R2
-fp_done:
-        CPY R2, R0
+        INT R0
         RET
 
 ; print_hex(v): print 0x and 8 hex digits
@@ -242,7 +240,7 @@ ph_print:
 ; read_char(): wait for a key and return it (not echoed)
 read_char:
         DATA R1, KEYBOARD
-        COMM INADDR, R1
+        COMM OUTADDR, R1
 rc_wait:
         COMM INDATA, R0
         TEST R0
@@ -262,9 +260,9 @@ read_line:
         CPY R0, R4                  ; R4 = max - 1
         DATA R3, 0                  ; R3 = length
         DATA R2, KEYBOARD
-        COMM INADDR, R2
-        DATA R2, DISPLAY
         COMM OUTADDR, R2
+        ;DATA R2, DISPLAY
+        ;COMM OUTADDR, R2
 rl_wait:
         COMM INDATA, R5
         TEST R5
@@ -575,8 +573,8 @@ fmin:
         DATA R2, -2
         STK GET, R2
         CPY R0, R2                  ; R2 = b
-        FSUB R1, R2
-        RJF N, fmin_a               ; a - b < 0
+        FCMP R1, R2
+        RJF N, fmin_a               ; a < b
         CPY R2, R0
         RET
 fmin_a:
@@ -591,8 +589,8 @@ fmax:
         DATA R2, -2
         STK GET, R2
         CPY R0, R2                  ; R2 = b
-        FSUB R1, R2
-        RJF N, fmax_b               ; a - b < 0
+        FCMP R1, R2
+        RJF N, fmax_b               ; a < b
         CPY R1, R0
         RET
 fmax_b:
