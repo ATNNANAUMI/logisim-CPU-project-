@@ -92,6 +92,7 @@ start:
         CALL read_char
         CPY R0, R5
         SAVE R5
+        CALL print_newline
         DATA R0, a_key
         STK PUSH
         CALL print_string, 1

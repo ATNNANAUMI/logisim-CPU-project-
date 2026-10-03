@@ -162,8 +162,9 @@ def float_op(name: str, a: int, b: int) -> tuple[int, int]:
         bits = float_to_bits(-fb)
         return bits, _float_flags(fa, fb, bits_to_float(bits))
 
-    if name == "CMP":
-        return 0, _float_flags(fa, fb, 0.0)
+    if name == "CMP":                            # flags from RA - RB, R0 = 0
+        diff = bits_to_float(float_to_bits(fa - fb))
+        return 0, _float_flags(fa, fb, diff)
 
     # SHL, SHR, ++, -- and the undefined opcodes: do nothing
     value = config.FLOAT_NOP_RESULT & MASK

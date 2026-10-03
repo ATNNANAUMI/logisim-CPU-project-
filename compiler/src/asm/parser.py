@@ -82,7 +82,7 @@ def split_statement(text):
     return label, m.group(1), text[m.end():].strip()
 
 
-def split_operands(text) -> list[int]:
+def split_operands(text) -> list[str]:
     """Split operand text on the commas that aren't inside quotes."""
     if not text.strip():
         return []
@@ -97,7 +97,7 @@ def split_operands(text) -> list[int]:
     return parts
 
 
-def split_sub_operation(text) -> (tuple[None, list[int]] | tuple[str, list[int]]):
+def split_sub_operation(text) -> tuple[str | None, list[str]]:
     """For COMM and STK: 'OUTADDR, R0' -> ('OUTADDR', ['R0']).
 
     The comma after the sub-operation is optional. Returns (None, []) when
@@ -111,7 +111,7 @@ def split_sub_operation(text) -> (tuple[None, list[int]] | tuple[str, list[int]]
 
 # ---------------------------------------------------------------- registers
 
-def is_register(name) -> int:
+def is_register(name) -> bool:
     m = _REGISTER_RE.fullmatch(name)
     return bool(m) and int(m.group(1)) <= 15
 

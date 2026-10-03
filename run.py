@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 ASM = ROOT / "compiler" / "src" / "asm"
-SIM = ROOT / "cpu_sim"
+SIM = ROOT / "cpu_sim" / "src"
 SKIP = {".git", ".venv", "venv", "__pycache__", "node_modules"}
 
 MENU = """what do you want to run?

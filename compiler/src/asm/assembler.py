@@ -147,8 +147,6 @@ class Assembler:
             return 2 if enc.SYSTEM_OPS[op][1] in enc.TWO_WORD_SHAPES else 1
         if enc.ALU_OPS[op][2] == "alu2":
             args = split_operands(rest)
-            if args[1] is not str:
-                raise AsmError(f"argument must be string")
             return 2 if len(args) == 2 and args[1].startswith("#") else 1
         return 1
 
@@ -303,8 +301,12 @@ class Assembler:
             raise AsmError(f"'{text.strip()}' doesn't fit in 32 bits")
         return number, label, False
 
-    def put_value(self, text, words, relocs, line):
-        """Append a value word. Returns (number, label, is_float)."""
+    def put_value(self, text, words, relocs, line, rom_only=False):
+        """Append a value word. Returns (number, label, is_float).
+
+        rom_only marks a CALL target, so the linker can reject a label from
+        another file that turns out to be in RAM.
+        """
         number, label, is_float = self.evaluate(text)
         at = len(words)
         if label is None:
@@ -312,10 +314,11 @@ class Assembler:
         elif label in self.labels:
             lab = self.labels[label]
             words.append(0)
-            relocs.append(Reloc(at, "abs", None, lab.section, lab.offset + number, line))
+            relocs.append(Reloc(at, "abs", None, lab.section, lab.offset + number,
+                                line, rom_only))
         else:
             words.append(0)
-            relocs.append(Reloc(at, "abs", label, None, number, line))
+            relocs.append(Reloc(at, "abs", label, None, number, line, rom_only))
         return number, label, is_float
 
     def put_jump(self, text, words, relocs, stmt):
@@ -381,7 +384,7 @@ class Assembler:
             words.append(enc.stk_word("PUSH"))              # STK PUSH
             words.append(enc.stk_word("CALL"))              # STK CALL
             words.append(enc.sys_word("DATA", rb=0))       # DATA R0, target
-            self.put_value(args[0], words, relocs, line)
+            self.put_value(args[0], words, relocs, line, rom_only=True)
             words.append(enc.sys_word("JMRB", rb=0))       # JMRB R0
             count = self.call_cleanup(args)                 # execution returns here
             if count:
@@ -484,8 +487,6 @@ class Assembler:
             self.expect(op, shape, args, 1)
             words.append(enc.word(enc.SYSTEM, opcode, 0, parse_register(args[0])))
         elif shape == "rb_value":
-            if args[1] is not str:
-                raise AsmError(f"argument must be string")
             self.expect(op, shape, args, 2)
             if args[1].startswith("#"):
                 raise AsmError(f"{op} takes a plain value, without '#'")
@@ -518,8 +519,6 @@ class Assembler:
         words, relocs = [], []
 
         if shape == "alu1":
-            if args[0] is not str:
-                raise AsmError(f"argument must be string")
             if len(args) == 1 and args[0].startswith("#"):
                 raise AsmError(f"{op} takes a register, not an immediate")
             self.expect(op, shape, args, 1)
@@ -528,8 +527,6 @@ class Assembler:
 
         self.expect(op, shape, args, 2)
         ra = parse_register(args[0])
-        if args[1] is not str:
-            raise AsmError(f"argument must be string")
         if not args[1].startswith("#"):
             words.append(enc.word(prefix, opcode, ra, parse_register(args[1])))
             return words, relocs
