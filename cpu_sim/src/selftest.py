@@ -72,6 +72,15 @@ def test_float_round_trip():
     assert cpu.regs[0] == 3
 
 
+def test_fcmp_flags_come_from_ra_minus_rb():
+    # DATA R1,1.5 ; DATA R2,2.5 ; FCMP R1,R2   -> 1.5 - 2.5 < 0: N on, Z off
+    cpu = run([0x0301, 0x3FC00000, 0x0302, 0x40200000, 0x3F12, 0x0F00])
+    assert cpu.regs[0] == 0 and cpu.flag("N") and not cpu.flag("Z")
+    # DATA R1,2.5 ; DATA R2,2.5 ; FCMP R1,R2   -> equal: Z on, N off
+    cpu = run([0x0301, 0x40200000, 0x0302, 0x40200000, 0x3F12, 0x0F00])
+    assert cpu.flag("Z") and not cpu.flag("N")
+
+
 def test_float_div_by_zero_is_inf():
     # DATA R1,1.0 ; DATA R2,0.0 ; FDIV R1,R2
     cpu = run([0x0301, 0x3F800000, 0x0302, 0x00000000, 0x3312, 0x0F00])
@@ -79,10 +88,17 @@ def test_float_div_by_zero_is_inf():
 
 
 def test_keyboard_input():
-    # DATA R1,0x0F ; COMM INADDR,R1 ; COMM INDATA,R2 ; COMM INDATA,R3
-    cpu = run([0x0301, 0x0F, 0x0811, 0x0802, 0x0803, 0x0F00], keys="A")
+    # DATA R3,0x55 ; DATA R1,0xF0 ; COMM INADDR,R1 ; COMM INDATA,R2 ; COMM INDATA,R3
+    cpu = run([0x0303, 0x55, 0x0301, 0xF0, 0x0811, 0x0802, 0x0803, 0x0F00], keys="A")
     assert cpu.regs[2] == ord("A")
-    assert cpu.regs[3] == 0              # buffer empty: register untouched
+    assert cpu.regs[3] == 0              # buffer empty: reads 0, like the circuit
+
+
+def test_keyboard_backspace_is_a_key():
+    # Backspace reaches the program as 0x08 (it is not an edit of the buffer)
+    # DATA R1,0xF0 ; COMM INADDR,R1 ; COMM INDATA,R2 ; COMM INDATA,R3
+    cpu = run([0x0301, 0xF0, 0x0811, 0x0802, 0x0803, 0x0F00], keys="7\b")
+    assert (cpu.regs[2], cpu.regs[3]) == (ord("7"), 0x08)
 
 
 def test_addr_and_jmrb():
