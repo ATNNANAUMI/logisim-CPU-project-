@@ -28,6 +28,7 @@ class Reloc:
     section: str | None    # for this file's own labels: "rom" or "ram"
     addend: int        # added to the address (for own labels: the label's offset)
     line: int          # source line, for error messages
+    rom_only: bool = False   # a CALL target: the linker rejects a RAM label
 
     def to_dict(self):
         d = {"at": self.at, "kind": self.kind}
@@ -37,12 +38,14 @@ class Reloc:
             d["section"] = self.section
         d["addend"] = self.addend
         d["line"] = self.line
+        if self.rom_only:                # left out when false, so older
+            d["rom_only"] = True         # object files still read the same
         return d
 
     @classmethod
     def from_dict(cls, d):
         return cls(d["at"], d["kind"], d.get("symbol"), d.get("section"),
-                   d["addend"], d.get("line", 0))
+                   d["addend"], d.get("line", 0), bool(d.get("rom_only", False)))
 
 
 @dataclass
@@ -98,9 +101,7 @@ class ObjectFile:
                 relocs=[Reloc.from_dict(r) for r in d["relocs"]],
             )
         except (ValueError, KeyError, TypeError, AttributeError):
-            raise AsmError("not an object file from this assembler "
-                           "(to use .asm files, run 'build' instead of 'link')",
-                           path) from None
+            raise AsmError("not an object file from this assembler", path) from None
 
     @classmethod
     def load(cls, path):

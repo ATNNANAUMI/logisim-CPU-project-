@@ -56,7 +56,7 @@ def _unquoted(text):
         raise AsmError("missing closing quote")
 
 
-def strip_comment(text):
+def strip_comment(text) -> str:
     """Cut the line at the first ';' that isn't inside quotes."""
     for i, ch in _unquoted(text):
         if ch == ";":
@@ -82,7 +82,7 @@ def split_statement(text):
     return label, m.group(1), text[m.end():].strip()
 
 
-def split_operands(text):
+def split_operands(text) -> list[str]:
     """Split operand text on the commas that aren't inside quotes."""
     if not text.strip():
         return []
@@ -97,7 +97,7 @@ def split_operands(text):
     return parts
 
 
-def split_sub_operation(text):
+def split_sub_operation(text) -> tuple[str | None, list[str]]:
     """For COMM and STK: 'OUTADDR, R0' -> ('OUTADDR', ['R0']).
 
     The comma after the sub-operation is optional. Returns (None, []) when
@@ -111,12 +111,12 @@ def split_sub_operation(text):
 
 # ---------------------------------------------------------------- registers
 
-def is_register(name):
+def is_register(name) -> bool:
     m = _REGISTER_RE.fullmatch(name)
     return bool(m) and int(m.group(1)) <= 15
 
 
-def parse_register(text):
+def parse_register(text) -> int:
     text = text.strip()
     if not is_register(text):
         raise AsmError(f"'{text}' is not a register (R0-R15)")
@@ -125,7 +125,7 @@ def parse_register(text):
 
 # ---------------------------------------------------------------- strings
 
-def _unescape(body, quote):
+def _unescape(body, quote) -> list[int]:
     """Turn the inside of a quoted literal into character codes."""
     codes = []
     i = 0
@@ -149,7 +149,7 @@ def _unescape(body, quote):
     return codes
 
 
-def parse_string(text):
+def parse_string(text) -> list[int]:
     """'"hi\\n"' -> [0x68, 0x69, 0x0A]. The 0 at the end is added elsewhere."""
     text = text.strip()
     if len(text) < 2 or text[0] != '"' or text[-1] != '"':
@@ -159,7 +159,7 @@ def parse_string(text):
 
 # ---------------------------------------------------------------- values
 
-def float_bits(value):
+def float_bits(value) -> int:
     """The IEEE-754 float32 bit pattern of a number."""
     try:
         return struct.unpack(">I", struct.pack(">f", value))[0]
@@ -173,11 +173,11 @@ class Expr:
     def __init__(self):
         self.number = 0          # sum of the plain numbers
         self.names = []          # (sign, name) for every name, in order
-        self.float_bits = None   # set when the value is a float literal
+        self.float_bits: int|None = None   # set when the value is a float literal
         self.terms = 0           # how many numbers and names it has
 
 
-def _tokenize(text):
+def _tokenize(text) -> list[tuple]:
     tokens, pos = [], 0
     while pos < len(text):
         m = _TOKEN_RE.match(text, pos)
@@ -191,7 +191,7 @@ def _tokenize(text):
     return tokens
 
 
-def _number(kind, token):
+def _number(kind, token) -> int:
     if kind == "hex":
         return int(token, 16)
     if kind == "bin":
@@ -204,7 +204,7 @@ def _number(kind, token):
     return codes[0]
 
 
-def parse_expression(text):
+def parse_expression(text) -> Expr:
     """Parse a value: numbers and names joined by + and -."""
     tokens = _tokenize(text)
     if not tokens:

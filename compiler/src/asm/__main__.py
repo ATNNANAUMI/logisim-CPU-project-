@@ -34,16 +34,33 @@ def run_assemble(args):
     print(f"{out}: {len(obj.rom)} words of ROM, {obj.ram_size} words of RAM")
 
 
+def load_object(path, command):
+    """Read an .obj file. Raises AsmError, with a hint when 'link' got a
+    file that isn't an .obj."""
+    try:
+        return ObjectFile.load(path)
+    except OSError as e:
+        raise AsmError(f"can't read the file ({e.strerror})", str(path)) from None
+    except AsmError as e:
+        if command == "link" and not path.lower().endswith(".obj"):
+            e.message += " (to use .asm files, run 'build' instead of 'link')"
+        raise
+
+
 def run_link(args):
     objects, problems = [], []
-    for path in args.inputs:
-        if args.command == "link" or path.endswith(".obj"):
-            objects.append(ObjectFile.load(path))
-        else:
-            try:
+    for path in args.inputs:                  # keep going to report every file
+        try:
+            if args.command == "link" or path.lower().endswith(".obj"):
+                objects.append(load_object(path, args.command))
+            else:
                 objects.append(assemble_file(path))
-            except AsmErrors as e:
-                problems.extend(e.errors)     # keep going to report every file
+        except AsmErrors as e:
+            problems.extend(e.errors)
+        except AsmError as e:
+            problems.append(e)
+        except (OSError, UnicodeDecodeError) as e:
+            problems.append(AsmError(f"can't read the file ({e})", str(path)))
     if problems:
         raise AsmErrors(problems)
 
