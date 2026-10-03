@@ -1,94 +1,98 @@
-# logisim-CPU-project-
-a complete project starting with a logic gate cpu made in logisim, followed by a compiler made for the especific cpu architecture
+# logisim-CPU-project
 
-# CPU simulator
-
-Simulator for the logic-gate CPU: 32-bit data, 17-bit address bus
-(bit 16 on = RAM, off = ROM), 16 registers, C A N Z flags, a stack in the
-bottom 25% of RAM, a display at `0x5C` and a keyboard at `0x0F`.
-
-Python 3.10+, standard library only (the window needs `tkinter`; on Linux
-that is the `python3-tk` package).
-
-All files sit in one folder, no package, no subfolders. Run from that folder:
+A 32-bit CPU built from logic gates in Logisim-evolution, with the tools to
+program it: an assembler and linker, a small standard library, and a Python
+simulator that runs the same ROM images as the circuit.
 
 ```
-python main.py                        # empty window
-python main.py print_a-z_fixed        # window with a ROM loaded
-python main.py abs_value --headless --trace
-python selftest.py                    # 11 checks on the core
+  .asm files ──► assembler ──► .obj ──► linker ──► .rom (Logisim "v2.0 raw")
+                                                     │
+                                ┌────────────────────┴───────────────┐
+                                ▼                                    ▼
+                  cpu_sim/src  (Python, GUI or headless)    logisim/CPU.circ  (the real circuit)
 ```
 
-ROM and RAM images are Logisim `v2.0 raw` files (`count*value` runs and
-`#` comments are accepted).
+## The machine in one paragraph
 
-## Window
+32-bit words, 16 registers (`R0`–`R15`), a 17-bit address bus where bit 16
+picks RAM (`0x10000`–`0x1FFFF`) over ROM (`0x00000`–`0x0FFFF`), four flags
+(`C A N Z`), a hardware stack in the first 16K words of RAM, integer and
+IEEE-754 float ALUs, and I/O through a single `COMM` instruction: a text
+display at `0x5C`, a hex number display at `0x3C` and a keyboard at `0xF0`.
+Every ALU result goes to **R0**.
 
-* registers, IAR, flags, ESP/EBP, selected devices, instruction count
-* ROM and RAM panes: paged hex, optional disassembly, follows the IAR
-* display: takes ASCII from `OUTDATA`, `0x0A` is a newline
-* keyboard: what you send goes into the buffer, `INDATA` consumes one character
-* controls: load ROM/RAM, reset, step, run/pause, resume (after `HALT`),
-  speed dropdown (1 Hz up to 1 MHz, or `max`)
-* breakpoints: right-click a word in the ROM or RAM pane to toggle one; a
-  running CPU stops before executing that address. `clear bp` removes them all
-* editing while paused (or running): type into any register, IAR, ESP or EBP
-  box and press Enter, click the flag boxes, double-click a ROM/RAM word.
-  Values accept `0x1F`, `31`, `-5`, `0b1010`, and `1.5` or `1.5f` for a
-  float32 bit pattern
-* trace of the last executed instructions
+## Requirements
 
-## Files
+* Python 3.10+, standard library only
+* `tkinter` for the simulator window (Arch: `tk`, Debian/Ubuntu: `python3-tk`,
+  Fedora: `python3-tkinter`)
+* Logisim-evolution 4.1.0 to open or run the circuit (not included)
 
-| file | what it holds |
+## Quick start
+
+Everything can be driven from `run.py` at the project root:
+
+```
+python run.py                     # interactive menu
+python run.py test                # assembler + simulator self-checks
+python run.py asm   prog.asm lib.asm -o prog.rom
+python run.py sim   prog.rom
+python run.py build prog.asm lib.asm -o prog.rom   # assemble, then open the simulator
+```
+
+Or call the tools directly:
+
+```
+# assemble + link a program with the standard library
+python compiler/src/asm build compiler/examples/stdlib/stdlib_demo.asm \
+                              compiler/examples/stdlib/stdlib.asm -o demo.rom
+
+# run it in the simulator (window, or terminal only)
+python cpu_sim/src/main.py demo.rom
+python cpu_sim/src/main.py demo.rom --headless --steps 2000000
+
+# run it on the real circuit, headless (needs the Logisim-evolution jar)
+python logisim/run_rom.py logisim/CPU.circ demo.rom --jar path/to/logisim-evolution-4.1.0-all.jar
+```
+
+## A taste of the assembly
+
+```asm
+        .equ DISPLAY, 0x5C
+        .global start
+
+start:  DATA R2, DISPLAY
+        COMM OUTADDR, R2
+        DATA R1, 'a'
+loop:   COMM OUTDATA, R1
+        ++ R1               ; R0 = R1 + 1
+        CPY R0, R1
+        CMP R1, #'z' + 1
+        RJNF Z, loop
+        HALT
+```
+
+More in `compiler/examples/programs/`.
+
+## Layout
+
+| path | what it is |
 | --- | --- |
-| `config.py` | sizes, and every behaviour that was a guess (marked TWEAKS) |
-| `isa.py` | encoding tables, decoder, disassembler |
-| `alu.py` | integer and float ops, flag generation |
-| `memory.py` | ROM/RAM banks, Logisim image loader |
-| `devices.py` | display, keyboard, COMM bus |
-| `cpu.py` | fetch / decode / execute |
-| `gui.py` | the window |
-| `main.py` | entry point, headless runner |
-| `selftest.py` | checks for stack, arrays, immediates, floats, I/O |
-| `abs_value`, `print_a-z`, `print_a-z_fixed` | example ROM images |
+| `logisim/CPU.circ` | the circuit (top level: `PC`) |
+| `logisim/run_rom.py` | load a ROM into the circuit and run Logisim headless |
+| `compiler/src/asm/` | assembler, linker, self-checks |
+| `compiler/examples/` | example programs, the standard library (`stdlib/stdlib.asm`), circuit diagnostics |
+| `compiler/roms/` | prebuilt ROM images |
+| `compiler/assembly_syntax.md` | full assembly language reference |
+| `cpu_sim/src/` | Python simulator (core, GUI, self-checks) |
+| `run.py` | one entry point for all of the above |
 
-## Encoding it implements
+## Documentation
 
-```
-bit14 immediate   bit13 float   bit12 ALU   11..8 opcode   7..4 RA   3..0 RB
-
-000 system      001 int ALU      011 float ALU
-                101 int + imm    111 float + imm
-```
-
-Every ALU instruction writes R0 and rewrites all four flags.
-`CMP` writes 0 to R0 but sets flags from `RA - RB`.
-
-## Assumptions still open
-
-These are in `config.py` where they can be flipped:
-
-* `A_FLAG_SIGNED` - "RA > RB" is compared signed
-* `SHR_ARITHMETIC` - `SHR` is logical, carry gets the bit shifted out
-* `DIV_TRUNCATE` - integer division truncates toward zero, `MOD` keeps the
-  dividend's sign
-* `STOP_ON_STACK_WRAP` - the stack wraps (current circuit behaviour)
-* `FLOAT_NOP_RESULT` - float `SHL/SHR/++/--` and undefined float opcodes
-  write 0
-
-Other choices baked in: `SUB` carry is the adder's carry-out (set when there
-is no borrow), `MULT` keeps the low 32 bits and sets C when the product does
-not fit, a float divide by zero gives infinity with the dividend's sign, and
-instruction bits above bit 14 are ignored.
-
-## Note on the old example
-
-`print_a-z` prints `a` 26 times now: it uses `++ R1` expecting the result in
-R1, but ALU results go to R0. `print_a-z_fixed` is the same program with
-`CPY R0,R1` after the increment and a `CMP` / `RJNF Z` loop.
-
-## Running the assembler
-
-python cpu_sim/src/asm build cpu_sim/src/asm/examples/hello.asm -o program.rom
-for multiple files, just need to add the path of each after the build and before -o
+* [TECHNICAL.md](TECHNICAL.md) — how every part works in detail (ISA,
+  circuit, simulator, assembler, linker, stdlib), what is still unconfirmed
+  on the circuit, and a list of outdated files.
+* [STRUCTURE.md](STRUCTURE.md) — a compact map of the project, written to be
+  pasted into a chat with an AI assistant.
+* [compiler/assembly_syntax.md](compiler/assembly_syntax.md) — the assembly
+  language reference.
