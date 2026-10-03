@@ -183,8 +183,8 @@ def check_jumps_and_flags():
             RJNF CANZ, top
     end:    HALT
     """
-    # RJMP's offset word is at 2: 0 - 2 = -2.  RJF's at 4: 7 - 4 = 3.
-    # RJNF's at 6: 0 - 6 = -6.
+    # Offsets count from the offset word:
+    # RJMP's is at 2: 0 - 2 = -2.  RJF's at 4: 7 - 4 = 3.  RJNF's at 6: 0 - 6 = -6.
     assert words_of(src) == [0x0000, 0x0400, 0xFFFFFFFE, 0x0503, 3, 0x060F,
                              0xFFFFFFFA, 0x0F00]
 
@@ -200,6 +200,27 @@ def check_call_and_ret():
     return_reloc, target_reloc = obj.relocs
     assert (return_reloc.at, return_reloc.section, return_reloc.addend) == (7, "rom", 13)
     assert (target_reloc.at, target_reloc.section, target_reloc.addend) == (11, "rom", 0)
+
+
+def check_save_restore_and_call_cleanup():
+    obj, _ = assemble("""
+    f:      RET
+            SAVE R2, R5
+            CALL f, 2
+            RESTORE R2, R5
+            RESTORE R0, R3
+            CALL f, 0
+    """, "t.asm")
+    rom = obj.rom[6:]
+    assert rom[0:4] == [0x0E20, 0x0B00, 0x0E50, 0x0B00]              # SAVE
+    assert rom[4:11] == [0x0300, 0, 0x0B00, 0x0B20, 0x0300, 0, 0x0A00]
+    assert rom[11:15] == [0x0E0F, 0x0B10, 0x0B10, 0x0EF0]            # drop 2 args
+    assert rom[15:21] == [0x0E0F, 0x0B10, 0x0E05, 0x0B10, 0x0E02, 0x0EF0]
+    assert rom[21:25] == [0x0B10, 0x0E03, 0x0B10, 0x0E00]            # R0 listed
+    assert len(rom[25:]) == 7                                        # CALL f, 0
+    # the return address still points just after JMRB, before the cleanup
+    ret = [r for r in obj.relocs if r.at == 6 + 5][0]
+    assert (ret.section, ret.addend) == ("rom", 6 + 11)
 
 
 def check_linking():
@@ -224,11 +245,11 @@ def check_linking():
     rom = build(main, lib).rom
     # ROM: entry jump 0-1, main 2-14, lib from 15 (helper = 15).
     # RAM: var 0x14000-0x14001, table 0x14002.
-    assert rom[0:2] == [0x0400, 1]                    # RJMP start (start = 2)
+    assert rom[0:2] == [0x0400, 1]                    # RJMP start: 2 - 1
     assert rom[2:4] == [0x0301, 0x14001]              # DATA R1, var + 1
     assert rom[5] == 11                               # CALL's return address
     assert rom[9] == 15                               # CALL's target: helper
-    assert rom[12] == 15 - 12                         # RJMP helper, relative
+    assert rom[12] == 15 - 12                         # RJMP helper, from its offset word at 12
     assert rom[13:15] == [0x0302, 0x14002]            # DATA R2, table
 
 
@@ -266,6 +287,12 @@ def check_errors():
     expect_error("        .equ X, later\nlater: NOP", "defined above")
     expect_error("        .bogus", "unknown directive")
     expect_error("        DATA R1, 1.5 + 1", "float can't be added")
+    expect_error("        SAVE", "expected SAVE register")
+    expect_error("        RESTORE R1, R1", "listed twice")
+    expect_error("        SAVE R1, 5", "not a register")
+    expect_error("f: RET\n        CALL f, -1", "0 or more")
+    expect_error("f: RET\n        CALL f, f", "is a label")
+    expect_error("f: RET\n        CALL f, 1, 2", "expected CALL label")
 
 
 def check_warnings():
@@ -282,6 +309,16 @@ def check_link_errors():
                       "isn't .global in any")
     expect_link_error(["        .global start\n        .extern b\nstart:  RJMP b",
                        "        .global b\n        .ram\nb: .space 1"], "RAM label")
+    # a CALL to another file's RAM label
+    expect_link_error(["        .global start\n        .extern buf\nstart:  CALL buf",
+                       "        .global buf\n        .ram\nbuf: .space 1"],
+                      "can't call 'buf'")
+    # an .extern nobody exports, even when it is never used
+    expect_link_error(["        .global start\n        .extern ghost\nstart:  HALT"],
+                      "listed in .extern")
+    # ...but taking a RAM label's address from another file is fine
+    build("        .global start\n        .extern buf\nstart:  DATA R1, buf",
+          "        .global buf\n        .ram\nbuf: .space 1")
 
 
 def check_raw_output():
@@ -305,6 +342,7 @@ def check_object_file_round_trip():
     """, "t.asm")
     again = ObjectFile.from_json(obj.to_json())
     assert again == obj
+    assert [r.rom_only for r in obj.relocs] == [False, True, False]   # CALL's target only
 
 
 def check_command_line():
@@ -325,21 +363,46 @@ def check_command_line():
         assert cli.main(["link", str(tmp / "main.obj"), str(tmp / "lib.obj"),
                          "-o", str(tmp / "linked.rom")]) == 0
         assert parse_raw((tmp / "linked.rom").read_text()) == built
+        # build reports a bad .asm AND a bad .obj, not just the first one
+        (tmp / "bad.asm").write_text("        FOO R1\n")
+        (tmp / "bad.obj").write_text("not json")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            assert cli.main(["build", str(tmp / "bad.asm"), str(tmp / "bad.obj")]) == 1
+        text = err.getvalue()
+        assert "unknown instruction" in text and "not an object file" in text, text
+        assert "instead of 'link'" not in text, text
 
 
 def check_examples_build():
-    """Every .asm in examples/asm builds (skipped if the folder isn't there)."""
-    root = Path(__file__).resolve().parents[2] / "examples" / "asm"
+    """Every example under examples/ (next to this file) assembles and links.
+
+    two_files/ is linked as its pair; every other .asm is linked together with
+    stdlib/stdlib.asm, which works whether or not it uses the library.
+    """
+    root = Path(__file__).resolve().parent / "examples"
     if not root.is_dir():
-        return "skipped, no examples/asm folder"
-    singles = [p for p in root.glob("*.asm")]
-    for path in singles:
-        linker.link([assemble(path.read_text(), str(path))[0]])
+        return "skipped, no examples folder"
+
+    def obj(path):
+        return assemble(path.read_text(encoding="utf-8-sig"), str(path))[0]
+
+    built = []
     pair = root / "two_files"
-    if pair.is_dir():
-        linker.link([assemble((pair / n).read_text(), n)[0]
-                     for n in ("main.asm", "lib.asm")])
-    return f"{len(singles)} single-file examples + two_files"
+    if (pair / "main.asm").is_file() and (pair / "lib.asm").is_file():
+        linker.link([obj(pair / "main.asm"), obj(pair / "lib.asm")])
+        built.append("two_files")
+    stdlib_path = root / "stdlib" / "stdlib.asm"
+    stdlib = [obj(stdlib_path)] if stdlib_path.is_file() else []
+    for path in sorted(root.rglob("*.asm")):
+        if path == stdlib_path or pair in path.parents:
+            continue
+        try:
+            linker.link([obj(path)] + stdlib)
+        except AsmErrors as e:
+            raise AssertionError(f"{path.relative_to(root)} doesn't build:\n{e}") from None
+        built.append(str(path.relative_to(root)))
+    return f"{len(built)} built"
 
 
 CHECKS = [
@@ -351,6 +414,7 @@ CHECKS = [
     check_strings_and_space,
     check_jumps_and_flags,
     check_call_and_ret,
+    check_save_restore_and_call_cleanup,
     check_linking,
     check_entry_when_start_is_not_first,
     check_errors,

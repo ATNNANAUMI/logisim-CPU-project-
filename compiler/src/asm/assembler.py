@@ -142,13 +142,41 @@ class Assembler:
 
     def instruction_size(self, op, rest):
         if op in enc.PSEUDO_OPS:
-            return enc.PSEUDO_OPS[op]
+            return self.pseudo_size(op, rest)
         if op in enc.SYSTEM_OPS:
             return 2 if enc.SYSTEM_OPS[op][1] in enc.TWO_WORD_SHAPES else 1
         if enc.ALU_OPS[op][2] == "alu2":
             args = split_operands(rest)
             return 2 if len(args) == 2 and args[1].startswith("#") else 1
         return 1
+
+    def pseudo_size(self, op, rest):
+        """Size of a pseudo-instruction. Called in pass 1, so any count must
+        already be known (a number or a constant defined above)."""
+        args = split_operands(rest)
+        if op == "RET":
+            return 6
+        if op == "CALL":
+            count = self.call_cleanup(args)
+            return 7 if count == 0 else 9 + count
+        # SAVE / RESTORE: 2 words per register; RESTORE adds 2 to keep R0
+        size = 2 * len(args)
+        if op == "RESTORE" and not self.lists_r0(args):
+            size += 2
+        return size
+
+    def call_cleanup(self, args):
+        """How many pushed arguments CALL target, N removes (0 without N)."""
+        if len(args) != 2:
+            return 0
+        count, is_float = self.constant(args[1])
+        if is_float or count < 0:
+            raise AsmError("CALL's argument count must be a whole number, 0 or more")
+        return count
+
+    @staticmethod
+    def lists_r0(args):
+        return any(is_register(a.strip()) and int(a.strip()[1:]) == 0 for a in args)
 
     def rom_only(self, name):
         if self.section != "rom":
@@ -273,8 +301,12 @@ class Assembler:
             raise AsmError(f"'{text.strip()}' doesn't fit in 32 bits")
         return number, label, False
 
-    def put_value(self, text, words, relocs, line):
-        """Append a value word. Returns (number, label, is_float)."""
+    def put_value(self, text, words, relocs, line, rom_only=False):
+        """Append a value word. Returns (number, label, is_float).
+
+        rom_only marks a CALL target, so the linker can reject a label from
+        another file that turns out to be in RAM.
+        """
         number, label, is_float = self.evaluate(text)
         at = len(words)
         if label is None:
@@ -282,14 +314,15 @@ class Assembler:
         elif label in self.labels:
             lab = self.labels[label]
             words.append(0)
-            relocs.append(Reloc(at, "abs", None, lab.section, lab.offset + number, line))
+            relocs.append(Reloc(at, "abs", None, lab.section, lab.offset + number,
+                                line, rom_only))
         else:
             words.append(0)
-            relocs.append(Reloc(at, "abs", label, None, number, line))
+            relocs.append(Reloc(at, "abs", label, None, number, line, rom_only))
         return number, label, is_float
 
     def put_jump(self, text, words, relocs, stmt):
-        """Append a relative jump offset: target - address of this word."""
+        """Append a relative jump offset (counted from the offset word)."""
         number, label, _ = self.evaluate(text)
         if label is None:
             raise AsmError("a jump target must be a label")
@@ -298,7 +331,7 @@ class Assembler:
             lab = self.labels[label]
             if lab.section != "rom":
                 raise AsmError(f"can't jump to '{label}': it is a RAM label")
-            words.append((lab.offset + number - (stmt.offset + at)) & MASK)
+            words.append(enc.jump_offset(lab.offset + number, stmt.offset + at))
         else:
             words.append(0)
             relocs.append(Reloc(at, "rel", label, None, number, stmt.line))
@@ -333,10 +366,13 @@ class Assembler:
                 self.put_value(text, words, relocs, line)
             return words, relocs
 
+        if op in ("SAVE", "RESTORE"):
+            return self.encode_save_restore(stmt), relocs
+
         if op == "CALL":
             args = split_operands(stmt.rest)
-            if len(args) != 1:
-                raise AsmError("expected CALL label")
+            if len(args) not in (1, 2):
+                raise AsmError("expected CALL label   or   CALL label, count")
             number, label, _ = self.evaluate(args[0])
             if label is None:
                 raise AsmError("CALL needs a label to call")
@@ -344,12 +380,17 @@ class Assembler:
                 raise AsmError(f"can't call '{label}': it is a RAM label")
             words.append(enc.sys_word("DATA", rb=0))       # DATA R0, <return>
             words.append(0)
-            relocs.append(Reloc(1, "abs", None, "rom", stmt.offset + stmt.size, line))
+            relocs.append(Reloc(1, "abs", None, "rom", stmt.offset + 7, line))
             words.append(enc.stk_word("PUSH"))              # STK PUSH
             words.append(enc.stk_word("CALL"))              # STK CALL
             words.append(enc.sys_word("DATA", rb=0))       # DATA R0, target
-            self.put_value(args[0], words, relocs, line)
+            self.put_value(args[0], words, relocs, line, rom_only=True)
             words.append(enc.sys_word("JMRB", rb=0))       # JMRB R0
+            count = self.call_cleanup(args)                 # execution returns here
+            if count:
+                words.append(enc.sys_word("CPY", 0, 15))    # CPY R0, R15  keep return value
+                words += [enc.stk_word("POP")] * count      # STK POP x count
+                words.append(enc.sys_word("CPY", 15, 0))    # CPY R15, R0  return value back
             return words, relocs
 
         if op == "RET":
@@ -369,6 +410,39 @@ class Assembler:
             return self.encode_system(stmt)
         return self.encode_alu(stmt)
 
+    def encode_save_restore(self, stmt):
+        """SAVE pushes the listed registers; RESTORE pops them back.
+
+        Both take the list in the same order; RESTORE pops in reverse. RESTORE
+        keeps R0 (the return value after a CALL) unless R0 is in the list.
+        """
+        args = split_operands(stmt.rest)
+        if not args:
+            raise AsmError(f"expected {stmt.op} register, register, ...")
+        regs = [parse_register(a) for a in args]
+        seen = set()
+        for reg in regs:
+            if reg in seen:
+                raise AsmError(f"R{reg} is listed twice")
+            seen.add(reg)
+
+        words = []
+        if stmt.op == "SAVE":
+            for reg in regs:
+                words.append(enc.sys_word("CPY", reg, 0))       # CPY Rx, R0
+                words.append(enc.stk_word("PUSH"))               # STK PUSH
+            return words
+
+        keep_r0 = 0 not in regs
+        if keep_r0:
+            words.append(enc.sys_word("CPY", 0, 15))             # CPY R0, R15
+        for reg in reversed(regs):
+            words.append(enc.stk_word("POP"))                    # STK POP
+            words.append(enc.sys_word("CPY", 0, reg))            # CPY R0, Rx
+        if keep_r0:
+            words.append(enc.sys_word("CPY", 15, 0))             # CPY R15, R0
+        return words
+
     def expect(self, op, shape, args, count):
         if len(args) != count:
             raise AsmError("expected " + enc.USAGE[shape].format(op=op))
@@ -381,13 +455,14 @@ class Assembler:
         if shape in ("comm", "stk"):
             sub, args = split_sub_operation(stmt.rest)
             if shape == "comm":
-                if sub not in enc.COMM_OPS:
+                if sub is None or sub not in enc.COMM_OPS:
                     raise AsmError("expected " + enc.USAGE[shape].format(op=op))
                 if len(args) != 1:
                     raise AsmError(f"expected COMM {sub}, RB")
-                words.append(enc.word(enc.SYSTEM, opcode, enc.COMM_OPS[sub], parse_register(args[0])))
+                words.append(enc.word(enc.SYSTEM, opcode, enc.COMM_OPS[sub],
+                                      parse_register(args[0])))
             else:
-                if sub not in enc.STK_OPS:
+                if sub is None or sub not in enc.STK_OPS:
                     raise AsmError("expected " + enc.USAGE[shape].format(op=op))
                 code, takes_register = enc.STK_OPS[sub]
                 if takes_register:
