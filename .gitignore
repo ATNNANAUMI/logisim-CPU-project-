@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.obj
+*.map
+*.class
+*.autosave
+*.old
+*.vscode
+*.untrack
+.venv
+*.jar
+compiler/rom
