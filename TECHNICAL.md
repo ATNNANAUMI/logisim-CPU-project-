@@ -43,7 +43,9 @@ One 17-bit address bus. Bit 16 chooses the bank:
   "tried writing in ROM" error line; the simulator ignores the write and notes
   it in the trace).
 * The stack is the first quarter of RAM (`RAM[0x0000..0x3FFF]`). `ESP` and
-  `EBP` are 14-bit indices into it, so they wrap at 16K.
+  `EBP` are 14-bit indices into it, so they wrap at 16K. `STK SET/GET`
+  addresses are not limited to the stack area: they wrap across the whole
+  RAM (see 1.6).
 * The IAR is 17 bits, so the CPU *can* fetch from RAM, but the assembler never
   puts code there.
 
@@ -136,7 +138,8 @@ Division or modulo by zero returns the dividend unchanged.
 **Float flags:** `C = 0`, `A = fa > fb`, `N = result < 0`, `Z = result == 0`.
 For `FCMP` the "result" is `RA − RB` (rounded to float32), so `N` means
 `RA < RB` and `Z` means equal, the same as the integer `CMP`.
-`FDIV` by zero gives ±infinity with the dividend's sign. `INT` of NaN or
+`INT` truncates toward zero (`INT(1.7) = 1`, `INT(-3.7) = -3`, `INT(0.5) = 0`),
+confirmed on the circuit. `FDIV` by zero gives ±infinity with the dividend's sign. `INT` of NaN or
 infinity gives 0.
 
 ### 1.6 Stack instructions (`STK`, `0x0Bob`)
@@ -153,8 +156,11 @@ The sub-operation is in the RA field.
 | 5 | `GET, RB` | `R0 = stack[EBP + RB]` |
 
 The stack grows **upward** from RAM index 0. `SET`/`GET` are relative to
-`EBP`; negative `RB` reaches arguments below the frame (the index wraps at
-14 bits).
+`EBP`; negative `RB` reaches arguments below the frame. On the circuit,
+`EBP + RB` goes through the 17-bit address adder, so it wraps across the
+**entire RAM**, not just the 16K stack area: with `EBP = 0`, index `-1`
+reads or writes the last word of RAM (`0x1FFFF`). The simulator still wraps
+this index at 14 bits, so it lands on `0x13FFF` instead (see section 8).
 
 ### 1.7 I/O (`COMM`, `0x08mb`)
 
@@ -212,8 +218,9 @@ PC  (top level: the "computer")
 └── buffer
 ```
 
-`PC` also holds the `HALT`, `RESET` and `RESUME` input pins, probes, and the
-Logisim `TTY`, `Keyboard` and `Hex Digit Display` components.
+`PC` also holds the `HALT`, `RESET` and `RESUME` input pins and the Logisim
+`TTY`, `Keyboard` and `Hex Digit Display` components. It also has an
+`RGB Video` component (565 colour) that is not wired to anything yet.
 
 ### 2.2 Subcircuits
 
@@ -241,7 +248,7 @@ decoders) and drives:
 **CLOCK** — turns the raw clock into the three phases the control section
 needs: `clk`, `clk_s` (AND of the clock and a delayed copy: the short "set"
 pulse) and `clk_e` (OR: the long "enable" window). The delay comes from the
-`buffer` subcircuit, a chain of 128 buffers.
+`buffer` subcircuit, a chain of 60 buffers.
 
 **stepper** — a 4-bit counter (steps 0–15) with two D flip-flops that
 synchronise its reset; the control section restarts it at the end of every
@@ -636,8 +643,8 @@ python compiler/src/asm build prog.asm compiler/examples/stdlib/stdlib.asm -o pr
 
 Strings end with a 0 word and hold one character per word. The library
 uses two RAM buffers: `num_buf` (12 words) and `in_buf` (32 words).
-`floor_pos` is a private helper for `print_float`; it gives the right answer
-whether `INT` truncates or rounds. In `read_line`, backspace removes the last
+`floor_pos` is a private helper for `print_float`: the whole part of a
+float ≥ 0, which is `INT` truncating. In `read_line`, backspace removes the last
 character from both the buffer and the display, and does nothing when the
 line is empty (so it can't erase the prompt).
 
@@ -656,11 +663,12 @@ line is empty (so it can't erase the prompt).
 | `stdlib/stdlib_input_demo.asm` | `read_line`, `read_int`, `read_float`, `read_char` |
 | `two_files/main.asm`, `lib.asm` | two files, `.extern`/`.global`, `CALL` inside a call, a RAM variable |
 | `tests/io_test.asm` | minimal keyboard → display loop for probing the circuit |
-| `tests/diag10.asm` | what `INT` does with floats below 1 on the circuit |
-| `tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0`, whether `STK GET` also writes `RB`, and `INT` rounding for positive and negative values. Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x14000`; they are also printed in hex |
+| `tests/diag10.asm` | `INT` on floats below 1 (diagnostic, resolved: they give 0) |
+| `tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x14000`; they are also printed in hex |
 
-All of these build and run correctly in the simulator. Prebuilt images are
-in `compiler/roms/` (see section 9 for which are stale).
+All of these build and run correctly in the simulator. Built images go in
+`compiler/rom/`, which git ignores. Rebuild them after changing a source
+or the stdlib; an image there can be older than its source.
 
 ---
 
@@ -742,9 +750,9 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | topic | simulator | circuit |
 | --- | --- | --- |
 | `A` signed, `SHR` logical, `DIV`/`MOD` truncate, stack wraps | as in 3.4 | confirmed (2026-10-02) |
-| `INT` (float → int) | truncates toward zero | not settled. `diag10.asm` looked at wrong results for inputs below 1 (a suspected shift-count wrap); `diag11.asm` measures truncate vs round for ±0.4 … ±3.7. `floor_pos` in the stdlib works either way |
-| `STK SET/GET` with a negative index at `EBP = 0` | wraps to the top of the stack area (`0x13FFF`) | measured by `diag11.asm` |
-| does `STK GET` also write `RB`? | no | measured by `diag11.asm` |
+| `INT` (float → int) | truncates toward zero | confirmed: truncates (`diag10.asm`, `diag11.asm`) |
+| `STK SET/GET` with a negative index at `EBP = 0` | wraps at 14 bits, to the top of the stack area (`0x13FFF`) | **differs**: wraps across the entire RAM, to the last word (`0x1FFFF`), measured with `diag11.asm` |
+| does `STK GET` also write `RB`? | no | no: fixed in the circuit (STK GET/SET/PUSH no longer misuse RB) |
 | float `SHL/SHR/++/--`, undefined float opcodes | write 0 (`FLOAT_NOP_RESULT`) | a guess |
 | `SUB` carry (set when there is no borrow), `MULT` overflow carry, float divide by zero | as in 1.5 | not verified |
 | number display `0x3C` | not modelled (writes are ignored) | 8 hex digits in `PC` |
@@ -781,6 +789,7 @@ disagrees with sections 1–8, sections 1–8 are right.
 | `logisim/cpu datas/fixes_circuit.txt` | empty |
 | `logisim/cpu datas/TO DO.txt` | personal to-do list (future ideas: loading ROM into RAM at start, BIOS, OS) |
 | `asm_grammar.py` | its docstring and footer refer to `02-assembly-language.md`, which does not exist |
+| `diag11.asm` header, result 1 | expects the `ebp-1` write to land on `0x13FFF` (its "truncating / as ISA" column); on the circuit it lands on `0x1FFFF`, the last word of RAM |
 
 ### Programs and images
 
@@ -788,10 +797,8 @@ disagrees with sections 1–8, sections 1–8 are right.
 | --- | --- |
 | `cpu_sim/examples/*` | hand-assembled ROMs, replaced by `compiler/examples/programs/*.asm`. `echo` still selects the keyboard at `0x0F` (now `0xF0`), so it waits forever; `print_a-z` uses `++ R1` expecting the result in `R1` and prints `a` forever (`print_a-z_fixed` works); `abs_value` sends the raw number 5 to the text display, which prints nothing visible |
 | `logisim/functions/*` | hand-assembled for the early ISA (results into `RB`, old stack layout); most give wrong results now |
-| `compiler/roms/stdlib.rom` | not a build of `stdlib.asm` (the library has no `start` and can't be linked alone); it is an old build of the input demo |
-| `compiler/roms/stdlib_demo.rom`, `diag10.rom`, `lib.rom` | stale: they differ from a fresh build of the current sources. `lib.rom` is the two-file example, named after its first input. `compiler/examples/stdlib/stdlib_demo.rom` is current |
-| `compiler/roms/io_test.rom`, `print_a-z.rom`, `stdlib_input_demo.rom` | current |
-| `program.rom`, `CPU__patched.circ` (project root) | scratch files generated by `run.py` / `run_rom.py`, not sources |
+| `compiler/rom/stdlib.rom` (local, ignored by git) | not a build of `stdlib.asm` (the library has no `start` and can't be linked alone); it is an old build of the input demo |
+| `compiler/rom/*` (local, ignored by git) | only `io_test.rom` and `print_a-z.rom` match a fresh build; every image linked with the stdlib is older than the current `stdlib.asm`. `lib.rom` is the two-file example, named after its first input |
 
 ### Circuit
 
@@ -799,9 +806,3 @@ disagrees with sections 1–8, sections 1–8 are right.
 | --- | --- |
 | subcircuits `ROM`, `program_loader`, `sign_controller`, `teste` | not used anywhere. `ROM` is an older memory block (the program now lives in the ROM inside `RAM`); `teste` is the FPU prototype, with π and e as test constants |
 | comparator against `0x287` in `RAM` | a debugging watch on one address, not part of the design |
-
-### Repository
-
-| item | status |
-| --- | --- |
-| `__pycache__/*.pyc` | committed even though `.gitignore` lists them |

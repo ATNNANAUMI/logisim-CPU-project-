@@ -180,22 +180,12 @@ pf_digit:
         RET
 
 ; floor_pos(f): whole part of a float >= 0, as an int (private helper)
-; INT rounds to nearest on the circuit, so INT(1.7) is 2. When f is below
-; the rounded value, take one off. Right whether INT rounds or truncates:
-; do not simplify this to a bare INT.
+; INT truncates toward zero (on the circuit and in the simulator), so for
+; f >= 0 it already is the floor.
 floor_pos:
         DATA R1, -2
-        STK GET, R1
-        CPY R0, R1                  ; R1 = f
-        INT R1
-        CPY R0, R2                  ; R2 = INT(f), maybe rounded up
-        FLOAT R2
-        FSUB R1, R0                 ; f - FLOAT(R2)
-        RJNF N, fp_done             ; not negative: R2 is the floor
-        -- R2
-        CPY R0, R2                  ; rounded up: one less
-fp_done:
-        CPY R2, R0
+        STK GET, R1                 ; R0 = f
+        INT R0
         RET
 
 ; print_hex(v): print 0x and 8 hex digits
