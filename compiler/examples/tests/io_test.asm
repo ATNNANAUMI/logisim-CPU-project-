@@ -36,7 +36,7 @@
 ; R1 display, R2 keyboard, R3 the key read, R4 the dot counter.
 
         .equ DISPLAY, 0x5C
-        .equ KEYBOARD, 0x0F
+        .equ KEYBOARD, 0xF0
         .equ DOT_MASK, 0xFFFF       ; one dot per 65536 reads - lower it
                                     ; (0xFFF, 0xFF) if the CPU is running
                                     ; slowly and you want dots sooner

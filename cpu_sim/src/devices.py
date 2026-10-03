@@ -36,7 +36,13 @@ class Display:
 
 
 class Keyboard:
-    """Buffer at 0x0F.  Typing fills it; INDATA consumes one character."""
+    """Buffer at 0xF0, like Logisim's Keyboard component.
+
+    Every key goes into the buffer the moment it is typed: Enter as 0x0A,
+    Backspace as 0x08 (the program decides what backspace means).  INDATA
+    consumes one character; an empty buffer reads as 0, which is what the
+    circuit's keyboard presents and what read_char / read_line poll on.
+    """
 
     def __init__(self):
         self.buffer: deque[int] = deque()
@@ -44,8 +50,8 @@ class Keyboard:
     def type(self, text: str) -> None:
         self.buffer.extend(ord(c) for c in text)
 
-    def read(self) -> int | None:
-        return self.buffer.popleft() if self.buffer else None
+    def read(self) -> int:
+        return self.buffer.popleft() if self.buffer else 0
 
     def clear(self) -> None:
         self.buffer.clear()
@@ -70,7 +76,8 @@ class DeviceBus:
             self.display.write(value)
 
     def in_data(self) -> int | None:
-        """None means 'nothing happened' - the register keeps its value."""
+        """None means no input device is selected: nothing drives the bus,
+        so the register keeps its value.  The keyboard gives 0 when empty."""
         if self.in_addr == config.KEYBOARD_ADDR:
             return self.keyboard.read()
         return None

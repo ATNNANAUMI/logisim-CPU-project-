@@ -39,6 +39,27 @@ def parse_word(text: str) -> int:
     return int(text, 0) & config.WORD_MASK
 
 
+def key_code(keysym: str, char: str) -> int | None:
+    """What Logisim's Keyboard would buffer for a key, or None to ignore it.
+
+    Enter gives 0x0A and Backspace 0x08; any other key counts only if it
+    types a printable ASCII character (Tab, arrows, Ctrl+... are ignored).
+    """
+    if keysym in ("Return", "KP_Enter"):
+        return 0x0A
+    if keysym == "BackSpace":
+        return 0x08
+    if len(char) == 1 and 32 <= ord(char) < 127:
+        return ord(char)
+    return None
+
+
+def buffer_text(codes) -> str:
+    """The keys waiting in the buffer, with Enter and Backspace made visible."""
+    shown = {0x0A: "⏎", 0x08: "⌫"}
+    return "".join(shown.get(c, chr(c) if 32 <= c < 127 else "·") for c in codes)
+
+
 class MemoryPane(ttk.Frame):
     """A paged hex view of one bank, optionally disassembled."""
 
@@ -359,14 +380,18 @@ class SimulatorWindow(tk.Tk):
         self.display.pack(fill="both", expand=True, padx=4, pady=4)
         self.display.configure(state="disabled")
 
-        keys = ttk.LabelFrame(parent, text=f"keyboard (0x{config.KEYBOARD_ADDR:02X})")
+        keys = ttk.LabelFrame(
+            parent, text=f"keyboard (0x{config.KEYBOARD_ADDR:02X}) - click here and type")
         keys.pack(fill="x", pady=6)
-        self.key_entry = ttk.Entry(keys)
+        # Read-only: every key goes straight into the buffer (on_key), and the
+        # field shows what is still waiting to be read, like Logisim's Keyboard.
+        self.key_waiting = tk.StringVar(value="")
+        self.key_entry = ttk.Entry(keys, textvariable=self.key_waiting,
+                                   font=MONO, state="readonly")
         self.key_entry.pack(side="left", fill="x", expand=True, padx=4, pady=4)
-        self.key_entry.bind("<Return>", lambda _e: self.send_keys())
-        self.newline = tk.BooleanVar(value=True)
-        ttk.Checkbutton(keys, text="+LF", variable=self.newline).pack(side="left")
-        ttk.Button(keys, text="send", command=self.send_keys).pack(side="left", padx=4)
+        self.key_entry.bind("<KeyPress>", self.on_key)
+        for paste in ("<<Paste>>", "<Control-v>", "<Control-V>"):
+            self.key_entry.bind(paste, self.on_paste)    # more specific than <KeyPress>
         self.buffer_label = ttk.Label(keys, text="buffer 0")
         self.buffer_label.pack(side="left", padx=4)
 
@@ -425,13 +450,28 @@ class SimulatorWindow(tk.Tk):
         self.cpu.resume()
         self.refresh()
 
-    def send_keys(self) -> None:
-        text = self.key_entry.get()
-        if self.newline.get():
-            text += "\n"
-        self.cpu.bus.keyboard.type(text)
-        self.key_entry.delete(0, "end")
-        self.refresh()
+    def on_key(self, event) -> str | None:
+        """A key typed into the keyboard field goes into the buffer at once."""
+        code = key_code(event.keysym, event.char)
+        if code is None:
+            return None                     # let Tk handle Tab, Ctrl+V, ...
+        self.cpu.bus.keyboard.type(chr(code))
+        self.refresh(memory=False)
+        return "break"
+
+    def on_paste(self, _event=None) -> str:
+        """Pasted text is typed one key at a time; a line break is Enter."""
+        try:
+            text = self.clipboard_get()
+        except tk.TclError:                 # clipboard empty or not text
+            return "break"
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        for char in text:
+            code = key_code("Return" if char == "\n" else "", char)
+            if code is not None:
+                self.cpu.bus.keyboard.type(chr(code))
+        self.refresh(memory=False)
+        return "break"
 
     # ----------------------------------------------------------- main loop
     def _tick(self) -> None:
@@ -515,6 +555,7 @@ class SimulatorWindow(tk.Tk):
         self.display.see("end")
         self.display.configure(state="disabled")
         self.buffer_label.configure(text=f"buffer {len(self.cpu.bus.keyboard.buffer)}")
+        self.key_waiting.set(buffer_text(self.cpu.bus.keyboard.buffer))
 
         if memory:
             for pane in (self.rom_pane, self.ram_pane):

@@ -18,13 +18,9 @@
 ;   first argument at ebp-(N+1) ... last argument at ebp-2
 ;   (ebp-1 = return address, ebp+0 = old ebp)
 ;
-; ASSUMES
-;   INT truncates towards zero, so for a value that is not negative it is
-;   already the floor. floor_pos relies on that; if INT is ever changed to
-;   round, floor_pos needs a correction step back.
-;
-; BUILD
-;   python compiler/src/asm build yourprog.asm stdlib.asm -o yourprog.rom
+; BUILD (from the project root)
+;   python compiler/src/asm build yourprog.asm
+;          compiler/src/asm/examples/stdlib/stdlib.asm -o yourprog.rom
 ;
 ; FUNCTIONS                                   returns
 ;   output
@@ -36,9 +32,9 @@
 ;     print_hex(v)            0x + 8 digits   -
 ;   input
 ;     read_char()             no echo         the key
-;     read_line(buf, max)     echoes          length (max-1 chars at most)
-;     read_int()              echoes          the number
-;     read_float()            echoes          the float
+;     read_line(buf, max)     echoes, backspace   length (max-1 chars at most)
+;     read_int()              echoes, backspace   the number
+;     read_float()            echoes, backspace   the float
 ;   strings (0-terminated, one character per word)
 ;     str_len(addr)                           length
 ;     str_copy(dst, src)                      length
@@ -57,6 +53,7 @@
 
         .equ DISPLAY, 0x5C
         .equ KEYBOARD, 0xF0
+        .equ BACKSPACE, 0x08
         .equ IN_SIZE, 32            ; line buffer for read_int / read_float
 
         .global print_char, print_string, print_int, print_newline
@@ -183,14 +180,22 @@ pf_digit:
         RET
 
 ; floor_pos(f): whole part of a float >= 0, as an int (private helper)
-; INT truncates towards zero, so for f >= 0 it already is the floor. An
-; earlier version corrected a rounding INT by testing the sign of
-; (f - FLOAT(INT(f))); that is gone, because it made the result depend on
-; the sign of a float subtraction (see the note at the top of the file).
+; INT rounds to nearest on the circuit, so INT(1.7) is 2. When f is below
+; the rounded value, take one off. Right whether INT rounds or truncates:
+; do not simplify this to a bare INT.
 floor_pos:
         DATA R1, -2
         STK GET, R1
-        INT R0
+        CPY R0, R1                  ; R1 = f
+        INT R1
+        CPY R0, R2                  ; R2 = INT(f), maybe rounded up
+        FLOAT R2
+        FSUB R1, R0                 ; f - FLOAT(R2)
+        RJNF N, fp_done             ; not negative: R2 is the floor
+        -- R2
+        CPY R0, R2                  ; rounded up: one less
+fp_done:
+        CPY R2, R0
         RET
 
 ; print_hex(v): print 0x and 8 hex digits
@@ -237,10 +242,11 @@ ph_print:
 ; INPUT
 ; ------------------------------------------------------------------
 
-; read_char(): wait for a key and return it (not echoed)
+; read_char(): wait for a key and return it. No echo: the caller decides
+; whether the key is shown (print_char), e.g. not for a menu choice.
 read_char:
         DATA R1, KEYBOARD
-        COMM OUTADDR, R1
+        COMM INADDR, R1
 rc_wait:
         COMM INDATA, R0
         TEST R0
@@ -249,6 +255,8 @@ rc_wait:
 
 ; read_line(buf, max): read keys into buf until Enter, echoing them.
 ; Keeps at most max-1 characters (extra keys are ignored), adds a 0.
+; Backspace removes the last character kept, from buf and from the display;
+; with nothing kept it does nothing (so it can't eat the prompt).
 ; Returns the length.
 read_line:
         DATA R1, -3
@@ -260,9 +268,9 @@ read_line:
         CPY R0, R4                  ; R4 = max - 1
         DATA R3, 0                  ; R3 = length
         DATA R2, KEYBOARD
+        COMM INADDR, R2
+        DATA R2, DISPLAY
         COMM OUTADDR, R2
-        ;DATA R2, DISPLAY
-        ;COMM OUTADDR, R2
 rl_wait:
         COMM INDATA, R5
         TEST R5
@@ -271,6 +279,8 @@ rl_wait:
         RJF Z, rl_done
         CMP R5, #'\r'
         RJF Z, rl_done
+        CMP R5, #BACKSPACE
+        RJF Z, rl_back
         CMP R3, R4
         RJF AZ, rl_wait             ; full: ignore the key
         CPY R5, R0
@@ -278,6 +288,13 @@ rl_wait:
         COMM OUTDATA, R5            ; echo
         ++ R3
         CPY R0, R3
+        RJMP rl_wait
+rl_back:
+        TEST R3
+        RJF Z, rl_wait              ; nothing kept: ignore it
+        -- R3
+        CPY R0, R3                  ; length - 1: the next key or the 0 overwrites it
+        COMM OUTDATA, R5            ; echo the backspace: the display deletes it too
         RJMP rl_wait
 rl_done:
         DATA R2, '\n'

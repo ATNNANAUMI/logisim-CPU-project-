@@ -8,7 +8,7 @@ UPDATE MCDECODER AND ASSEMBLER FOR UPDATED MICROCODE
 ongoing:
 
 yet:
-
+label in control section each instruction
 
 later:
 CREATE A CIRCUIT TO LOAD ROM TO RAM ON START
