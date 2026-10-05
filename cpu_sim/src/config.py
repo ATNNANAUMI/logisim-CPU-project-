@@ -19,6 +19,7 @@ STACK_WORDS = BANK_WORDS // 4  # bottom 25% of RAM, 14-bit index
 STACK_MASK = STACK_WORDS - 1
 
 DISPLAY_ADDR = 0x5C
+HEX_DISPLAY_ADDR = 0x3C       # 8-digit hex display: shows the last word sent
 KEYBOARD_ADDR = 0xF0           # its decoder wants bits 0-3 = 0, bits 4-7 = 1
 
 # ------------------------------------------------------------------ TWEAKS

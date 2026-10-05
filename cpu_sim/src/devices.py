@@ -61,6 +61,7 @@ class DeviceBus:
     def __init__(self):
         self.display = Display()
         self.keyboard = Keyboard()
+        self.hex_value = None          # None = nothing sent yet (display blank)
         self.out_addr = 0
         self.in_addr = 0
 
@@ -74,6 +75,8 @@ class DeviceBus:
     def out_data(self, value: int) -> None:
         if self.out_addr == config.DISPLAY_ADDR:
             self.display.write(value)
+        elif self.out_addr == config.HEX_DISPLAY_ADDR:
+            self.hex_value = value & config.WORD_MASK
 
     def in_data(self) -> int | None:
         """None means no input device is selected: nothing drives the bus,
@@ -84,5 +87,6 @@ class DeviceBus:
 
     def reset(self) -> None:
         self.out_addr = self.in_addr = 0
+        self.hex_value = None
         self.display.clear()
         self.keyboard.clear()
