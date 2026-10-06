@@ -52,8 +52,8 @@ python compiler/src/asm build compiler/examples/stdlib/stdlib_demo.asm \
 python cpu_sim/src/main.py compiler/ROM/demo.rom
 python cpu_sim/src/main.py compiler/ROM/demo.rom --headless --steps 2000000
 
-# run it on the real circuit, headless (needs the Logisim-evolution jar)
-python logisim/run_rom.py logisim/CPU.circ compiler/ROM/demo.rom --jar path/to/logisim-evolution-4.1.0-all.jar
+# run it on the real circuit, headless (finds an installed Logisim-evolution; --jar or $LOGISIM_JAR otherwise)
+python logisim/run_rom.py logisim/CPU.circ compiler/ROM/demo.rom
 ```
 
 ## A taste of the assembly
