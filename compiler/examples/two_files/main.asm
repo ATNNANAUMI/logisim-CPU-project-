@@ -1,5 +1,5 @@
 ; Uses the functions in lib.asm. Build both files together:
-;   python src/asm build examples/asm/two_files/main.asm examples/asm/two_files/lib.asm
+;   python compiler/src/asm build compiler/examples/two_files/main.asm compiler/examples/two_files/lib.asm
 
         .extern print_newline, print_dashes
         .global start

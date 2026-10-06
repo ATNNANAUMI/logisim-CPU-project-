@@ -96,7 +96,7 @@ def run_link(args):
 
 def main(argv=None):
     cli = argparse.ArgumentParser(
-        prog="python src/asm",
+        prog="python compiler/src/asm",
         description="Assembler and linker for the logic-gate CPU.")
     commands = cli.add_subparsers(dest="command", required=True)
 

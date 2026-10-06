@@ -4,7 +4,7 @@ Source files end in `.asm`. The assembler turns each one into an object file
 (`.obj`), and the linker joins object files into one ROM image in Logisim
 `v2.0 raw` format, the same format the simulator already loads.
 
-The tools live in `src/asm/`; section 10 shows how to run them.
+The tools live in `compiler/src/asm/`; section 10 shows how to run them.
 
 
 ## 1. Lines
@@ -90,8 +90,8 @@ don't keep values in them across a `RET`.
 | `STK POP` | `esp--; R0 = stack[esp]` | 1 | `0x0B10` |
 | `STK CALL` | build a stack frame (no jump) | 1 | `0x0B20` |
 | `STK RET` | drop the stack frame (no jump) | 1 | `0x0B30` |
-| `STK SET, RB` | `stack[RB] = R0` | 1 | `0x0B4b` |
-| `STK GET, RB` | `R0 = stack[RB]` | 1 | `0x0B5b` |
+| `STK SET, RB` | `stack[ebp + RB] = R0` | 1 | `0x0B4b` |
+| `STK GET, RB` | `R0 = stack[ebp + RB]` | 1 | `0x0B5b` |
 | `ALD RA, RB` | `R0 = mem[RA + RB]` | 1 | `0x0Cab` |
 | `AST RA, RB` | `mem[RA + RB] = R0` | 1 | `0x0Dab` |
 | `CPY RA, RB` | `RB = RA` | 1 | `0x0Eab` |
@@ -407,5 +407,5 @@ and the relocations the linker will fill in.
 Check the tools themselves with:
 
 ```
-python src/asm/selftest.py
+python compiler/src/asm/selftest.py
 ```

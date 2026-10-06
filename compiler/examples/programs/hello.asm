@@ -1,6 +1,6 @@
 ; hello.asm - print a string stored in ROM
 ;
-; python compiler/src/asm build compiler/src/asm/examples/programs/hello.asm
+; python compiler/src/asm build compiler/examples/programs/hello.asm
 ; Expected display: hello, world
 
         .equ DISPLAY, 0x5C

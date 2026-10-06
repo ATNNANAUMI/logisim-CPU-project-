@@ -27,8 +27,7 @@ logisim-CPU-project-/
 ├── logisim/
 │   ├── CPU.circ              THE CIRCUIT. Top-level circuit = "PC" (has an unwired RGB Video placeholder)
 │   ├── run_rom.py            patches a .rom into the ROM inside subcircuit "RAM", runs Logisim headless, prints TTY
-│   ├── cpu datas/            old design notes (instruction table, stack micro-steps, TODO); partly OUTDATED
-│   └── functions/            early hand-assembled programs + isa_encoding_reference.md; OUTDATED (old ISA)
+│   └── cpu datas/            old notes: stack micro-steps, personal TODO
 │
 ├── compiler/
 │   ├── assembly_syntax.md    CURRENT assembly language reference
@@ -41,13 +40,13 @@ logisim-CPU-project-/
 │   │   ├── linker.py         .obj files → ROM image; checks externs/RAM calls; format_raw(), format_map()
 │   │   ├── errors.py         AsmError (file:line: message), AsmErrors (batch)
 │   │   ├── selftest.py       18 checks (incl. building every compiler/examples program)
-│   │   ├── asm_grammar.py    generates railroad-diagram HTML of the grammar (needs railroad-diagrams)
-│   │   └── assembly_syntax.md   OUTDATED older copy of compiler/assembly_syntax.md
+│   │   └── asm_grammar.py    generates railroad-diagram HTML of the grammar (needs railroad-diagrams)
 │   ├── examples/
-│   │   ├── programs/         hello, print_a-z, count_0-9, sum_1-10, abs_value, stack_reverse, echo (.asm, no stdlib)
+│   │   ├── programs/         hello, print_a-z, count_0-9, sum_1-10, abs_value, stack_reverse, echo (no stdlib); guess, untested (with stdlib)
 │   │   ├── stdlib/stdlib.asm             standard library (I/O, strings, memory, math, conversion)
 │   │   ├── stdlib/stdlib_demo.asm        uses every stdlib function except input
 │   │   ├── stdlib/stdlib_input_demo.asm  read_line / read_int / read_float / read_char
+│   │   ├── stdlib/stdlib_more_demo.asm   the functions added 2026-10-03 (no typing, no hex display)
 │   │   ├── two_files/main.asm, lib.asm   multi-file linking example
 │   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases)
 │   └── ROM/                  build output (.obj/.rom/.map), git-ignored, created on first build
@@ -58,12 +57,11 @@ logisim-CPU-project-/
     │   ├── isa.py            decode(), disassemble(), opcode tables
     │   ├── alu.py            int_op(), float_op() → (R0 value, flags)
     │   ├── memory.py         ROM/RAM banks, v2.0 raw loader
-    │   ├── devices.py        Display (0x5C), Keyboard (0xF0, empty reads 0), DeviceBus
+    │   ├── devices.py        Display (0x5C), Keyboard (0xF0, empty reads 0), DeviceBus (+ hex display value, 0x3C)
     │   ├── cpu.py            CPU: step(), run(), reset(), stack ops, COMM
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, display, live keyboard, breakpoints, speed)
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG]`
     │   └── selftest.py       13 checks
-    └── examples/             OUTDATED hand-assembled ROMs with # comments (superseded by compiler/examples/programs)
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -143,15 +141,7 @@ python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom --jar logisim-e
   14 bits in the simulator (`0x13FFF`), but across the entire RAM on the
   circuit (`0x1FFFF`, measured with `diag11.asm`).
 * `STK GET/SET/PUSH` misusing RB was a circuit bug, now fixed.
-* The simulator does not model the number display (0x3C).
 * Still-unconfirmed behaviours can be switched in `cpu_sim/src/config.py`
   (TWEAKS).
-* Stale paths after the move: example headers and the stdlib BUILD note say
-  `compiler/src/asm/examples/…` (now `compiler/examples/…`); `run.py`
-  looks for `cpu_sim/src/examples`; the assembler self-check for the examples
-  never runs.
-* Outdated: `cpu_sim/examples/*`, `logisim/functions/*`,
-  `logisim/cpu datas/instruction`, `compiler/src/asm/assembly_syntax.md`,
-  old `python src/asm` paths in docstrings, and stdlib-linked ROMs in
-  `compiler/rom/`.
-  The full list is in TECHNICAL.md §9.
+* Outdated notes: `logisim/cpu datas/` (see TECHNICAL.md §9). The old
+  hand-assembled programs were removed on 2026-10-06 (still in git history).

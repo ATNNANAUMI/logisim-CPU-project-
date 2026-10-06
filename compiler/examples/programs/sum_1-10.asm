@@ -1,6 +1,6 @@
 ; sum_1-10.asm - add 1 + 2 + ... + 10 and print the total
 ;
-; python compiler/src/asm build compiler/src/asm/examples/programs/sum_1-10.asm
+; python compiler/src/asm build compiler/examples/programs/sum_1-10.asm
 ; Expected display: 55
 
         .equ DISPLAY, 0x5C
