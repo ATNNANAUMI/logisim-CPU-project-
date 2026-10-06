@@ -20,8 +20,10 @@ python -c "import sys; sys.path.insert(0,'cpu_sim/src'); import selftest; selfte
 python compiler/src/asm build prog.asm compiler/examples/stdlib/stdlib.asm [-o name.rom] [--map]
 python cpu_sim/src/main.py compiler/ROM/prog.rom                             # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 [--trace] [--keys $'text\n']
-python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom --jar logisim-evolution-4.1.0-all.jar
+python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom [--seconds N]   # real circuit, headless
 ```
+
+`run_rom.py` finds the jar via `$LOGISIM_JAR` or the Arch package path. A circuit run stops at `HALT` (printing `--- halted at HALT ---`) because Logisim's headless mode watches the output pin labelled `halt` in the top-level `PC` circuit; keep that pin and its label if the circuit is reworked. The `circuit-check` skill (`.claude/skills/`) covers comparing the simulator with the circuit.
 
 There is no linter or build step. Assembler output goes to `compiler/ROM/` (git-ignored); an `-o` containing a directory component is used as given.
 

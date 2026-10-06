@@ -220,7 +220,9 @@ PC  (top level: the "computer")
 
 `PC` also holds the `HALT`, `RESET` and `RESUME` input pins and the Logisim
 `TTY`, `Keyboard` and `Hex Digit Display` components. It also has an
-`RGB Video` component (565 colour) that is not wired to anything yet.
+`RGB Video` component (565 colour) that is not wired to anything yet. The
+output pin labelled `halt` goes high when the CPU halts; headless runs use it
+to stop (section 7.2), so keep its label.
 
 ### 2.2 Subcircuits
 
@@ -716,7 +718,7 @@ source file with `.rom`.
 Runs a ROM on the **real circuit** without the GUI:
 
 ```
-python logisim/run_rom.py logisim/CPU.circ prog.rom [--jar logisim-evolution-4.1.0-all.jar]
+python logisim/run_rom.py logisim/CPU.circ prog.rom [--jar path/to/logisim-evolution.jar]
                           [--seconds 120] [--circuit PC] [--keep patched.circ]
 python logisim/run_rom.py logisim/CPU.circ --dump-rom current.rom
 ```
@@ -726,8 +728,17 @@ It parses the `.circ` XML and finds the single `ROM` component inside the
 (`addr/data: 16 32` header, 8 words per line) and writes
 `CPU__patched.circ` to the current directory (or to `--keep`). Then it runs
 `java -Djava.awt.headless=true -jar <jar> <patched> --toplevel-circuit PC -t tty,halt`
-and prints the TTY output until `HALT` or the timeout. `--dump-rom` instead
-writes out the ROM currently stored in the circuit. The jar is not in the
+and prints the TTY output. Without `--jar` it uses `$LOGISIM_JAR`, then
+`/usr/share/java/logisim-evolution/logisim-evolution.jar` (the Arch package).
+
+Logisim's `halt` mode stops the simulation when an output pin labelled
+exactly `halt` in the top-level circuit goes high. `PC` has one, driven by the
+CPU's halt signal, so a run ends at `HALT` and prints `--- halted at HALT ---`
+(Logisim logs this as an `ERROR` line, which `run_rom.py` hides). A run that
+reaches `--seconds` first prints `--- exit: timeout ---`. For scale,
+`stdlib_demo` takes about 40 seconds.
+
+`--dump-rom` instead writes out the ROM currently stored in the circuit. The jar is not in the
 repo.
 
 ### 7.3 Self-checks
