@@ -67,7 +67,7 @@ logisim-CPU-project-/
 ## Circuit hierarchy (`logisim/CPU.circ`)
 
 ```
-PC (top)
+PC (top)                  has the output pin `halt` that ends headless runs at HALT
 ├── CPU
 │   ├── CONTROL_SECTION   decoder/sequencer (gates); uses CLOCK (clk, clk_s, clk_e via "buffer" delay) and stepper (4-bit)
 │   ├── CPU_REG           16 × REGISTER (32-bit), one-hot set/enable selects
@@ -132,7 +132,7 @@ python run.py test
 python compiler/src/asm build prog.asm compiler/examples/stdlib/stdlib.asm [--map]   # -> compiler/ROM/prog.rom
 python cpu_sim/src/main.py compiler/ROM/prog.rom                       # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 --keys $'text\n'
-python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom --jar logisim-evolution-4.1.0-all.jar
+python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom   (jar: $LOGISIM_JAR or the Arch package path)
 ```
 
 ## Open questions / gotchas

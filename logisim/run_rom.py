@@ -2,7 +2,10 @@
 """
 Run a ROM image on the REAL Logisim circuit, headless.
 
-    python3 run_rom.py CPU.circ prog.rom [--seconds 120] [--jar logisim-evolution-4.1.0-all.jar]
+    python3 run_rom.py CPU.circ prog.rom [--seconds 120] [--jar path/to/logisim-evolution.jar]
+
+Without --jar it uses $LOGISIM_JAR, then the jar installed by the Arch
+package (/usr/share/java/logisim-evolution/logisim-evolution.jar).
 
 It copies CPU.circ, replaces the contents of the ROM component inside the
 `RAM` subcircuit with prog.rom, then runs Logisim-Evolution with no GUI and
@@ -15,6 +18,7 @@ prog.rom is the Logisim "v2.0 raw" image your linker already produces
                           instead of running anything
 """
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -23,6 +27,15 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 HEADER = "addr/data: 16 32"
+SYSTEM_JAR = Path("/usr/share/java/logisim-evolution/logisim-evolution.jar")
+
+
+def default_jar():
+    if os.environ.get("LOGISIM_JAR"):
+        return os.environ["LOGISIM_JAR"]
+    if SYSTEM_JAR.is_file():
+        return str(SYSTEM_JAR)
+    return "logisim-evolution-4.1.0-all.jar"
 
 
 def find_rom(tree):
@@ -67,7 +80,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("circ")
     p.add_argument("rom", nargs="?")
-    p.add_argument("--jar", default="logisim-evolution-4.1.0-all.jar")
+    p.add_argument("--jar", default=default_jar())
     p.add_argument("--seconds", type=int, default=120)
     p.add_argument("--circuit", default="PC")
     p.add_argument("--dump-rom")
@@ -100,10 +113,14 @@ def main():
         code = "timeout"
 
     noise = ("JAVA_TOOL_OPTIONS", "java.util.prefs", "INFO:")
+    halted = False
     for line in out.splitlines():
-        if not any(n in line for n in noise):
+        if "halted due to halt pin" in line:      # Logisim logs this as an ERROR
+            halted = True
+        elif not any(n in line for n in noise):
             print(line)
-    print(f"--- exit: {code} ---", file=sys.stderr)
+    status = "halted at HALT" if halted else f"exit: {code}"
+    print(f"--- {status} ---", file=sys.stderr)
 
 
 if __name__ == "__main__":
