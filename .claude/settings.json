@@ -4,6 +4,7 @@
       "Bash(python run.py test)",
       "Bash(python compiler/src/asm/selftest.py)",
       "Bash(python cpu_sim/src/selftest.py)",
+      "Bash(python check_docs.py)",
       "Bash(python compiler/src/asm assemble *)",
       "Bash(python compiler/src/asm link *)",
       "Bash(python compiler/src/asm build *)",

@@ -34,7 +34,7 @@ Everything can be driven from `run.py` at the project root:
 
 ```
 python run.py                     # interactive menu
-python run.py test                # assembler + simulator self-checks
+python run.py test                # assembler + simulator self-checks, docs check
 python run.py asm   prog.asm lib.asm            # -> compiler/ROM/prog.rom
 python run.py sim   compiler/ROM/prog.rom
 python run.py build prog.asm lib.asm            # assemble, then open the simulator

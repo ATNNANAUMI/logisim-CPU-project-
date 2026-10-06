@@ -12,7 +12,7 @@ MENU = """what do you want to run?
   1) asm    assemble only
   2) sim    open the simulator
   3) build  assemble, then open the simulator
-  4) test   both self-checks
+  4) test   self-checks + docs check
 """
 NAMES = {"1": "asm", "2": "sim", "3": "build", "4": "test"}
 
@@ -85,6 +85,7 @@ def do(cmd, args):
     elif cmd == "test":
         run(ASM / "selftest.py")
         run(SIM / "selftest.py")
+        run(ROOT / "check_docs.py")
     else:
         sys.exit(f"unknown command: {cmd}")
 
