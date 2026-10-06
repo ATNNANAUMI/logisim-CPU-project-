@@ -179,7 +179,7 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 | address | device | behaviour |
 | --- | --- | --- |
 | `0x5C` | text display (TTY) | prints the low 7 bits as ASCII; `0x0A` newline, `0x08` backspace |
-| `0x3C` | number display | latches the 32-bit word and shows it on 8 hex digits (circuit only) |
+| `0x3C` | number display | latches the 32-bit word and shows it on 8 hex digits (the simulator shows it in the window, and as `HEX DISPLAY:` in headless output) |
 | `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08` |
 
 Each device compares the 8 low bits of the selected address against its own
@@ -342,7 +342,7 @@ modules import each other by plain name, so run them as scripts
 | `isa.py` | opcode tables, `decode(word) -> Instr`, `disassemble(word, operand)`. `Instr.takes_operand` says whether a literal word follows |
 | `alu.py` | `int_op(name, a, b)` and `float_op(name, a, b)`, each returning `(R0 value, flag nibble)`; float32 ↔ bits helpers |
 | `memory.py` | `Memory` with two 64K banks, `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
-| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes), `Keyboard` (a deque; empty reads 0), `DeviceBus` (the selected input and output addresses) |
+| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes), `Keyboard` (a deque; empty reads 0), `DeviceBus` (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()`, `reset()`, `resume()` |
 | `gui.py` | the Tk window |
 | `main.py` | command line, `build_cpu`, headless runner |
@@ -661,13 +661,16 @@ line is empty (so it can't erase the prompt).
 | `programs/echo.asm` | keyboard → display until Enter (backspace is echoed too) |
 | `stdlib/stdlib_demo.asm` | every stdlib function except input; the expected output is in its header |
 | `stdlib/stdlib_input_demo.asm` | `read_line`, `read_int`, `read_float`, `read_char` |
+| `stdlib/stdlib_more_demo.asm` | the stdlib functions added on 2026-10-03 that need no typing and no hex display; the expected output is in its header |
+| `programs/guess.asm` | guess-the-number game with the stdlib (needs typing) |
+| `programs/untested.asm` | `show_hex` and `try_read_char`, the two stdlib functions not yet run on the circuit (needs typing) |
 | `two_files/main.asm`, `lib.asm` | two files, `.extern`/`.global`, `CALL` inside a call, a RAM variable |
 | `tests/io_test.asm` | minimal keyboard → display loop for probing the circuit |
 | `tests/diag10.asm` | `INT` on floats below 1 (diagnostic, resolved: they give 0) |
 | `tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x14000`; they are also printed in hex |
 
 All of these build and run correctly in the simulator. Built images go in
-`compiler/rom/`, which git ignores. Rebuild them after changing a source
+`compiler/ROM/`, which git ignores. Rebuild them after changing a source
 or the stdlib; an image there can be older than its source.
 
 ---
@@ -685,8 +688,7 @@ v2.0 raw
 * the first line is `v2.0 raw`, then hex words separated by whitespace,
   starting at word 0
 * `count*value` repeats a value (the linker uses it for runs of 4 or more)
-* the simulator also accepts `#` comments (used by the hand-written ROMs in
-  `cpu_sim/examples/`)
+* the simulator also accepts `#` comments
 
 ---
 
@@ -755,50 +757,28 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | does `STK GET` also write `RB`? | no | no: fixed in the circuit (STK GET/SET/PUSH no longer misuse RB) |
 | float `SHL/SHR/++/--`, undefined float opcodes | write 0 (`FLOAT_NOP_RESULT`) | a guess |
 | `SUB` carry (set when there is no borrow), `MULT` overflow carry, float divide by zero | as in 1.5 | not verified |
-| number display `0x3C` | not modelled (writes are ignored) | 8 hex digits in `PC` |
+| number display `0x3C` | shows the last word sent (window and headless output) | 8 hex digits in `PC` |
 | timing | one instruction per step | several clock cycles per instruction (stepper) |
 
 ---
 
 ## 9. Outdated files and stale information
 
-These are still in the repo but are **not** current. When something here
-disagrees with sections 1–8, sections 1–8 are right.
+These are still in the repo but are **not** a description of the current
+design. When something here disagrees with sections 1–8, sections 1–8 are
+right.
 
-### Paths left over from the move to `compiler/examples/` and `cpu_sim/src/`
+The old hand-assembled programs (`cpu_sim/examples/`, `logisim/functions/`),
+the outdated `logisim/cpu datas/instruction` table and the old copy of
+`assembly_syntax.md` in `compiler/src/asm/` were removed on 2026-10-06; they
+are still in the git history.
 
-| where | what is stale |
-| --- | --- |
-| headers of `compiler/examples/programs/*.asm`, `tests/diag11.asm`, and the BUILD note in `stdlib/stdlib.asm` | say `compiler/src/asm/examples/…`; the files are now in `compiler/examples/…` |
-| `compiler/src/asm/selftest.py` `check_examples_build` | looks for `compiler/src/asm/examples`, which is gone, so it is **always skipped** (it reports "skipped, no examples folder"). Its target should be `compiler/examples` |
-| `run.py` `find_roms` | adds files from `cpu_sim/src/examples`, which does not exist; the hand-written ROMs in `cpu_sim/examples/` have no `.rom` extension, so the menu doesn't list them |
-| `cpu_sim/src/main.py` docstring | `python main.py print_a-z_fixed`: assumes you run it from inside the examples folder |
-| `compiler/src/asm/__main__.py` and `selftest.py` docstrings, `compiler/examples/two_files/main.asm` header | use the even older `python src/asm …` / `examples/asm/…` paths |
-| `compiler/assembly_syntax.md`, section 10 | same older paths (`python src/asm`, `python src/main.py`, `examples/asm/…`). The real ones are `python compiler/src/asm …` and `python cpu_sim/src/main.py …` |
-| headers of `stdlib_demo.asm`, `stdlib_input_demo.asm`, `diag10.asm`, `io_test.asm` | relative build commands that only work from inside their own folder |
-
-### Documentation
-
-| file | what is outdated |
-| --- | --- |
-| `compiler/src/asm/assembly_syntax.md` | an older copy of `compiler/assembly_syntax.md`, missing `CALL target, n` and `SAVE`/`RESTORE`. Use `compiler/assembly_syntax.md` |
-| `compiler/assembly_syntax.md`, section 4 | lists `STK SET/GET` as `stack[RB]`; they are `stack[EBP + RB]` |
-| `logisim/cpu datas/instruction` | marked "up to date", but says `ADD/SUB/MULT/DIV` store in `RB` (they store in `R0`), lists float `SHL/SHR/++/--` as real operations, and calls the `DATA` literal a "byte" |
-| `logisim/functions/isa_encoding_reference.md` | an early reverse-engineering note: the "result into RB" rule, guessed flag meanings, no stack/array/float details |
-| `logisim/cpu datas/stack_instruction.txt` | internal micro-step notes for the stack hardware, not a description of the instructions |
-| `logisim/cpu datas/fixes_circuit.txt` | empty |
-| `logisim/cpu datas/TO DO.txt` | personal to-do list (future ideas: loading ROM into RAM at start, BIOS, OS) |
-| `asm_grammar.py` | its docstring and footer refer to `02-assembly-language.md`, which does not exist |
-| `diag11.asm` header, result 1 | expects the `ebp-1` write to land on `0x13FFF` (its "truncating / as ISA" column); on the circuit it lands on `0x1FFFF`, the last word of RAM |
-
-### Programs and images
+### Notes
 
 | file | status |
 | --- | --- |
-| `cpu_sim/examples/*` | hand-assembled ROMs, replaced by `compiler/examples/programs/*.asm`. `echo` still selects the keyboard at `0x0F` (now `0xF0`), so it waits forever; `print_a-z` uses `++ R1` expecting the result in `R1` and prints `a` forever (`print_a-z_fixed` works); `abs_value` sends the raw number 5 to the text display, which prints nothing visible |
-| `logisim/functions/*` | hand-assembled for the early ISA (results into `RB`, old stack layout); most give wrong results now |
-| `compiler/rom/stdlib.rom` (local, ignored by git) | not a build of `stdlib.asm` (the library has no `start` and can't be linked alone); it is an old build of the input demo |
-| `compiler/rom/*` (local, ignored by git) | only `io_test.rom` and `print_a-z.rom` match a fresh build; every image linked with the stdlib is older than the current `stdlib.asm`. `lib.rom` is the two-file example, named after its first input |
+| `logisim/cpu datas/stack_instruction.txt` | internal micro-step notes for the stack hardware, not a description of the instructions |
+| `logisim/cpu datas/TO DO.txt` | personal to-do list (future ideas: loading ROM into RAM at start, BIOS, OS) |
 
 ### Circuit
 

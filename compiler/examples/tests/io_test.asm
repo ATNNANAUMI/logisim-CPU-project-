@@ -4,7 +4,7 @@
 ; responding. This strips it down to the fewest instructions that can
 ; still show something, so the circuit can be probed while it runs.
 ;
-;   python compiler/src/asm build io_test.asm -o io_test.rom
+;   python compiler/src/asm build compiler/examples/tests/io_test.asm
 ;
 ; No stdlib, no calls, no stack. Just the display, the keyboard and a
 ; loop.

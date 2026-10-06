@@ -1,8 +1,8 @@
-"""Entry point.  Every file lives in the same folder; run it from there.
+"""Entry point.  Run it from the project root:
 
-    python main.py                          open the window
-    python main.py print_a-z_fixed          open it with a ROM loaded
-    python main.py abs_value --headless     run in the terminal
+    python cpu_sim/src/main.py                                  open the window
+    python cpu_sim/src/main.py compiler/ROM/hello.rom           open it with a ROM loaded
+    python cpu_sim/src/main.py compiler/ROM/hello.rom --headless   run in the terminal
 """
 
 import argparse

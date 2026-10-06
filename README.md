@@ -83,7 +83,7 @@ More in `compiler/examples/programs/`.
 | `logisim/run_rom.py` | load a ROM into the circuit and run Logisim headless |
 | `compiler/src/asm/` | assembler, linker, self-checks |
 | `compiler/examples/` | example programs, the standard library (`stdlib/stdlib.asm`), circuit diagnostics |
-| `compiler/rom/` | build output for ROM images (ignored by git) |
+| `compiler/ROM/` | build output for ROM images (ignored by git) |
 | `compiler/assembly_syntax.md` | full assembly language reference |
 | `cpu_sim/src/` | Python simulator (core, GUI, self-checks) |
 | `run.py` | one entry point for all of the above |

@@ -1,6 +1,6 @@
 ; count_0-9.asm - print the digits 0 to 9
 ;
-; python compiler/src/asm build compiler/src/asm/examples/programs/count_0-9.asm
+; python compiler/src/asm build compiler/examples/programs/count_0-9.asm
 ; Expected display: 0123456789
 
         .equ DISPLAY, 0x5C

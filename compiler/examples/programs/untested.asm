@@ -1,7 +1,7 @@
 ; untested.asm - checks the last two stdlib functions not yet run on the circuit:
 ; show_hex and try_read_char
 ;
-; python compiler/src/asm build compiler/examples/tests/untested.asm compiler/examples/stdlib/stdlib.asm
+; python compiler/src/asm build compiler/examples/programs/untested.asm compiler/examples/stdlib/stdlib.asm
 ;
 ; Type two keys, e.g. "ab" (no Enter). Expected:
 ;   hex display shows CAFE1234

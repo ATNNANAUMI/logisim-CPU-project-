@@ -1,6 +1,6 @@
 ; stdlib_demo.asm - runs every non-input stdlib function once
 ;
-; python compiler/src/asm build stdlib_demo.asm stdlib.asm -o stdlib_demo.rom
+; python compiler/src/asm build compiler/examples/stdlib/stdlib_demo.asm compiler/examples/stdlib/stdlib.asm
 ;
 ; Expected output:
 ;   int:    -1234 2147483647 -2147483648

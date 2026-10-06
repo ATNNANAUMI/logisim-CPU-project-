@@ -1,6 +1,6 @@
 ; abs_value.asm - print the absolute value of -5
 ;
-; python compiler/src/asm build compiler/src/asm/examples/programs/abs_value.asm
+; python compiler/src/asm build compiler/examples/programs/abs_value.asm
 ; Expected display: 5
 
         .equ DISPLAY, 0x5C

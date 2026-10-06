@@ -1,6 +1,6 @@
 ; stdlib_input_demo.asm - tries the four input functions (needs typing)
 ;
-; python compiler/src/asm build stdlib_input_demo.asm stdlib.asm -o input_demo.rom
+; python compiler/src/asm build compiler/examples/stdlib/stdlib_input_demo.asm compiler/examples/stdlib/stdlib.asm
 ;
 ; Example session (typed text shown after each prompt):
 ;   name? Arthur

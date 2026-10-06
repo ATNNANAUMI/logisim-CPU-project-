@@ -2,9 +2,9 @@
 ; diag11.asm - three behaviours never measured, plus INT once more
 ;
 ; From the project root:
-;   python compiler/src/asm build compiler/src/asm/examples/tests/diag11.asm
-;          compiler/src/asm/examples/stdlib/stdlib.asm -o diag11.rom
-;   python logisim/run_rom.py logisim/CPU.circ diag11.rom --jar <logisim jar>
+;   python compiler/src/asm build compiler/examples/tests/diag11.asm
+;          compiler/examples/stdlib/stdlib.asm
+;   python logisim/run_rom.py logisim/CPU.circ compiler/ROM/diag11.rom --jar <logisim jar>
 ;
 ; diag11.asm must come FIRST on the command line: its results then sit in
 ; RAM from 0x14000, ready for a RAM dump. They are also printed, one hex
@@ -15,6 +15,8 @@
 ; ---- C: STK SET/GET with a negative index while EBP = 0
 ;  1  0x14000  SET at ebp-1, then LD 0x13FFF      CAFE0001    anything else: the
 ;              (the slot it should wrap to)                    sum didn't wrap there
+;              MEASURED on the circuit: the write lands on 0x1FFFF (the last
+;              RAM word): the sum wraps across all of RAM, not at 14 bits
 ;  2  0x14001  GET at ebp-1                       CAFE0001
 ; ---- B: does STK GET also write RB?
 ;  3  0x14002  R0 after GET index 0               1234ABCD

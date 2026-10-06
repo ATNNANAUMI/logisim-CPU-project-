@@ -1,6 +1,6 @@
 ; stack_reverse.asm - print a word backwards, using the stack
 ;
-; python compiler/src/asm build compiler/src/asm/examples/programs/stack_reverse.asm
+; python compiler/src/asm build compiler/examples/programs/stack_reverse.asm
 ; Expected display: kcats
 ; The stack ends where it started (ESP = 0).
 

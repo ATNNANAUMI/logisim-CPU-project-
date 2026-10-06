@@ -1,6 +1,6 @@
 ; print_a-z.asm - print the alphabet (replaces print_a-z and print_a-z_fixed)
 ;
-; python compiler/src/asm build compiler/src/asm/examples/programs/print_a-z.asm
+; python compiler/src/asm build compiler/examples/programs/print_a-z.asm
 ; Expected display: abcdefghijklmnopqrstuvwxyz
 
         .equ DISPLAY, 0x5C

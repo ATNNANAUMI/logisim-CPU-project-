@@ -6,7 +6,7 @@
 ; all >= 1, all correct. print_float feeds it 0.5, 0.05, 0.005, 0.0005 and
 ; 0.00005, and those are exactly the cases that come out wrong.
 ;
-;   python compiler/src/asm build diag10.asm stdlib.asm -o diag10.rom
+;   python compiler/src/asm build compiler/examples/tests/diag10.asm compiler/examples/stdlib/stdlib.asm
 ;
 ; Each line: <letter> CANZ 0x<result of INT>
 ;

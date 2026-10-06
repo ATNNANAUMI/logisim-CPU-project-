@@ -1,6 +1,6 @@
 """Checks for the assembler and linker. Run from the project root:
 
-    python src/asm/selftest.py
+    python compiler/src/asm/selftest.py
 """
 
 import contextlib

@@ -1,6 +1,6 @@
 ; echo.asm - show every key typed, until Enter
 ;
-; python compiler/src/asm build compiler/src/asm/examples/programs/echo.asm
+; python compiler/src/asm build compiler/examples/programs/echo.asm
 ; Type something and press Enter; the display shows what you typed.
 ; Backspace is echoed too, so the display deletes the last character.
 ;
