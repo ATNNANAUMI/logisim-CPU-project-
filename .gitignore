@@ -11,3 +11,4 @@ __pycache__/
 *.jar
 compiler/ROM/
 *.rom
+*__patched.circ
