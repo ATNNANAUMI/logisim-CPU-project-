@@ -1,11 +1,14 @@
 """Command line for the assembler and linker. Run it from the project root:
 
-    python src/asm assemble prog.asm              -> prog.obj
-    python src/asm link prog.obj lib.obj          -> prog.rom
-    python src/asm build prog.asm lib.asm         -> prog.rom   (both steps)
+    python compiler/src/asm assemble prog.asm         -> compiler/ROM/prog.obj
+    python compiler/src/asm link prog.obj lib.obj     -> compiler/ROM/prog.rom
+    python compiler/src/asm build prog.asm lib.asm    -> compiler/ROM/prog.rom
 
--o NAME picks the output file. --map (link and build) also writes a .map
-file listing every label's final address.
+Everything is written to compiler/ROM/ (found from this file's location, so
+it works from any folder). -o picks the output: a bare name (-o demo.rom)
+still goes into compiler/ROM/, a path with a folder (-o out/demo.rom,
+-o ./demo.rom) is used as written. --map (link and build) also writes a .map
+file next to the .rom, listing every label's final address.
 """
 
 import argparse
@@ -16,6 +19,23 @@ import linker as linker
 from assembler import assemble
 from errors import AsmError, AsmErrors
 from objfile import ObjectFile
+
+# compiler/src/asm/__main__.py -> compiler/ROM
+OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "ROM"
+
+
+def output_path(given, first_input, suffix):
+    """Where to write: -o as written if it names a folder, a bare -o name
+    inside OUTPUT_DIR, otherwise OUTPUT_DIR/<first input's name><suffix>.
+    Creates the folder (git doesn't keep an empty one)."""
+    if given and ("/" in given or "\\" in given):
+        out = Path(given)
+    elif given:
+        out = OUTPUT_DIR / given
+    else:
+        out = OUTPUT_DIR / (Path(first_input).stem + suffix)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    return out
 
 
 def assemble_file(path):
@@ -29,7 +49,7 @@ def assemble_file(path):
 
 def run_assemble(args):
     obj = assemble_file(args.source)
-    out = Path(args.output) if args.output else Path(args.source).with_suffix(".obj")
+    out = output_path(args.output, args.source, ".obj")
     obj.save(out)
     print(f"{out}: {len(obj.rom)} words of ROM, {obj.ram_size} words of RAM")
 
@@ -65,7 +85,7 @@ def run_link(args):
         raise AsmErrors(problems)
 
     program = linker.link(objects)
-    out = Path(args.output) if args.output else Path(args.inputs[0]).with_suffix(".rom")
+    out = output_path(args.output, args.inputs[0], ".rom")
     out.write_text(linker.format_raw(program.rom), encoding="utf-8")
     print(f"{out}: {len(program.rom)} words of ROM, {program.ram_used} words of RAM")
     if args.map:
@@ -82,14 +102,14 @@ def main(argv=None):
 
     p = commands.add_parser("assemble", help="turn one .asm file into an .obj file")
     p.add_argument("source")
-    p.add_argument("-o", "--output", help="output file (default: source name .obj)")
+    p.add_argument("-o", "--output", help="output file (default: compiler/ROM/<source>.obj)")
 
     for name, help_text in (
             ("link", "join .obj files into a ROM image"),
             ("build", "assemble and link in one step (.asm and .obj files)")):
         p = commands.add_parser(name, help=help_text)
         p.add_argument("inputs", nargs="+")
-        p.add_argument("-o", "--output", help="output file (default: first input's name .rom)")
+        p.add_argument("-o", "--output", help="output file (default: compiler/ROM/<first input>.rom)")
         p.add_argument("--map", action="store_true",
                        help="also write a .map file with every label's address")
 

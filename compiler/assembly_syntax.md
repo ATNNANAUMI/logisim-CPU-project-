@@ -364,32 +364,34 @@ start:  DATA R3, count
 
 ## 10. Using the tools
 
-Run everything from the project root. `python src/asm` works the same way as
-`python src/main.py` does for the simulator.
+Run everything from the project root. `python compiler/src/asm` works the same
+way as `python cpu_sim/src/main.py` does for the simulator.
 
 Build a program in one step (assemble every file, then link):
 
 ```
-python src/asm build examples/asm/hello.asm
-python src/asm build main.asm lib.asm -o program.rom
+python compiler/src/asm build compiler/examples/programs/hello.asm
+python compiler/src/asm build main.asm lib.asm -o program.rom
 ```
 
-The ROM image is written next to the first file with a `.rom` ending, or to the
-name given with `-o`. Load it in the simulator like any other ROM:
+Everything is written to `compiler/ROM/`: by default under the first file's name
+with a `.rom` ending (`compiler/ROM/hello.rom`), or under the name given with
+`-o`. An `-o` that includes a folder (`-o out/program.rom`, `-o ./program.rom`)
+is used exactly as written. Load the image in the simulator like any other ROM:
 
 ```
-python src/main.py examples/asm/hello.rom
+python cpu_sim/src/main.py compiler/ROM/hello.rom
 ```
 
 Or do the two steps separately, for example to keep a library assembled:
 
 ```
-python src/asm assemble lib.asm              # writes lib.obj
-python src/asm link main.obj lib.obj -o program.rom
-python src/asm build main.asm lib.obj        # build takes .asm and .obj
+python compiler/src/asm assemble lib.asm     # writes compiler/ROM/lib.obj
+python compiler/src/asm link compiler/ROM/main.obj compiler/ROM/lib.obj -o program.rom
+python compiler/src/asm build main.asm compiler/ROM/lib.obj   # build takes .asm and .obj
 ```
 
-Add `--map` to `build` or `link` to also write a `.map` file listing every
+Add `--map` to `build` or `link` to also write a `.map` file (next to the `.rom`) listing every
 label's final address, which helps when stepping through the simulator.
 
 Errors report the file and line, and nothing is written when there are any:
