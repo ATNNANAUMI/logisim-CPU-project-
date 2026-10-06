@@ -30,11 +30,7 @@ def find(pattern):
 
 
 def find_roms():
-    roms = set(find("*.rom"))
-    examples = SIM / "examples"
-    if examples.is_dir():
-        roms |= {p for p in examples.iterdir() if p.is_file()}
-    return sorted(roms)
+    return find("*.rom")
 
 
 def pick(items, what, multi=True, optional=False):
