@@ -43,6 +43,22 @@ Key ISA facts that trip people up (details in STRUCTURE.md):
 - `STK CALL/RET` only move the stack frame; the `CALL`/`RET` pseudo-ops do the jump and clobber R0/R14/R15.
 - The linker puts `RJMP start` at address 0. Exactly one file has `.global start`. Calling or jumping to a RAM label is a link error.
 
+## Keeping the docs in sync
+
+Most facts are written in more than one doc. When you change one of these, update every place in its row (the first one is the full version), then run `python run.py test`; `check_docs.py` catches dead paths, unlisted examples and undocumented TWEAKS, but not wrong descriptions.
+
+| when this changes | update |
+| --- | --- |
+| an instruction (encoding or behaviour) | `encoding.py` + `isa.py` + `alu.py`/`cpu.py`; TECHNICAL §1, `compiler/assembly_syntax.md` §4, STRUCTURE "ISA cheat sheet", README if it's the one-paragraph summary |
+| assembler syntax, directives, pseudo-ops | `compiler/assembly_syntax.md`; TECHNICAL §4, STRUCTURE "Assembler conventions" |
+| a command, flag or output path | TECHNICAL §3.3 / §4.1 / §7; README "Quick start", STRUCTURE "Common commands", `assembly_syntax.md` §10, this file's Commands |
+| a stdlib function or the calling convention | the header of `stdlib.asm`; TECHNICAL §5.1–5.2, STRUCTURE "Assembler conventions" |
+| an example program added, renamed or removed | its own header (build command, expected output); TECHNICAL §5.3, STRUCTURE tree |
+| a TWEAKS switch, or a behaviour measured on the circuit | `config.py`; TECHNICAL §3.4 and §8, STRUCTURE "Open questions / gotchas", the diag file's header (see the `circuit-check` skill) |
+| a subcircuit, pin or device in `CPU.circ` | TECHNICAL §2; STRUCTURE "Circuit hierarchy" |
+| a self-check added or removed | TECHNICAL §7.3; the counts in STRUCTURE's tree and in this file |
+| a file or folder added, moved or removed | STRUCTURE tree; README "Layout"; TECHNICAL §9 if it's outdated material |
+
 ## Outdated notes
 
 `logisim/cpu datas/` holds old personal notes (stack micro-steps, a TODO list), not a description of the current design. The old hand-assembled programs (`cpu_sim/examples/`, `logisim/functions/`) were removed on 2026-10-06 and are only in git history. Unused subcircuits in `CPU.circ` are listed in `TECHNICAL.md` §9.
