@@ -707,7 +707,7 @@ lets you pick files from the project (it skips `.git`, `.venv`,
 | `python run.py asm <files…> [-o out.rom]` | `compiler/src/asm build …` |
 | `python run.py sim [rom]` | `cpu_sim/src/main.py [rom]` (the window) |
 | `python run.py build <files…> -o out.rom` | assembles, then opens the result in the simulator |
-| `python run.py test` | runs both self-checks |
+| `python run.py test` | runs both self-checks, then `check_docs.py` |
 
 It checks for `tkinter` before opening the window and prints install hints
 when it is missing. In the menu, the output of `asm`/`build` is the first
@@ -751,7 +751,14 @@ python compiler/src/asm/selftest.py   # 18 checks: encodings, values, strings, j
 python cpu_sim/src/selftest.py        # 13 checks: immediates, flags, DIV by 0, RAM,
                                       # ROM writes, stack, frames, floats, FCMP flags,
                                       # keyboard, backspace, ADDR/JMRB
+python check_docs.py                  # 3 checks on the docs: every repo path they name
+                                      # exists, every example is listed in 5.3, every
+                                      # TWEAKS switch is in 3.4
 ```
+
+`check_docs.py` checks only mechanical facts. It skips build output under
+`compiler/ROM/`, `diagNN`-style placeholders, and paragraphs that mention
+files as removed.
 
 ---
 
