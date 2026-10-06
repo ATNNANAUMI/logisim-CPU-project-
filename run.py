@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 ASM = ROOT / "compiler" / "src" / "asm"
 SIM = ROOT / "cpu_sim" / "src"
+ROM_DIR = ROOT / "compiler" / "ROM"   # where the assembler writes, see compiler/src/asm/__main__.py
 SKIP = {".git", ".venv", "venv", "__pycache__", "node_modules"}
 
 MENU = """what do you want to run?
@@ -57,6 +58,17 @@ def pick(items, what, multi=True, optional=False):
         print("invalid, try again")
 
 
+def built_rom(args):
+    """The .rom the assembler writes for these build args (same rule as its output_path)."""
+    out = args[args.index("-o") + 1] if "-o" in args else None
+    if out and ("/" in out or "\\" in out):
+        return Path(out)
+    if out:
+        return ROM_DIR / out
+    first = next(a for a in args if not a.startswith("-"))
+    return ROM_DIR / (Path(first).stem + ".rom")
+
+
 def run(*cmd):
     print("$ python", *cmd)
     code = subprocess.run([sys.executable, *map(str, cmd)]).returncode
@@ -71,11 +83,9 @@ def do(cmd, args):
         need_tk()
         run(SIM / "main.py", *args)
     elif cmd == "build":
-        if "-o" not in args:
-            sys.exit("build needs -o <output.rom>")
         need_tk()
         run(ASM, "build", *args)
-        run(SIM / "main.py", args[args.index("-o") + 1])
+        run(SIM / "main.py", built_rom(args))
     elif cmd == "test":
         run(ASM / "selftest.py")
         run(SIM / "selftest.py")
@@ -92,9 +102,9 @@ def ask():
 
     if cmd in ("asm", "build"):
         srcs = pick(find("*.asm"), "source files (order = link order)")
-        out = srcs[0].with_suffix(".rom")
-        print(f"output: {out.relative_to(ROOT)}")
-        return cmd, [*map(str, srcs), "-o", str(out)]
+        args = [*map(str, srcs)]
+        print(f"output: {built_rom(args).relative_to(ROOT)}")
+        return cmd, args
     if cmd == "sim":
         rom = pick(find_roms(), "ROM", multi=False, optional=True)
         return cmd, [*map(str, rom)]

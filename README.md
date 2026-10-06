@@ -35,9 +35,9 @@ Everything can be driven from `run.py` at the project root:
 ```
 python run.py                     # interactive menu
 python run.py test                # assembler + simulator self-checks
-python run.py asm   prog.asm lib.asm -o prog.rom
-python run.py sim   prog.rom
-python run.py build prog.asm lib.asm -o prog.rom   # assemble, then open the simulator
+python run.py asm   prog.asm lib.asm            # -> compiler/ROM/prog.rom
+python run.py sim   compiler/ROM/prog.rom
+python run.py build prog.asm lib.asm            # assemble, then open the simulator
 ```
 
 Or call the tools directly:
@@ -46,13 +46,14 @@ Or call the tools directly:
 # assemble + link a program with the standard library
 python compiler/src/asm build compiler/examples/stdlib/stdlib_demo.asm \
                               compiler/examples/stdlib/stdlib.asm -o demo.rom
+# (written to compiler/ROM/demo.rom; an -o with a folder, like ./demo.rom, is used as is)
 
 # run it in the simulator (window, or terminal only)
-python cpu_sim/src/main.py demo.rom
-python cpu_sim/src/main.py demo.rom --headless --steps 2000000
+python cpu_sim/src/main.py compiler/ROM/demo.rom
+python cpu_sim/src/main.py compiler/ROM/demo.rom --headless --steps 2000000
 
 # run it on the real circuit, headless (needs the Logisim-evolution jar)
-python logisim/run_rom.py logisim/CPU.circ demo.rom --jar path/to/logisim-evolution-4.1.0-all.jar
+python logisim/run_rom.py logisim/CPU.circ compiler/ROM/demo.rom --jar path/to/logisim-evolution-4.1.0-all.jar
 ```
 
 ## A taste of the assembly
