@@ -10,5 +10,9 @@
       "Bash(python cpu_sim/src/main.py * --headless*)",
       "Bash(python logisim/run_rom.py *)"
     ]
+  },
+  "attribution": {
+    "commit": "",
+    "pr": ""
   }
 }
