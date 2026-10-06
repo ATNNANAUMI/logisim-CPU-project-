@@ -9,6 +9,7 @@ import io
 import tempfile
 import traceback
 from pathlib import Path
+from typing import Any
 
 import linker as linker
 from assembler import assemble
@@ -20,7 +21,7 @@ from objfile import ObjectFile
 _spec = importlib.util.spec_from_file_location(
     "asm_cli", Path(__file__).with_name("__main__.py"))
 assert _spec is not None and _spec.loader is not None
-cli = importlib.util.module_from_spec(_spec)
+cli: Any = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cli)
 
 
@@ -358,8 +359,8 @@ def check_command_line():
                          "-o", str(out), "--map"]) == 0
         built = parse_raw(out.read_text())
         assert (tmp / "prog.map").exists()
-        assert cli.main(["assemble", str(tmp / "main.asm")]) == 0
-        assert cli.main(["assemble", str(tmp / "lib.asm")]) == 0
+        assert cli.main(["assemble", str(tmp / "main.asm"), "-o", str(tmp / "main.obj")]) == 0
+        assert cli.main(["assemble", str(tmp / "lib.asm"), "-o", str(tmp / "lib.obj")]) == 0
         assert cli.main(["link", str(tmp / "main.obj"), str(tmp / "lib.obj"),
                          "-o", str(tmp / "linked.rom")]) == 0
         assert parse_raw((tmp / "linked.rom").read_text()) == built
@@ -372,15 +373,32 @@ def check_command_line():
         text = err.getvalue()
         assert "unknown instruction" in text and "not an object file" in text, text
         assert "instead of 'link'" not in text, text
+        # output-path rule, with OUTPUT_DIR pointed at the temp folder
+        saved = cli.OUTPUT_DIR
+        cli.OUTPUT_DIR = tmp / "ROM"
+        try:
+            ROM = tmp / "ROM"
+            assert cli.output_path(None, "x/y/prog.asm", ".rom") == ROM / "prog.rom"
+            assert cli.output_path(None, "prog.asm", ".obj") == ROM / "prog.obj"
+            assert cli.output_path("demo.rom", "prog.asm", ".rom") == ROM / "demo.rom"
+            assert cli.output_path(str(tmp / "out/demo.rom"), "prog.asm", ".rom") == tmp / "out/demo.rom"
+            assert cli.output_path("./demo.rom", "prog.asm", ".rom") == Path("./demo.rom")
+            assert ROM.is_dir()                       # created when missing
+            assert cli.main(["build", str(tmp / "main.asm"), str(tmp / "lib.asm"), "--map"]) == 0
+            assert (ROM / "main.rom").exists() and (ROM / "main.map").exists()
+            assert parse_raw((ROM / "main.rom").read_text()) == built
+            assert not (tmp / "main.rom").exists()    # not next to the source any more
+        finally:
+            cli.OUTPUT_DIR = saved
 
 
 def check_examples_build():
-    """Every example under examples/ (next to this file) assembles and links.
+    """Every example under compiler/examples/ assembles and links.
 
     two_files/ is linked as its pair; every other .asm is linked together with
     stdlib/stdlib.asm, which works whether or not it uses the library.
     """
-    root = Path(__file__).resolve().parent / "examples"
+    root = Path(__file__).resolve().parent.parent.parent / "examples"   # compiler/examples
     if not root.is_dir():
         return "skipped, no examples folder"
 

@@ -9,4 +9,6 @@ __pycache__/
 *.untrack
 .venv
 *.jar
-compiler/rom
+compiler/ROM/
+*.rom
+!cpu_sim/examples/*
