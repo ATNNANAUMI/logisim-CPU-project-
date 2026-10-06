@@ -149,6 +149,7 @@
     <comp lib="0" loc="(360,80)" name="Pin">
       <a name="appearance" val="classic"/>
       <a name="facing" val="south"/>
+      <a name="label" val="halt"/>
       <a name="type" val="output"/>
     </comp>
     <comp lib="0" loc="(380,340)" name="Splitter">
