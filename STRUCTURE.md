@@ -31,16 +31,16 @@ logisim-CPU-project-/
 │   └── functions/            early hand-assembled programs + isa_encoding_reference.md; OUTDATED (old ISA)
 │
 ├── compiler/
-│   ├── assembly_syntax.md    CURRENT assembly language reference (section 10 paths are outdated)
+│   ├── assembly_syntax.md    CURRENT assembly language reference
 │   ├── src/asm/              assembler + linker (run as `python compiler/src/asm <cmd>`)
-│   │   ├── __main__.py       CLI: assemble | link | build  (-o out, --map); reports errors from every input
+│   │   ├── __main__.py       CLI: assemble | link | build  (-o out, --map); writes to compiler/ROM/; reports errors from every input
 │   │   ├── parser.py         text → pieces: comments, labels, operands, strings, value expressions
 │   │   ├── encoding.py       ISA tables (SYSTEM_OPS, ALU_OPS, COMM_OPS, STK_OPS, FLAGS), word(), jump_offset()
 │   │   ├── assembler.py      two-pass assembler: one .asm → ObjectFile (+ relocations, pseudo-op expansion)
 │   │   ├── objfile.py        ObjectFile / Reloc (abs|rel, rom_only for CALL targets), saved as JSON (.obj)
 │   │   ├── linker.py         .obj files → ROM image; checks externs/RAM calls; format_raw(), format_map()
 │   │   ├── errors.py         AsmError (file:line: message), AsmErrors (batch)
-│   │   ├── selftest.py       18 checks (check_examples_build is always skipped: it looks in src/asm/examples)
+│   │   ├── selftest.py       18 checks (incl. building every compiler/examples program)
 │   │   ├── asm_grammar.py    generates railroad-diagram HTML of the grammar (needs railroad-diagrams)
 │   │   └── assembly_syntax.md   OUTDATED older copy of compiler/assembly_syntax.md
 │   ├── examples/
@@ -50,7 +50,7 @@ logisim-CPU-project-/
 │   │   ├── stdlib/stdlib_input_demo.asm  read_line / read_int / read_float / read_char
 │   │   ├── two_files/main.asm, lib.asm   multi-file linking example
 │   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases)
-│   └── rom/                  built .rom images (gitignored; may be older than the sources)
+│   └── ROM/                  build output (.obj/.rom/.map), git-ignored, created on first build
 │
 └── cpu_sim/
     ├── src/                  simulator (modules import each other by plain name: run as scripts)
@@ -131,10 +131,10 @@ The design follows the "But How Do It Know?" style: a single bus,
 
 ```
 python run.py test
-python compiler/src/asm build prog.asm compiler/examples/stdlib/stdlib.asm -o prog.rom [--map]
-python cpu_sim/src/main.py prog.rom                       # GUI
-python cpu_sim/src/main.py prog.rom --headless --steps 2000000 --keys $'text\n'
-python logisim/run_rom.py logisim/CPU.circ prog.rom --jar logisim-evolution-4.1.0-all.jar
+python compiler/src/asm build prog.asm compiler/examples/stdlib/stdlib.asm [--map]   # -> compiler/ROM/prog.rom
+python cpu_sim/src/main.py compiler/ROM/prog.rom                       # GUI
+python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 --keys $'text\n'
+python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom --jar logisim-evolution-4.1.0-all.jar
 ```
 
 ## Open questions / gotchas

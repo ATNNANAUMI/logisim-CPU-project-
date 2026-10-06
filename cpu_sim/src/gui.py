@@ -380,6 +380,12 @@ class SimulatorWindow(tk.Tk):
         self.display.pack(fill="both", expand=True, padx=4, pady=4)
         self.display.configure(state="disabled")
 
+        hexbox = ttk.LabelFrame(parent, text=f"hex display (0x{config.HEX_DISPLAY_ADDR:02X})")
+        hexbox.pack(fill="x")
+        self.hex_label = tk.Label(hexbox, font=MONO, text="--------",
+                                  background="#101010", foreground="#ff6050")
+        self.hex_label.pack(fill="x", padx=4, pady=4)
+
         keys = ttk.LabelFrame(
             parent, text=f"keyboard (0x{config.KEYBOARD_ADDR:02X}) - click here and type")
         keys.pack(fill="x", pady=6)
@@ -554,6 +560,8 @@ class SimulatorWindow(tk.Tk):
         self.display.insert("1.0", self.cpu.bus.display.text)
         self.display.see("end")
         self.display.configure(state="disabled")
+        hv = self.cpu.bus.hex_value
+        self.hex_label.configure(text="--------" if hv is None else f"{hv:08X}")
         self.buffer_label.configure(text=f"buffer {len(self.cpu.bus.keyboard.buffer)}")
         self.key_waiting.set(buffer_text(self.cpu.bus.keyboard.buffer))
 

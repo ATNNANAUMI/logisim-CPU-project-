@@ -41,6 +41,8 @@ def run_headless(cpu: CPU, max_steps: int, trace: bool, keys: str = "") -> None:
           % (cpu.iar, cpu.flag_text, cpu.esp, cpu.ebp))
     for i in range(0, 16, 4):
         print("  " + "  ".join(f"R{j:<2d} 0x{cpu.regs[j]:08X}" for j in range(i, i + 4)))
+    if cpu.bus.hex_value is not None:
+        print(f"\nHEX DISPLAY: {cpu.bus.hex_value:08X}")
     print("\nDISPLAY:")
     print(cpu.bus.display.text)
 
