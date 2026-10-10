@@ -128,7 +128,7 @@ instructions compute `RA op RB` (or `RA op imm`). One-operand instructions use
 
 | flag | meaning |
 | --- | --- |
-| `C` | carry out of the adder. `ADD`, `++`: unsigned overflow. `SUB`, `CMP`, `--`, `NEG`: set when there is **no** borrow. `SHL`: bit 31 shifted out. `SHR`: bit 0 shifted out. `MULT`: product does not fit in signed 32 bits. Everything else: 0 |
+| `C` | `ADD`, `++`: carry out (unsigned overflow). `SUB`: **borrow**, set when `RA < RB` unsigned. `SHL`: bit 31 shifted out. `SHR`: bit 0 shifted out. Everything else, including `CMP`, `--`, `NEG` and `MULT`: 0. Measured on the circuit with `diag12.asm` and `diag13.asm` |
 | `A` | `RA > RB`, signed |
 | `N` | bit 31 of the result (for `CMP`, of `RA − RB`) |
 | `Z` | result is 0 (for `CMP`, `RA == RB`) |
@@ -348,7 +348,7 @@ modules import each other by plain name, so run them as scripts
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()`, `reset()`, `resume()` |
 | `gui.py` | the Tk window |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 13 checks on the core |
+| `selftest.py` | 14 checks on the core |
 
 ### 3.2 Execution model
 
@@ -670,6 +670,8 @@ line is empty (so it can't erase the prompt).
 | `tests/io_test.asm` | minimal keyboard → display loop for probing the circuit |
 | `tests/diag10.asm` | `INT` on floats below 1 (diagnostic, resolved: they give 0) |
 | `tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x14000`; they are also printed in hex |
+| `tests/diag12.asm` | what the C compiler relies on: reading and setting `ESP`/`EBP` with `STK CALL`/`STK RET`, stack slot `i` being RAM `0x10000 + i`, the carry flag after `CMP`/`SUB`/`ADD`, the `A` flag after `FCMP` (a float compare), `MULT`'s low 32 bits, `DIV` by `0x80000000`. Link it first; 30 results from `0x14000`, also printed |
+| `tests/diag13.asm` | the carry flag (and A N Z) after `SUB`, `--`, `++`, `NEG`, `SHL`, `SHR`, `MULT`, `ADD`, `AND`, `TEST`: on the circuit `SUB` sets C on a borrow and `CMP`/`--`/`NEG`/`MULT` never set it. Link it first; 24 results from `0x14000`, also printed |
 
 All of these build and run correctly in the simulator. Built images go in
 `compiler/ROM/`, which git ignores. Rebuild them after changing a source
@@ -748,7 +750,7 @@ python compiler/src/asm/selftest.py   # 18 checks: encodings, values, strings, j
                                       # CALL/RET, SAVE/RESTORE, linking, link errors
                                       # (RAM calls, unexported externs), warnings,
                                       # raw output, .obj round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 13 checks: immediates, flags, DIV by 0, RAM,
+python cpu_sim/src/selftest.py        # 14 checks: immediates, flags, carry flag, DIV by 0, RAM,
                                       # ROM writes, stack, frames, floats, FCMP flags,
                                       # keyboard, backspace, ADDR/JMRB
 python check_docs.py                  # 3 checks on the docs: every repo path they name
@@ -774,7 +776,8 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | `STK SET/GET` with a negative index at `EBP = 0` | wraps at 14 bits, to the top of the stack area (`0x13FFF`) | **differs**: wraps across the entire RAM, to the last word (`0x1FFFF`), measured with `diag11.asm` |
 | does `STK GET` also write `RB`? | no | no: fixed in the circuit (STK GET/SET/PUSH no longer misuse RB) |
 | float `SHL/SHR/++/--`, undefined float opcodes | write 0 (`FLOAT_NOP_RESULT`) | a guess |
-| `SUB` carry (set when there is no borrow), `MULT` overflow carry, float divide by zero | as in 1.5 | not verified |
+| carry flag | as in 1.5 | confirmed (`diag12.asm`, `diag13.asm`, 2026-10-10). The simulator used to set C on `SUB`/`CMP` when there was *no* borrow, and on `MULT` overflow; it now matches the circuit |
+| float divide by zero | ±infinity | not verified |
 | number display `0x3C` | shows the last word sent (window and headless output) | 8 hex digits in `PC` |
 | timing | one instruction per step | several clock cycles per instruction (stepper) |
 

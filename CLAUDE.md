@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # both self-check suites (assembler 18, simulator 13), then check_docs.py
+python run.py test                                   # both self-check suites (assembler 18, simulator 14), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 
@@ -40,6 +40,7 @@ Both `compiler/src/asm/` and `cpu_sim/src/` import their sibling modules by plai
 Key ISA facts that trip people up (details in STRUCTURE.md):
 - Every ALU result goes to **R0**, and every ALU op rewrites all flags.
 - Jumps are relative to the address of the offset word.
+- The carry flag: `SUB` sets C on a *borrow* (`RA < RB` unsigned); `CMP`, `--`, `NEG`, `MULT` never set it (measured on the circuit).
 - `STK CALL/RET` only move the stack frame; the `CALL`/`RET` pseudo-ops do the jump and clobber R0/R14/R15.
 - The linker puts `RJMP start` at address 0. Exactly one file has `.global start`. Calling or jumping to a RAM label is a link error.
 

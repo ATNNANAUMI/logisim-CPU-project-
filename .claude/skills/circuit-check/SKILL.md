@@ -1,7 +1,7 @@
 ---
 name: circuit-check
 description: Measure how the real Logisim circuit behaves for some instruction or edge case, compare it with the Python simulator, and record the result. Use when asked to check, confirm, verify or measure a behaviour "on the circuit", when the simulator and circuit may disagree, or to settle a TWEAKS guess in cpu_sim/src/config.py.
-argument-hint: "<behaviour to check, e.g. 'does SUB set C when there is no borrow'>"
+argument-hint: "<behaviour to check, e.g. 'what does FDIV by zero give'>"
 ---
 
 # Check a behaviour on the real circuit
