@@ -30,6 +30,19 @@ def test_sub_negative_sets_n():
     assert cpu.flag("N") and not cpu.flag("A")
 
 
+def test_carry_flag_matches_circuit():
+    # Measured with diag12/diag13: SUB sets C on a borrow, CMP never sets it
+    # DATA R1,3 ; DATA R2,5 ; SUB R1,R2   -> 3 < 5 unsigned: borrow, C on
+    assert run([0x0301, 3, 0x0302, 5, 0x1112, 0x0F00]).flag("C")
+    # DATA R1,5 ; DATA R2,3 ; SUB R1,R2   -> no borrow, C off
+    assert not run([0x0301, 5, 0x0302, 3, 0x1112, 0x0F00]).flag("C")
+    # DATA R1,3 ; DATA R2,5 ; CMP R1,R2   -> C off (A N Z still from 3 - 5)
+    cpu = run([0x0301, 3, 0x0302, 5, 0x1F12, 0x0F00])
+    assert not cpu.flag("C") and cpu.flag("N")
+    # DATA R1,0xFFFFFFFF ; ++ R1          -> carry out, C on
+    assert run([0x0301, 0xFFFFFFFF, 0x1B01, 0x0F00]).flag("C")
+
+
 def test_div_by_zero_returns_dividend():
     # DATA R1,7 ; DATA R2,0 ; DIV R1,R2 ; MOD R1,R2
     cpu = run([0x0301, 7, 0x0302, 0, 0x1312, 0x1A12, 0x0F00])

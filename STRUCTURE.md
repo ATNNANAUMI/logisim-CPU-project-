@@ -49,7 +49,8 @@ logisim-CPU-project-/
 │   │   ├── stdlib/stdlib_input_demo.asm  read_line / read_int / read_float / read_char
 │   │   ├── stdlib/stdlib_more_demo.asm   the functions added 2026-10-03 (no typing, no hex display)
 │   │   ├── two_files/main.asm, lib.asm   multi-file linking example
-│   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases)
+│   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
+│   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag)
 │   └── ROM/                  build output (.obj/.rom/.map), git-ignored, created on first build
 │
 └── cpu_sim/
@@ -62,7 +63,7 @@ logisim-CPU-project-/
     │   ├── cpu.py            CPU: step(), run(), reset(), stack ops, COMM
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, display, live keyboard, breakpoints, speed)
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG]`
-    │   └── selftest.py       13 checks
+    │   └── selftest.py       14 checks
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -99,7 +100,11 @@ The design follows the "But How Do It Know?" style: a single bus,
   `CMP`/`FCMP` write 0 to R0 and set the flags from `RA − RB`.
 * Confirmed on the circuit: the `A` flag (`RA > RB`) is signed, `SHR` is
   logical, `DIV` truncates and `MOD` keeps the dividend's sign, `INT`
-  (float→int) truncates toward zero, ESP/EBP wrap at 14 bits.
+  (float→int) truncates toward zero, ESP/EBP wrap at 14 bits, the `A` flag
+  after `FCMP` is a float compare.
+* Carry flag (measured, `diag12`/`diag13`): `ADD`/`++` carry out, `SUB` sets C
+  on a **borrow** (`RA < RB` unsigned), `SHL`/`SHR` the bit shifted out;
+  `CMP`, `--`, `NEG`, `MULT` never set it.
 * System ops: NOP LD ST DATA RJMP RJF RJNF CLF COMM ADDR JMRB STK ALD AST CPY HALT.
   `CPY RA, RB` copies RA → RB. `ALD`/`AST` use R0 with `mem[RA+RB]`.
 * Jumps are relative to the **address of the offset word**. `RJF` = any
@@ -142,6 +147,9 @@ python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom   (jar: $LOGISI
   14 bits in the simulator (`0x13FFF`), but across the entire RAM on the
   circuit (`0x1FFFF`, measured with `diag11.asm`).
 * `STK GET/SET/PUSH` misusing RB was a circuit bug, now fixed.
+* The carry flag was documented as "set when there is no borrow" for
+  `SUB`/`CMP`; the circuit sets it on a borrow for `SUB` and never for `CMP`
+  (`diag12.asm`, `diag13.asm`). The simulator now matches the circuit.
 * Still-unconfirmed behaviours can be switched in `cpu_sim/src/config.py`
   (TWEAKS).
 * Outdated notes: `logisim/cpu datas/` (see TECHNICAL.md §9). The old

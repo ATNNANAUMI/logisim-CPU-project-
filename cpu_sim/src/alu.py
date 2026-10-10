@@ -2,7 +2,9 @@
 
 Every ALU instruction writes its result to R0 and rewrites all four flags.
 
-    C  unsigned carry out of the adder
+    C  ADD, ++: carry out.  SUB: borrow (RA < RB unsigned).  SHL/SHR: the
+       bit shifted out.  Everything else (CMP, --, NEG, MULT ...): 0.
+       Measured on the circuit with diag12.asm / diag13.asm (2026-10-10).
     A  RA > RB (the two ALU inputs)
     N  result < 0
     Z  result == 0
@@ -72,12 +74,9 @@ def int_op(name: str, a: int, b: int) -> tuple[int, int]:
         total = a + b
         carry, result = total > MASK, total & MASK
     elif name == "SUB":
-        total = a + (~b & MASK) + 1              # carry out = no borrow
-        carry, result = total > MASK, total & MASK
+        carry, result = a < b, (a - b) & MASK    # C = borrow, as on the circuit
     elif name == "MULT":
-        product = sa * sb
-        carry = not (-(1 << 31) <= product <= (1 << 31) - 1)
-        result = product & MASK
+        result = (sa * sb) & MASK                # no carry on overflow (circuit)
     elif name == "DIV":
         result = a if sb == 0 else _divide(sa, sb)[0] & MASK
     elif name == "MOD":
@@ -99,17 +98,14 @@ def int_op(name: str, a: int, b: int) -> tuple[int, int]:
         total = b + 1
         carry, result = total > MASK, total & MASK
     elif name == "DEC":
-        total = b + MASK                         # b + (-1)
-        carry, result = total > MASK, total & MASK
+        result = (b - 1) & MASK                  # C stays 0 (circuit)
     elif name == "NEG":
-        total = (~b & MASK) + 1
-        carry, result = total > MASK, total & MASK
+        result = -b & MASK                       # C stays 0 (circuit)
     elif name == "TEST":
         result = b
     elif name == "CMP":
-        total = a + (~b & MASK) + 1              # flags from RA - RB ...
-        carry, flag_value = total > MASK, total & MASK
-        result = 0                               # ... but R0 gets 0
+        flag_value = (a - b) & MASK              # A N Z from RA - RB, C stays 0 ...
+        result = 0                               # ... and R0 gets 0
     else:
         result = 0
 
