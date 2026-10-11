@@ -3,6 +3,7 @@
     python cpu_sim/src/main.py                                  open the window
     python cpu_sim/src/main.py compiler/ROM/hello.rom           open it with a ROM loaded
     python cpu_sim/src/main.py compiler/ROM/hello.rom --headless   run in the terminal
+        (--screen out.png saves the RGB screen at the end)
 """
 
 import argparse
@@ -20,7 +21,8 @@ def build_cpu(rom_path=None, ram_path=None) -> CPU:
     return cpu
 
 
-def run_headless(cpu: CPU, max_steps: int, trace: bool, keys: str = "") -> None:
+def run_headless(cpu: CPU, max_steps: int, trace: bool, keys: str = "",
+                 screen: str = "") -> None:
     if keys:
         cpu.bus.keyboard.type(keys)
     steps = 0
@@ -45,6 +47,10 @@ def run_headless(cpu: CPU, max_steps: int, trace: bool, keys: str = "") -> None:
         print(f"\nHEX DISPLAY: {cpu.bus.hex_value:08X}")
     print("\nDISPLAY:")
     print(cpu.bus.display.text)
+    if screen:
+        with open(screen, "wb") as f:
+            f.write(cpu.bus.video.png(scale=2))
+        print(f"\n(RGB screen saved to {screen})")
 
 
 def main() -> None:
@@ -55,11 +61,13 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=100_000)
     parser.add_argument("--trace", action="store_true")
     parser.add_argument("--keys", default="", help="preload the keyboard buffer")
+    parser.add_argument("--screen", default="", metavar="FILE.png",
+                        help="save the RGB screen (device 0x6C) as a PNG at the end")
     args = parser.parse_args()
 
     cpu = build_cpu(args.rom, args.ram)
     if args.headless:
-        run_headless(cpu, args.steps, args.trace, args.keys)
+        run_headless(cpu, args.steps, args.trace, args.keys, args.screen)
         return
 
     from gui import SimulatorWindow

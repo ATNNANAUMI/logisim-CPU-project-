@@ -519,8 +519,22 @@ class SimulatorWindow(tk.Tk):
         entry.insert(0, f"0x{value:0{width}X}")
 
     def _build_display(self, parent) -> None:
-        box = ttk.LabelFrame(parent, text=f"display (0x{config.DISPLAY_ADDR:02X})")
-        box.pack(fill="both", expand=True)
+        # the text display and the RGB screen share a notebook; the screen
+        # tab comes forward the first time a program draws
+        self.outputs = ttk.Notebook(parent)
+        self.outputs.pack(fill="both", expand=True)
+        box = ttk.Frame(self.outputs)
+        self.outputs.add(box, text=f"display (0x{config.DISPLAY_ADDR:02X})")
+        video = self.cpu.bus.video
+        screen_box = ttk.Frame(self.outputs)
+        self.outputs.add(screen_box, text=f"RGB screen (0x{config.VIDEO_ADDR:02X})")
+        self.screen_tab = screen_box
+        self.screen_zoom = max(1, 384 // max(video.width, video.height))
+        self.screen_image = tk.PhotoImage(width=video.width, height=video.height)
+        self.screen_big = self.screen_image.zoom(self.screen_zoom)
+        self.screen_label = tk.Label(screen_box, image=self.screen_big, background="#101010")
+        self.screen_label.pack(expand=True, padx=4, pady=4)
+        self._screen_shown = False
         self.display = tk.Text(box, font=MONO, height=16, wrap="char",
                                background="#101010", foreground="#c8ffc8",
                                insertbackground="#c8ffc8")
@@ -744,6 +758,7 @@ class SimulatorWindow(tk.Tk):
         self.display.configure(state="disabled")
         hv = self.cpu.bus.hex_value
         self.hex_label.configure(text="--------" if hv is None else f"{hv:08X}")
+        self._draw_screen()
         self.buffer_label.configure(text=f"buffer {len(self.cpu.bus.keyboard.buffer)}")
         self.key_waiting.set(buffer_text(self.cpu.bus.keyboard.buffer))
 
@@ -752,6 +767,28 @@ class SimulatorWindow(tk.Tk):
                 pane.follow_iar()
                 pane.render()
             self.source_pane.render()
+
+    def _draw_screen(self) -> None:
+        video = self.cpu.bus.video
+        if not (video.dirty or video.cleared):
+            return
+        if video.cleared or len(video.dirty) > 1000:
+            # the whole image in one put: one {row} of colours per line
+            names = ["#%02x%02x%02x" % video.rgb(c) for c in video.pixels]
+            w = video.width
+            self.screen_image.put(" ".join("{" + " ".join(names[y * w:(y + 1) * w]) + "}"
+                                           for y in range(video.height)))
+        else:
+            for i in video.dirty:
+                self.screen_image.put("#%02x%02x%02x" % video.rgb(video.pixels[i]),
+                                      to=(i % video.width, i // video.width))
+        video.dirty = set()
+        video.cleared = False
+        self.screen_big = self.screen_image.zoom(self.screen_zoom)
+        self.screen_label.configure(image=self.screen_big)
+        if video.used and not self._screen_shown:
+            self._screen_shown = True
+            self.outputs.select(self.screen_tab)
 
     def _measured_rate(self) -> str:
         """Instructions actually executed per second, averaged over ~0.5 s."""

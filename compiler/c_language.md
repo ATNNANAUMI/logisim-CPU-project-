@@ -38,7 +38,8 @@ python run.py build prog.c                         # build, then open the simula
 * `run` prints what the program writes on the display. `--keys TEXT` types
   keys first (`--keys $'12\n'` in bash for Enter), `--steps N` limits the
   instructions (default 50 million), `--stats` prints the instruction count
-  and R0 at the end, `--trace` prints every instruction.
+  and R0 at the end, `--trace` prints every instruction, `--screen F.png`
+  saves the RGB screen.
 * `-I dir` adds a folder for `#include`, `-D NAME[=value]` defines a macro,
   `-w` hides warnings, `--no-libc` leaves the library and start-up code out
   (the program then needs its own `start`), `--lib FILE` links an assembly
@@ -219,6 +220,26 @@ register; it can't name C variables. At file scope it adds assembly to the
 file, for example a whole function with its label. Only this basic form of
 `asm` is supported.
 
+`<gfx.h>`: drawing on the 128×128 RGB screen (devices `0x6C`/`0x6D`, see
+the header for the wiring). Colours are RGB565 (`GFX_RGB(r, g, b)` from
+0–255 parts, `GFX_RED`, `GFX_WHITE`, ...); everything is clipped to the
+screen, which can't be read back.
+
+| | |
+| --- | --- |
+| `gfx_clear()`, `gfx_fill(c)` | all black (one reset pulse), all one colour |
+| `gfx_pixel(x, y, c)` | one pixel |
+| `gfx_hline(x, y, w, c)`, `gfx_vline(x, y, h, c)` | lines across and down |
+| `gfx_line(x0, y0, x1, y1, c)` | any line (Bresenham) |
+| `gfx_rect`, `gfx_fill_rect(x, y, w, h, c)` | outline / filled rectangle |
+| `gfx_circle`, `gfx_fill_circle(cx, cy, r, c)` | outline / filled circle |
+| `gfx_char(x, y, ch, fg, bg)` | a 5×7 character in a 6×8 cell (`bg` = `GFX_NONE`: transparent); returns the next x |
+| `gfx_text(x, y, s, fg, bg)` | a string, `\n` goes to the next row under x; returns the x after it |
+| `gfx_bitmap(x, y, w, h, pixels)` | `w*h` colours row by row, `GFX_NONE` ones skipped |
+
+`cc run --screen out.png` saves the screen after the run; the simulator
+window shows it in its "RGB screen" tab.
+
 Builtins: `__builtin_va_start()`, `__builtin_offsetof(type, member)` (used
 by `<stdarg.h>` and `<stddef.h>`), `__builtin_expect(e, c)`,
 `__builtin_trap()` and `__builtin_unreachable()` (both halt),
@@ -227,7 +248,7 @@ by `<stdarg.h>` and `<stddef.h>`), `__builtin_expect(e, c)`,
 
 ## 7. The C library
 
-Headers: `assert.h`, `cpu.h`, `ctype.h`, `errno.h`, `float.h`,
+Headers: `assert.h`, `cpu.h`, `ctype.h`, `errno.h`, `float.h`, `gfx.h`,
 `inttypes.h`, `iso646.h`, `limits.h`, `locale.h`, `math.h`, `setjmp.h`,
 `signal.h`, `stdalign.h`, `stdarg.h`, `stdbool.h`, `stddef.h`, `stdint.h`,
 `stdio.h`, `stdlib.h`, `stdnoreturn.h`, `string.h`, `time.h`.

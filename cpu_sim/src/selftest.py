@@ -127,6 +127,23 @@ def test_keyboard_backspace_is_a_key():
     assert (cpu.regs[2], cpu.regs[3]) == (ord("7"), 0x08)
 
 
+def test_rgb_video():
+    # DATA R1,0x6C ; COMM OUTADDR,R1 ; DATA R2,pixel ; COMM OUTDATA,R2 ; DATA R2,pixel ; COMM OUTDATA,R2
+    # x = 3, y = 5, red; then x = 0x83 (only 7 bits wired: x = 3), y = 6, white
+    cpu = run([0x0301, 0x6C, 0x0831, 0x0302, 0x0305F800, 0x0822,
+               0x0302, 0x8306FFFF, 0x0822, 0x0F00])
+    video = cpu.bus.video
+    assert video.pixels[5 * video.width + 3] == 0xF800
+    assert video.pixels[6 * video.width + 3] == 0xFFFF
+    assert video.rgb(0xF800) == (255, 0, 0)
+    # DATA R1,0x6D ; COMM OUTADDR,R1 ; COMM OUTDATA,R1  clears it
+    cpu.halted = False
+    cpu.mem.load_rom([0x0301, 0x6D, 0x0831, 0x0821, 0x0F00])
+    cpu.iar = 0
+    cpu.run(10)
+    assert not any(video.pixels)
+
+
 def test_addr_and_jmrb():
     # ADDR R1 ; JMRB R1 lands on the instruction after ADDR
     cpu = run([0x0901, 0x0A01, 0x0F00], steps=5)
