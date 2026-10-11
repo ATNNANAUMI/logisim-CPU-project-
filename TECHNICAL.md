@@ -435,9 +435,12 @@ explains how the tools work.
 
 ```
 python compiler/src/asm assemble prog.asm            [-o prog.obj]
-python compiler/src/asm link     prog.obj lib.obj    [-o prog.rom] [--map]
-python compiler/src/asm build    prog.asm lib.asm    [-o prog.rom] [--map]
+python compiler/src/asm link     prog.obj lib.obj    [-o prog.rom] [--map] [--lib lib.obj]
+python compiler/src/asm build    prog.asm lib.asm    [-o prog.rom] [--map] [--lib lib.asm]
 ```
+
+`--lib FILE` (repeatable) links FILE as a library: only the parts the
+program needs (4.6). Libraries are placed after the other inputs.
 
 `build` accepts `.asm` and `.obj` files mixed; `link` takes only `.obj` (and
 suggests `build` when given something else). The default output name is the
@@ -469,7 +472,7 @@ problems of all files (bad source, unreadable file, broken `.obj`), as
 | `objfile.py` | `ObjectFile` and `Reloc`, saved as readable JSON |
 | `linker.py` | object files → one ROM image, plus `format_raw` and `format_map` |
 | `errors.py` | `AsmError` (one message with file and line) and `AsmErrors` (a batch) |
-| `selftest.py` | 18 checks for the assembler and linker |
+| `selftest.py` | 19 checks for the assembler and linker |
 | `asm_grammar.py` | writes railroad diagrams of the grammar to `asm_grammar.html` (needs `pip install railroad-diagrams`) |
 
 ### 4.3 Assembling (two passes)
@@ -485,6 +488,7 @@ current section (`.rom` or `.ram`), records `.equ` constants and the
 | `.word a, b, …` | one per value |
 | `.string "…"` | one per character + a 0 |
 | `.space n` | n (zeros in ROM; only reserves room in RAM) |
+| `.part` | 0 (starts a new part) |
 | `CALL t` / `CALL t, n` | 7 / 9 + n |
 | `RET` | 6 |
 | `SAVE r…` | 2 per register |
@@ -502,10 +506,16 @@ value that contains a label becomes a 0 word plus a relocation:
 * `abs`: the word must hold a label's final address (from `DATA`, `.word`,
   immediates, `CALL`). A `CALL` target is also marked `rom_only`, so the
   linker rejects calling a RAM label from another file
-* `rel`: a jump offset to a label in **another** file
+* `rel`: a jump offset to a label in **another** file, or in another part
+  of this file (`section: rom`, the target's offset in `addend`)
 
-Jumps to labels in the same file are resolved immediately, since the distance
-does not change when the file moves.
+**Parts.** After pass 1 the file's ROM is cut into parts: one starts at
+offset 0, at every `.global` ROM label and at every `.part` directive. Each
+part records whether it can fall through into the next one (its last
+statement is not `RJMP`, `JMRB`, `RET`, `.word`, `.string` or `.space`).
+Jumps to labels in the same part are resolved immediately, since the
+distance does not change when the file moves; a jump into another part
+becomes a `rel` relocation, because a library link may move or drop parts.
 
 Checks include: unknown names, labels used as constants, more than one label
 in an expression, subtracting a label, values that don't fit in 32 bits,
@@ -540,6 +550,10 @@ SAVE Ra, Rb                     RESTORE Ra, Rb
 None of them touch the flags.
 
 ### 4.5 Object files (`.obj`)
+
+(Since 2026-10-11 an object file also has `"parts": [[start, falls_through], ...]`,
+the parts of its ROM; an older file without it is one part.)
+
 
 JSON, written by hand so it stays readable. Here is
 `compiler/examples/two_files/main.asm` assembled on its own (words the linker
@@ -583,6 +597,13 @@ RAM  0x10000   stack (never touched by the linker)
      0x14000   each file's RAM part, in command-line order
 ```
 
+0. For a library (`--lib`), choose the parts to keep: starting from every
+   part of the other files (and `start`), follow the relocations of each
+   kept part (a section-relative target, or a `.global` defined in a
+   library) to the part it points into, and keep the next part when a kept
+   part falls through. A library none of whose labels is referred to is
+   dropped, RAM and all. The kept parts are joined up and every offset
+   (labels, relocation positions and targets) is renumbered.
 1. Give each file a base in ROM and RAM, and check that the sizes fit.
 2. Compute every label's final address and build the table of `.global`s
    (the same global in two files is an error).
@@ -592,7 +613,8 @@ RAM  0x10000   stack (never touched by the linker)
    `rel`: `target − address of the offset word`). Jumping to or calling a
    RAM label is an error; taking a RAM label's address is fine.
 5. Check that every `.extern` is exported by some file, even when it is
-   never used (a missing file or a typo).
+   never used (a missing file or a typo). Labels of dropped library parts
+   still count as exported.
 
 The output is a v2.0 raw image (section 6).
 
@@ -641,7 +663,11 @@ uses with `.extern`:
 
 ```
 python compiler/src/asm build prog.asm compiler/examples/stdlib/stdlib.asm -o prog.rom
+python compiler/src/asm build prog.asm --lib compiler/examples/stdlib/stdlib.asm   # only what prog uses
 ```
+
+With `--lib`, only the functions the program calls (and the ones they call)
+are linked: `programs/guess.asm` takes 556 words instead of 1669.
 
 | group | functions |
 | --- | --- |
@@ -766,10 +792,11 @@ repo.
 ### 7.3 Self-checks
 
 ```
-python compiler/src/asm/selftest.py   # 18 checks: encodings, values, strings, jumps,
+python compiler/src/asm/selftest.py   # 19 checks: encodings, values, strings, jumps,
                                       # CALL/RET, SAVE/RESTORE, linking, link errors
                                       # (RAM calls, unexported externs), warnings,
-                                      # raw output, .obj round trip, CLI, examples
+                                      # library parts (--lib), raw output, .obj
+                                      # round trip, CLI, examples
 python cpu_sim/src/selftest.py        # 15 checks: immediates, flags, carry flag, DIV by 0, RAM,
                                       # ROM writes, stack, frames, floats, FCMP flags,
                                       # keyboard, backspace, ADDR/JMRB, float specials
@@ -848,7 +875,7 @@ how the compiler works.
 
 ```
 python compiler/src/cc compile prog.c [-o prog.asm]                 # C -> assembly
-python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map] [--no-libc]
+python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map] [--no-libc] [--lib x.asm]
 python compiler/src/cc run   prog.c [...] [--keys TEXT] [--steps N] [--stats] [--trace]
         common options: -I dir, -D NAME[=value], -w (no warnings)
 ```
@@ -991,7 +1018,9 @@ files only) and two assembly files: `runtime.asm` (`_pow2`, `_udiv`,
   change to any of them rebuilds it.
 * `driver.select_library` links a library file only when it defines a name
   that is still missing, repeating until nothing is: like a static library,
-  so a program's own `puts` wins and nothing unused is linked.
+  so a program's own `puts` wins. The chosen files are then linked as
+  libraries (4.6): the compiler starts a `.part` at every function and data
+  object, so only the functions and data actually used go in.
 * `runtime.asm`'s helpers are called with `DATA R14, back` / `RJMP _udiv`
   and return with `JMRB R14`; they change only R0, R13, R14, R15.
 * `format.c` prints floats exactly: `fdigits.c` turns the float's exact

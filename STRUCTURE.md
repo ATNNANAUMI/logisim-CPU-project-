@@ -43,9 +43,9 @@ logisim-CPU-project-/
 │   │   ├── encoding.py       ISA tables (SYSTEM_OPS, ALU_OPS, COMM_OPS, STK_OPS, FLAGS), word(), jump_offset()
 │   │   ├── assembler.py      two-pass assembler: one .asm → ObjectFile (+ relocations, pseudo-op expansion)
 │   │   ├── objfile.py        ObjectFile / Reloc (abs|rel, rom_only for CALL targets), saved as JSON (.obj)
-│   │   ├── linker.py         .obj files → ROM image; checks externs/RAM calls; format_raw(), format_map()
+│   │   ├── linker.py         .obj files → ROM image; --lib: only the needed parts; checks externs/RAM calls; format_raw(), format_map()
 │   │   ├── errors.py         AsmError (file:line: message), AsmErrors (batch)
-│   │   ├── selftest.py       18 checks (incl. building every compiler/examples program)
+│   │   ├── selftest.py       19 checks (incl. building every compiler/examples program)
 │   │   └── asm_grammar.py    generates railroad-diagram HTML of the grammar (needs railroad-diagrams)
 │   ├── src/cc/               C compiler (run as `python compiler/src/cc <cmd>`); imports src/asm's modules
 │   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; run: --keys --steps --stats --trace)
@@ -153,6 +153,9 @@ The design follows the "But How Do It Know?" style: a single bus,
 * The linker puts `RJMP start` at address 0. Exactly one file needs
   `.global start`. Every `.extern` must be exported by some file. Calling or
   jumping to a RAM label is an error.
+* `--lib FILE`: a library; only the *parts* the program needs are linked.
+  Parts start at every `.global` label and at `.part`; a part that can fall
+  through keeps the next one. Jumps between parts are relocations.
 * Calling convention: push args first→last, `CALL f, N`, result in R0. R0,
   R14, R15 always clobbered; R1–R13 caller-saved. Inside, arg i of N is at
   `STK GET` index `-(N+1)+(i-1)`; the last arg is at -2.
@@ -183,6 +186,7 @@ The design follows the "But How Do It Know?" style: a single bus,
 ```
 python run.py test
 python compiler/src/asm build prog.asm compiler/examples/stdlib/stdlib.asm [--map]   # -> compiler/ROM/prog.rom
+python compiler/src/asm build prog.asm --lib compiler/examples/stdlib/stdlib.asm       # only the stdlib functions used
 python cpu_sim/src/main.py compiler/ROM/prog.rom                       # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 --keys $'text\n'
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom   (jar: $LOGISIM_JAR or the Arch package path)

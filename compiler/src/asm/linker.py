@@ -6,8 +6,14 @@ Memory layout it builds:
          0x00002   each file's ROM part, in the order given
     RAM  0x10000   stack, never touched by the linker
          0x14000   each file's RAM part, in the order given
+
+Libraries: of a file given as a library, only the parts (see assembler.py)
+the program needs are linked: the parts other files refer to, the parts
+those refer to, and so on, plus the part each kept part falls through into.
+A library nothing refers to is left out entirely, RAM included.
 """
 
+import bisect
 from dataclasses import dataclass
 
 import encoding as enc
@@ -38,8 +44,132 @@ class Program:
     symbols: list      # every label's final address (for the map file)
 
 
-def link(objects):
-    """Join object files. Returns a Program; raises AsmErrors."""
+@dataclass
+class _View:
+    """The part of an object file that gets linked (all of it, unless it is a
+    library), with offsets renumbered."""
+    source: str
+    rom: list
+    ram_size: int
+    labels: dict
+    globals: list
+    externs: list
+    relocs: list
+
+
+def _parts(obj):
+    """(start, end, falls_through) for each part of an object's ROM."""
+    raw = obj.parts or [[0, True]]
+    out = []
+    for i, (start, falls) in enumerate(raw):
+        end = raw[i + 1][0] if i + 1 < len(raw) else len(obj.rom)
+        out.append((start, end, falls))
+    return out
+
+
+def _part_index(parts, offset):
+    """The part an offset is in (the end of the ROM counts as the last part)."""
+    starts = [p[0] for p in parts]
+    i = bisect.bisect_right(starts, offset) - 1
+    return max(i, 0)
+
+
+def _choose_parts(objects, libraries):
+    """For each object, the set of part indexes to link (None: the object is
+    not linked at all)."""
+    defs = {}
+    for obj in objects:
+        for name in obj.globals:
+            if name in obj.labels:
+                sec, off = obj.labels[name]
+                defs.setdefault(name, (obj, sec, off))
+    parts = {id(o): _parts(o) for o in objects}
+    kept = {id(o): set() for o in objects}
+    used = {id(o): id(o) not in libraries for o in objects}
+    work = []
+
+    def need(obj, section, offset):
+        used[id(obj)] = True
+        if id(obj) not in libraries or section != "rom":
+            return
+        i = _part_index(parts[id(obj)], offset)
+        if i not in kept[id(obj)]:
+            kept[id(obj)].add(i)
+            work.append((obj, i))
+
+    for obj in objects:
+        if id(obj) not in libraries:
+            kept[id(obj)] = set(range(len(parts[id(obj)])))
+            work.extend((obj, i) for i in kept[id(obj)])
+    if ENTRY in defs:
+        need(*defs[ENTRY])
+    while work:
+        obj, i = work.pop()
+        start, end, falls = parts[id(obj)][i]
+        if falls and i + 1 < len(parts[id(obj)]):
+            need(obj, "rom", parts[id(obj)][i + 1][0])
+        for r in obj.relocs:
+            if not start <= r.at < end:
+                continue
+            if r.symbol is None:
+                need(obj, r.section, r.addend)
+            elif r.symbol in defs:
+                target, section, offset = defs[r.symbol]
+                need(target, section, offset + r.addend)
+    return {id(o): (kept[id(o)] if used[id(o)] else None) for o in objects}
+
+
+def _view(obj, keep):
+    """The object with only the kept parts, offsets renumbered."""
+    parts = _parts(obj)
+    if keep == set(range(len(parts))):
+        return _View(obj.source, list(obj.rom), obj.ram_size, dict(obj.labels),
+                     list(obj.globals), list(obj.externs), list(obj.relocs))
+    pieces = []                       # (old start, old end, new start)
+    rom = []
+    for i, (start, end, _) in enumerate(parts):
+        if i in keep:
+            pieces.append((start, end, len(rom)))
+            rom.extend(obj.rom[start:end])
+
+    def move(offset):
+        for start, end, new in pieces:
+            if start <= offset < end or (offset == end and end == len(obj.rom)):
+                return new + offset - start
+        if offset == len(obj.rom):
+            return len(rom)
+        return None
+
+    labels = {}
+    for name, (sec, off) in obj.labels.items():
+        if sec == "ram":
+            labels[name] = (sec, off)
+        else:
+            new = move(off)
+            if new is not None:
+                labels[name] = (sec, new)
+    relocs = []
+    for r in obj.relocs:
+        at = move(r.at)
+        if at is None or not any(s <= r.at < e for s, e, _ in pieces):
+            continue
+        addend = r.addend
+        if r.symbol is None and r.section == "rom":
+            addend = move(r.addend)
+        relocs.append(type(r)(at, r.kind, r.symbol, r.section, addend, r.line, r.rom_only))
+    globals_ = [g for g in obj.globals if g in labels]
+    return _View(obj.source, rom, obj.ram_size, labels, globals_, list(obj.externs), relocs)
+
+
+def link(objects, libraries=()):
+    """Join object files. Returns a Program; raises AsmErrors.
+
+    libraries: the objects (from the list) to link as libraries: only the
+    parts the program needs."""
+    lib_ids = {id(o) for o in libraries}
+    exported = {name for o in objects for name in o.globals}   # before anything is dropped
+    keep = _choose_parts(objects, lib_ids)
+    objects = [_view(o, keep[id(o)]) for o in objects if keep[id(o)] is not None]
     errors = []
 
     # 1. Give each file its place in ROM and RAM.
@@ -114,7 +244,7 @@ def link(objects):
     #    a declared name nobody provides is a typo or a missing file.
     for obj in objects:
         for name in obj.externs:
-            if name not in table and (obj.source, name) not in reported:
+            if name not in table and name not in exported and (obj.source, name) not in reported:
                 reported.add((obj.source, name))
                 errors.append(AsmError(f"'{name}' is listed in .extern but isn't .global "
                                        "in any of the files (is its file in the list?)",

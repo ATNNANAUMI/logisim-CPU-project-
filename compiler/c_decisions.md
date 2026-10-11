@@ -99,7 +99,10 @@ The language itself is described in [`c_language.md`](c_language.md).
     `ipow` on 2026-10-11, so at least that one can't be mistaken for C's); a valid C
     program must be able to use those names.
 24. **Library files are linked only when needed**, like a static library,
-    and a program's own definition of a library function wins. The library
+    and a program's own definition of a library function wins. Within a
+    library file, only the functions and data the program uses are linked
+    (the linker's `--lib` mode; the compiler starts a `.part` at every
+    function and data object). The library
     is compiled once and cached in `compiler/ROM/libc/` (rebuilt when the
     compiler or the library changes).
 25. **stdin is line-buffered with echo and backspace editing; Ctrl-D at

@@ -183,6 +183,7 @@ assembler warns about the two easy mix-ups:
 | `.word v, ...` | one word per value (ROM only) |
 | `.string "text"` | one character per word, then a 0 word (ROM only) |
 | `.space n` | n words: zeros in ROM, reserved space in RAM |
+| `.part` | starts a new *part* here (ROM only; see section 6). Takes no space |
 
 A constant used by `.equ` or `.space` must be defined above that line.
 
@@ -207,6 +208,18 @@ RAM  0x10000 - 0x13FFF   stack (never touched by the linker)
 ```
 
 Exactly one file must define `.global start`. That's where the program begins.
+
+**Libraries.** A file given with `--lib` (section 10) is a library: only the
+functions the program uses go in. The assembler cuts each file into
+*parts*: a new part starts at every `.global` label and at every `.part`
+directive. Of a library, the linker keeps the parts the other files refer
+to (by `CALL`, a jump, `DATA label`, `.word label`...), the parts those
+refer to, and so on, plus the next part when a kept part's last instruction
+can run on into it (anything but `RJMP`, `JMRB`, `RET` or data). A private
+helper right after its function is in that function's part, so it comes
+along; put `.part` before a helper or a table that should stand alone. A
+library nobody refers to is left out entirely, RAM included. Files given
+the normal way are always linked whole.
 
 
 ## 7. Pseudo-instructions
@@ -389,6 +402,13 @@ Or do the two steps separately, for example to keep a library assembled:
 python compiler/src/asm assemble lib.asm     # writes compiler/ROM/lib.obj
 python compiler/src/asm link compiler/ROM/main.obj compiler/ROM/lib.obj -o program.rom
 python compiler/src/asm build main.asm compiler/ROM/lib.obj   # build takes .asm and .obj
+```
+
+Link only the functions you use from a library with `--lib` (repeatable;
+libraries go after the other files):
+
+```
+python compiler/src/asm build prog.asm --lib compiler/examples/stdlib/stdlib.asm
 ```
 
 Add `--map` to `build` or `link` to also write a `.map` file (next to the `.rom`) listing every

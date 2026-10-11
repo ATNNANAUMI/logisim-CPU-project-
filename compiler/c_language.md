@@ -39,7 +39,9 @@ python run.py build prog.c                         # build, then open the simula
   and R0 at the end, `--trace` prints every instruction.
 * `-I dir` adds a folder for `#include`, `-D NAME[=value]` defines a macro,
   `-w` hides warnings, `--no-libc` leaves the library and start-up code out
-  (the program then needs its own `start`).
+  (the program then needs its own `start`), `--lib FILE` links an assembly
+  (or `.obj`) library, keeping only the functions the program uses (like the
+  assembler's `--lib`).
 * On the circuit: `python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom`.
   The circuit runs about 160 instructions a second, so keep circuit runs
   small: `hello.c` takes 1 400 instructions, a `printf` with a float a few
@@ -179,9 +181,21 @@ int twice(int n);              /* in twice.asm, .global twice */
 example in both directions. The assembly standard library
 (`compiler/examples/stdlib/stdlib.asm`) is not linked into C programs: the
 C library has its own functions with the standard names. It can still be
-listed as an input, but some of its names (`abs`, `rand`, `malloc`, ...)
-are also C library names. (Its integer power function is `ipow`, so it
-doesn't clash with C's `pow`.)
+used: declare the functions you need and give the file with `--lib`, so only
+those are linked:
+
+```c
+void print_int(int n);           /* in stdlib.asm */
+int ipow(int base, int exp);
+```
+
+```
+python compiler/src/cc run prog.c --lib compiler/examples/stdlib/stdlib.asm
+```
+
+Some of its names (`abs`, `rand`, `malloc`, ...) are also C library names;
+a program that uses both gets a link error naming the clash. (Its integer
+power function is `ipow`, so it doesn't clash with C's `pow`.)
 
 
 ## 6. Machine-specific features
