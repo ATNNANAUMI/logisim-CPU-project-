@@ -26,4 +26,12 @@ int _float_digits(float x, char *digits, int max, int *point, int mode, int prec
 
 int _read_key(void);    /* wait for a key, no echo */
 
+/* what FILE is (stdio.h only names it) */
+struct _FILE {
+    int output;          /* 1 for stdout/stderr */
+    int eof;
+    int error;
+};
+
+
 #endif

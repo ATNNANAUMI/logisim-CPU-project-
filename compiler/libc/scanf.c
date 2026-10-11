@@ -362,3 +362,14 @@ int sscanf(const char *s, const char *fmt, ...)
     va_end(ap);
     return n;
 }
+
+int fscanf(FILE *stream, const char *fmt, ...)
+{
+    va_list ap;
+    int n;
+    (void)stream;
+    va_start(ap, fmt);
+    n = vscanf(fmt, ap);
+    va_end(ap);
+    return n;
+}

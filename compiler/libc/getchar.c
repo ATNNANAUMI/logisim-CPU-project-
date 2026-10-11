@@ -94,3 +94,53 @@ void _stdin_clear(void)
 {
     at_eof = 0;
 }
+
+int fgetc(FILE *stream)
+{
+    int c;
+    if (stream->output) {
+        stream->error = 1;
+        return EOF;
+    }
+    c = getchar();
+    if (c == EOF)
+        stream->eof = 1;
+    return c;
+}
+
+int getc(FILE *stream)
+{
+    return fgetc(stream);
+}
+
+char *fgets(char *buf, int size, FILE *stream)
+{
+    int n = 0;
+    if (size <= 0)
+        return 0;
+    while (n < size - 1) {
+        int c = fgetc(stream);
+        if (c == EOF)
+            break;
+        buf[n++] = c;
+        if (c == '\n')
+            break;
+    }
+    if (n == 0)
+        return 0;
+    buf[n] = 0;
+    return buf;
+}
+
+size_t fread(void *ptr, size_t size, size_t count, FILE *stream)
+{
+    char *p = ptr;
+    size_t i, n = size * count;
+    for (i = 0; i < n; i++) {
+        int c = fgetc(stream);
+        if (c == EOF)
+            break;
+        p[i] = c;
+    }
+    return size ? i / size : 0;
+}
