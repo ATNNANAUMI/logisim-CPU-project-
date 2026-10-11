@@ -94,8 +94,9 @@ The language itself is described in [`c_language.md`](c_language.md).
 
 23. **The C library is written in C (plus `runtime.asm` and
     `setjmp.asm`), and `stdlib.asm` is not linked into C programs.**
-    `stdlib.asm` exports names like `min`, `max`, `print_int` and an integer
-    `pow`, which could clash with a program's own functions; a valid C
+    `stdlib.asm` exports names like `min`, `max` and `print_int`, which
+    could clash with a program's own functions (its integer `pow` was renamed
+    `ipow` on 2026-10-11, so at least that one can't be mistaken for C's); a valid C
     program must be able to use those names.
 24. **Library files are linked only when needed**, like a static library,
     and a program's own definition of a library function wins. The library
@@ -152,10 +153,6 @@ The language itself is described in [`c_language.md`](c_language.md).
 
 ## Open questions for you
 
-* `stdlib.asm`'s `pow` works on integers while C's `pow` is a float
-  function. They only meet if a C program links `stdlib.asm` explicitly
-  (then the link fails with "pow is .global in both"). Rename the assembly
-  one (`ipow`)? Not done: it would change your existing programs.
 * 64-bit `long long` in software is possible (pairs of words, with the
   carry flag now known); it was left out as large and slow. Worth doing?
 * `project_files/` (your notes, not in git) still says the compiler isn't

@@ -649,7 +649,7 @@ python compiler/src/asm build prog.asm compiler/examples/stdlib/stdlib.asm -o pr
 | input | `read_char()` (waits for a key, **no echo**), `read_line(buf, max)` (echoes, handles backspace, keeps max−1 chars, returns the length), `read_int()`, `read_float()` |
 | strings | `str_len(addr)`, `str_copy(dst, src)` (returns the length), `str_eq(a, b)` (1/0) |
 | memory | `mem_copy(dst, src, n)`, `mem_set(dst, value, n)` |
-| int math | `abs(n)`, `min(a, b)`, `max(a, b)`, `pow(base, exp)` (exp < 0 gives 0) |
+| int math | `abs(n)`, `min(a, b)`, `max(a, b)`, `ipow(base, exp)` (exp < 0 gives 0; it was called `pow` until 2026-10-11) |
 | float math | `fabs(f)`, `fmin(a, b)`, `fmax(a, b)` |
 | conversion | `int_to_str(n, buf)` (buf: 12 words, returns the length), `str_to_int(addr)` |
 
