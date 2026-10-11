@@ -27,6 +27,8 @@ computes FP = 0x10000 + EBP once (stack slot i is RAM word 0x10000 + i).
 
 import struct
 
+import peephole
+import regalloc
 import typesys as T
 from cerror import CError, error_at
 from cparser import MASK, wrap
@@ -34,6 +36,7 @@ from nodes import Node, Obj
 
 TEMPS = list(range(1, 13))
 SCRATCH = 13
+MIN_TEMPS = 5           # registers kept for expressions; the rest can hold variables
 INT_MIN = -(1 << 31)
 UINT_MAX = MASK
 PUSH_LIMIT = 15         # frames up to this size are reserved with STK PUSHes
@@ -56,6 +59,7 @@ class Val:
 
     imm   a constant: .imm is an int (32-bit pattern) or a str (label expr)
     reg   in temporary register .reg (owned: free it when done)
+    vreg  in register .reg that belongs to a variable (read it, don't change it)
     r0    in R0 (move it out before anything else uses the ALU)
     addr  an aggregate (array/struct/function): .addr is its Addr
     void  no value
@@ -78,17 +82,22 @@ class Addr:
 
     frame   stack slot EBP + off (+ register .reg if set): STK GET/SET
     abs     memory address label + off (+ register .reg if set)
+    var     a variable that lives in register .var_reg
     """
-    __slots__ = ("kind", "reg", "off", "label")
+    __slots__ = ("kind", "reg", "off", "label", "var_reg", "owned")
 
-    def __init__(self, kind, reg=None, off=0, label=None):
+    def __init__(self, kind, reg=None, off=0, label=None, var_reg=None, owned=True):
         self.kind = kind
         self.reg = reg
         self.off = off
         self.label = label
+        self.var_reg = var_reg
+        self.owned = owned      # False: .reg is a variable's register (read only)
 
     def plus(self, n):
-        return Addr(self.kind, self.reg, self.off + n, self.label)
+        if self.kind == "var":
+            raise CError("internal error: offset from a register variable")
+        return Addr(self.kind, self.reg, self.off + n, self.label, owned=self.owned)
 
     def sym(self):
         """The constant part as assembly text."""
@@ -122,13 +131,24 @@ def has_call(node):
 
 
 def depth(node):
+    """Roughly how many registers evaluating node needs (casts between
+    integer and pointer types cost nothing)."""
     cached = getattr(node, "_depth", None)
     if cached is not None:
         return cached
-    kids = list(_children(node))
-    d = 1 + max((depth(k) for k in kids), default=0)
+    if node.kind == "cast" and _free_cast(node):
+        d = depth(node.lhs)
+    else:
+        kids = list(_children(node))
+        d = 1 + max((depth(k) for k in kids), default=0)
     node._depth = d
     return d
+
+
+def _free_cast(node):
+    a, b = node.lhs.ty, node.ty
+    return (a.is_integer or a.kind == "ptr") and (b.is_integer or b.kind == "ptr") \
+        and b.kind != "bool"
 
 
 def _children(node):
@@ -141,12 +161,23 @@ def _children(node):
             yield a
 
 
+class OutOfRegisters(Exception):
+    """An expression needed more temporaries than there were; the function
+    is generated again with fewer register variables."""
+
+    def __init__(self, error):
+        super().__init__(str(error))
+        self.error = error
+
+
 class CodeGen:
     def __init__(self, program, unit, source=None):
         self.program = program
         self.unit = unit                # a name for this file's init routine
         self.lines = []                 # the finished output
         self.code = None                # the current function body: list of tuples
+        self.temps = list(TEMPS)        # registers for expression temporaries
+        self.var_regs = {}              # variable -> the register it lives in
         self.free = []
         self.used_labels = set()        # labels this file refers to
         self.defined = set()            # labels this file defines
@@ -183,16 +214,16 @@ class CodeGen:
     # ================================================================ registers
     def alloc(self, node=None):
         if not self.free:
-            raise self.error(node, "expression too complex: out of registers")
+            raise OutOfRegisters(self.error(node, "expression too complex: out of registers"))
         return self.free.pop(0)
 
     def release(self, reg):
-        if reg is not None and reg not in self.free and 1 <= reg <= 12:
+        if reg is not None and reg not in self.free and reg in self.temps:
             self.free.append(reg)
             self.free.sort()
 
     def live(self):
-        return [r for r in TEMPS if r not in self.free]
+        return [r for r in self.temps if r not in self.free]
 
     def free_val(self, v):
         if v is None:
@@ -203,7 +234,7 @@ class CodeGen:
             self.free_addr(v.addr)
 
     def free_addr(self, a):
-        if a is not None and a.reg is not None:
+        if a is not None and a.reg is not None and a.owned:
             self.release(a.reg)
 
     def imm_text(self, imm, flt=False):
@@ -222,7 +253,7 @@ class CodeGen:
         """An ALU right operand: Rn or #value."""
         if v.kind == "imm":
             return "#" + self.imm_text(v.imm, v.flt)
-        if v.kind == "reg":
+        if v.kind in ("reg", "vreg"):
             return f"R{v.reg}"
         if v.kind == "r0":
             return "R0"
@@ -236,9 +267,15 @@ class CodeGen:
 
     def to_reg(self, v, node=None):
         """Move v into a temporary register and return its number. v itself
-        is updated to say so: free it with free_val(v) or release(reg), once."""
+        is updated to say so: free it with free_val(v) or release(reg), once.
+        (A variable's register is copied: the caller may change the copy.)"""
         if v.kind == "reg":
             return v.reg
+        if v.kind == "vreg":
+            r = self.alloc(node)
+            self.ins("CPY", f"R{v.reg}", f"R{r}")
+            v.kind, v.reg = "reg", r
+            return r
         if v.kind == "addr":
             m = self.materialize(v.addr, node)
             v.kind, v.reg, v.imm, v.addr = m.kind, m.reg, m.imm, None
@@ -259,7 +296,7 @@ class CodeGen:
             return
         if v.kind == "imm":
             self.ins("DATA", "R0", self.imm_text(v.imm, v.flt))
-        elif v.kind == "reg":
+        elif v.kind in ("reg", "vreg"):
             self.ins("CPY", f"R{v.reg}", "R0")
             self.release(v.reg)
         elif v.kind == "addr":
@@ -270,10 +307,12 @@ class CodeGen:
         v.kind, v.reg, v.imm, v.addr = "r0", None, None, None
 
     def reg_name(self, v):
-        """The name of a register holding v (R0 allowed; constants get a
-        temporary register, recorded in v)."""
+        """The name of a register holding v, for reading (R0 allowed; a
+        variable's own register; constants get a temporary, recorded in v)."""
         if v.kind == "r0":
             return "R0"
+        if v.kind == "vreg":
+            return f"R{v.reg}"
         return f"R{self.to_reg(v)}"
 
     # ================================================================ program
@@ -427,9 +466,25 @@ class CodeGen:
 
     # ================================================================ functions
     def gen_function(self, fn):
+        analysis = regalloc.Analysis(fn)
+        wanted = regalloc.candidates(fn, analysis)
+        n = min(len(wanted), len(TEMPS) - MIN_TEMPS)
+        while True:
+            try:
+                return self.gen_function_with(fn, analysis, wanted[:n])
+            except OutOfRegisters as e:
+                if n == 0:
+                    raise e.error from None
+                n = max(0, n - 2)
+
+    def gen_function_with(self, fn, analysis, regvars):
         self.fn = fn
+        self.analysis = analysis
+        self.call_pos = {id(node): pos for node, pos in analysis.calls}
+        self.var_regs = {v: 12 - i for i, v in enumerate(regvars)}
+        self.temps = list(range(1, 13 - len(regvars)))
         self.code = []
-        self.free = list(TEMPS)
+        self.free = list(self.temps)
         self.frame = 0                  # words of frame used above EBP
         self.fp_slot = None
         self.va_count = None
@@ -449,6 +504,9 @@ class CodeGen:
         for var in fn.locals:
             if var.is_param or var in params:
                 continue
+            if var in self.var_regs:
+                var.offset = None        # a stack slot only if a call needs one
+                continue
             var.offset = self.frame + 1
             self.frame += max(var.ty.size, 0)
 
@@ -464,12 +522,21 @@ class CodeGen:
         self.comment_header(fn)
         self.label(fn.asm_name)
         self.prologue()
+        for var, r in sorted(self.var_regs.items(), key=lambda item: -item[1]):
+            if var.is_param:
+                self.ins("DATA", f"R{SCRATCH}", str(var.offset))
+                self.ins("STK", "GET", f"R{SCRATCH}")
+                self.ins("CPY", "R0", f"R{r}")
+        if self.var_regs:
+            self.comment("in registers: " + ", ".join(
+                f"{v.name or 'param'}=R{r}" for v, r in sorted(self.var_regs.items(),
+                                                              key=lambda item: -item[1])))
         prologue = self.code
         self.code = []
         self.label(self.ret_label)
         self.ins("RET")
         epilogue = self.code
-        return self.format(prologue + body + epilogue)
+        return self.format(peephole.optimize(prologue + body + epilogue))
 
     def comment_header(self, fn):
         self.raw("")
@@ -636,9 +703,12 @@ class CodeGen:
             self.label(node.label)
             self.gen_stmt(node.lhs)
         elif k == "asm":
+            keep, _ = self.vars_across(node)
+            saved = self.save_live([self.var_regs[v] for v in keep])
             for line in node.text.splitlines():
                 self.raw(line if line.startswith((" ", "\t")) or line.endswith(":")
                          else "        " + line.strip())
+            self.restore_live(saved)
         else:
             raise self.error(node, f"internal error: unknown statement '{k}'")
 
@@ -653,7 +723,23 @@ class CodeGen:
         return node.kind == "num" and (node.val != 0)
 
     def discard(self, node):
-        v = self.gen(node)
+        """Evaluate an expression for its effects only."""
+        k = node.kind
+        if k in ("preinc", "predec", "postinc", "postdec"):
+            v = self.gen_incdec(node, want=False)
+        elif k == "assign":
+            v = self.gen_assign(node, want=False)
+        elif k == "assign_op":
+            v = self.gen_assign_op(node, want=False)
+        elif k == "comma":
+            self.discard(node.lhs)
+            self.discard(node.rhs)
+            return
+        elif k == "cast" and node.ty.is_void:
+            self.discard(node.lhs)
+            return
+        else:
+            v = self.gen(node)
         self.free_val(v)
 
     def gen_return(self, node):
@@ -800,9 +886,27 @@ class CodeGen:
         self.free_val(v)
         self.ins("RJNF" if when else "RJF", "Z", label)
 
+    def is_free(self, node):
+        """Does evaluating node emit no code? (A constant or a register variable.)"""
+        k = node.kind
+        if k == "num":
+            return True
+        if k == "var":
+            return node.var in self.var_regs
+        if k == "cast" and _free_cast(node):
+            return self.is_free(node.lhs)
+        return False
+
     def operands(self, lhs, rhs):
         """Evaluate two operands; the one with calls (or the deeper one) first,
-        so fewer registers are live across calls."""
+        so fewer registers are live across calls. An operand that needs no
+        code goes last, so the other may stay in R0."""
+        if self.is_free(rhs):
+            a = self.gen(lhs)
+            return a, self.gen(rhs)
+        if self.is_free(lhs):
+            b = self.gen(rhs)
+            return self.gen(lhs), b
         if (has_call(rhs) and not has_call(lhs)) or \
                 (has_call(rhs) == has_call(lhs) and depth(rhs) > depth(lhs) + 1):
             b = self.hold(self.gen(rhs), rhs)
@@ -1019,6 +1123,8 @@ class CodeGen:
         k = node.kind
         if k == "var":
             var = node.var
+            if var in self.var_regs:
+                return Addr("var", var_reg=self.var_regs[var])
             if var.is_local:
                 return Addr("frame", off=var.offset)
             self.use(var.asm_name)
@@ -1082,6 +1188,8 @@ class CodeGen:
             return Addr("abs", reg=self.to_reg(v, node))
         if v.kind == "addr":
             return v.addr
+        if v.kind == "vreg":                     # a pointer variable: use its register
+            return Addr("abs", reg=v.reg, owned=False)
         r = self.to_reg(v, node)
         return Addr("abs", reg=r)
 
@@ -1090,15 +1198,28 @@ class CodeGen:
         if iv.kind == "imm" and isinstance(iv.imm, int):
             return base.plus(signed(iv.imm))
         if base.reg is None:
+            if iv.kind == "vreg":                # an index variable: use its register
+                return Addr(base.kind, reg=iv.reg, off=base.off, label=base.label, owned=False)
             r = self.to_reg(iv, node)
             return Addr(base.kind, reg=r, off=base.off, label=base.label)
         self.ins("ADD", f"R{base.reg}", self.operand(iv))
         self.free_val(iv)
-        self.ins("CPY", "R0", f"R{base.reg}")
-        return base
+        return self.own(base, node)
+
+    def own(self, base, node=None):
+        """After an ALU op left base's new register value in R0: put it in a
+        register base owns."""
+        if base.owned:
+            self.ins("CPY", "R0", f"R{base.reg}")
+            return base
+        r = self.alloc(node)
+        self.ins("CPY", "R0", f"R{r}")
+        return Addr(base.kind, reg=r, off=base.off, label=base.label)
 
     def materialize(self, addr, node=None):
         """An Addr as a pointer value."""
+        if addr.kind == "var":
+            raise self.error(node, "internal error: the address of a register variable")
         if addr.kind == "abs":
             if addr.reg is None:
                 if addr.label is not None:
@@ -1108,18 +1229,23 @@ class CodeGen:
             if addr.label is not None:
                 self.ins("DATA", f"R{SCRATCH}", addr.sym())
                 self.ins("ADD", f"R{r}", f"R{SCRATCH}")
-                self.ins("CPY", "R0", f"R{r}")
             elif addr.off:
                 self.ins("ADD", f"R{r}", f"#{signed(addr.off)}")
+            elif not addr.owned:
+                return Val("vreg", reg=r)
+            else:
+                return Val("reg", reg=r)
+            if addr.owned:
                 self.ins("CPY", "R0", f"R{r}")
-            return Val("reg", reg=r)
+                return Val("reg", reg=r)
+            return Val("r0")
         # a frame slot: FP + index
         self.load_fp()
         if addr.reg is not None:
             self.ins("ADD", "R0", f"R{addr.reg}")
         if addr.off:
             self.ins("ADD", "R0", f"#{signed(addr.off)}")
-        if addr.reg is not None:
+        if addr.reg is not None and addr.owned:
             self.ins("CPY", "R0", f"R{addr.reg}")
             return Val("reg", reg=addr.reg)
         return Val("r0")
@@ -1139,6 +1265,8 @@ class CodeGen:
 
     def load(self, addr, ty):
         """Load the scalar at addr. The Addr's register is freed."""
+        if addr.kind == "var":
+            return Val("vreg", reg=addr.var_reg)
         if addr.kind == "frame":
             idx = self.frame_index(addr)
             self.ins("STK", "GET", idx)
@@ -1150,15 +1278,21 @@ class CodeGen:
             self.ins("LD", f"R{SCRATCH}", f"R{r}")
             return Val("reg", reg=r)
         if addr.label is None and addr.off == 0:
-            self.ins("LD", f"R{addr.reg}", f"R{addr.reg}")
-            return Val("reg", reg=addr.reg)
+            if addr.owned:
+                self.ins("LD", f"R{addr.reg}", f"R{addr.reg}")
+                return Val("reg", reg=addr.reg)
+            r = self.alloc()
+            self.ins("LD", f"R{addr.reg}", f"R{r}")
+            return Val("reg", reg=r)
         self.ins("DATA", f"R{SCRATCH}", addr.sym())
         self.ins("ALD", f"R{addr.reg}", f"R{SCRATCH}")
-        self.release(addr.reg)
+        self.free_addr(addr)
         return Val("r0")
 
     def load_keep(self, addr, ty):
         """Load without giving up the Addr's register (for read-modify-write)."""
+        if addr.kind == "var":
+            return Val("vreg", reg=addr.var_reg)
         if addr.kind == "frame":
             idx = self.frame_index(addr)
             self.ins("STK", "GET", idx)
@@ -1178,6 +1312,14 @@ class CodeGen:
     def store(self, addr, v):
         """Store a scalar value at addr. Returns the value (now in R0 or its
         register). The Addr's register is kept: free it yourself."""
+        if addr.kind == "var":
+            r = addr.var_reg
+            if v.kind == "imm":
+                self.ins("DATA", f"R{r}", self.imm_text(v.imm, v.flt))
+            elif not (v.kind == "vreg" and v.reg == r):
+                self.ins("CPY", self.reg_name(v), f"R{r}")
+                self.free_val(v)
+            return Val("vreg", reg=r)
         if addr.kind == "frame":
             if addr.reg is not None and addr.off != 0:
                 v = self.hold(v)
@@ -1560,7 +1702,7 @@ class CodeGen:
         return Val("r0")
 
     # ---------------------------------------------------------------- assignment
-    def gen_assign(self, node):
+    def gen_assign(self, node, want=True):
         lhs, rhs = node.lhs, node.rhs
         ty = lhs.ty
         if ty.is_struct:
@@ -1579,16 +1721,21 @@ class CodeGen:
             out = self.store_bitfield(addr, lhs.member, v, node)
             self.free_addr(addr)
             return out
-        if self.simple_addr(lhs) or has_call(rhs):
+        if self.simple_addr(lhs):
+            v = self.gen(rhs)                    # the address needs no code: R0 is safe
+            addr = self.gen_addr(lhs)
+        elif has_call(rhs):
             v = self.hold(self.gen(rhs), rhs)
             addr = self.gen_addr(lhs)
         else:
             addr = self.gen_addr(lhs)
             v = self.gen(rhs)
         out = self.store(addr, v)
-        out = self.hold(out, node) if out.kind == "r0" else out
         self.free_addr(addr)
-        return out
+        if not want:
+            self.free_val(out)
+            return Val("void")
+        return self.hold(out, node)
 
     def simple_addr(self, node):
         """An lvalue whose Addr needs no registers and no code."""
@@ -1598,7 +1745,7 @@ class CodeGen:
             return self.simple_addr(node.lhs)
         return False
 
-    def gen_assign_op(self, node):
+    def gen_assign_op(self, node, want=True):
         lhs = node.lhs
         ty = lhs.ty
         if lhs.kind == "member" and lhs.member.is_bitfield:
@@ -1631,9 +1778,11 @@ class CodeGen:
         if addr.kind == "frame" and addr.reg is not None and addr.off != 0:
             res = self.hold(res, node)
         out = self.store(addr, res)
-        out = self.hold(out, node) if out.kind == "r0" else out
         self.free_addr(addr)
-        return out
+        if not want:
+            self.free_val(out)
+            return Val("void")
+        return self.hold(out, node)
 
     def to_bool(self, v, node):
         r = self.reg_name(v)
@@ -1647,11 +1796,34 @@ class CodeGen:
         self.label(skip)
         return Val("reg", reg=t)
 
-    def gen_incdec(self, node):
+    def gen_incdec(self, node, want=True):
         lhs = node.lhs
         ty = lhs.ty
         pre = node.kind in ("preinc", "predec")
         up = node.kind in ("preinc", "postinc")
+        if not want and not (lhs.kind == "member" and lhs.member.is_bitfield):
+            # only the new value matters: no copy of the old one
+            addr = self.gen_addr(lhs)
+            cur = self.load_keep(addr, ty)
+            if addr.kind == "frame" and addr.reg is not None and addr.off != 0:
+                cur = self.hold(cur, node)
+            name = self.reg_name(cur)
+            if ty.is_float:
+                self.ins("FADD" if up else "FSUB", name, "#1.0")
+            elif ty.kind == "bool":
+                if up:
+                    self.ins("DATA", "R0", "1")
+                else:
+                    self.ins("XOR", name, "#1")
+            elif node.step == 1:
+                self.ins("++" if up else "--", name)
+            else:
+                self.ins("ADD" if up else "SUB", name, f"#{node.step}")
+            self.free_val(cur)
+            out = self.store(addr, Val("r0"))
+            self.free_val(out)
+            self.free_addr(addr)
+            return Val("void")
         if lhs.kind == "member" and lhs.member.is_bitfield:
             addr = self.gen_addr(lhs.lhs).plus(lhs.member.offset)
             old = self.hold(self.load_bitfield(addr, lhs.member, node), node)
@@ -1726,20 +1898,43 @@ class CodeGen:
         return Val("reg", reg=r)
 
     # ---------------------------------------------------------------- calls
-    def save_live(self):
-        regs = self.live()
+    def save_live(self, var_regs=()):
+        """SAVE the live temporaries (and these variable registers) before a
+        call; the temporaries are free for the call's arguments."""
+        temps = self.live()
+        regs = sorted(set(temps) | set(var_regs))
         if regs:
             self.ins("SAVE", *[f"R{r}" for r in regs])
-            for r in regs:
+            for r in temps:
                 self.release(r)
-        return regs
+        return temps, regs
 
-    def restore_live(self, regs):
+    def restore_live(self, saved):
+        temps, regs = saved
         if regs:
-            for r in regs:
+            for r in temps:
                 if r in self.free:
                     self.free.remove(r)
             self.ins("RESTORE", *[f"R{r}" for r in regs])
+
+    def vars_across(self, node):
+        """Register variables a call (or asm statement) must keep: (kept with
+        SAVE/RESTORE, kept in their stack slot because the call's own
+        arguments change them)."""
+        if not self.var_regs:
+            return [], []
+        pos = self.call_pos.get(id(node))
+        live = [v for v in self.var_regs
+                if pos is None or self.analysis.live_at(v, pos)]
+        changed = regalloc.assigned_vars(node, self.var_regs) if node.kind == "funcall" else set()
+        keep = [v for v in live if v not in changed]
+        spill = [v for v in live if v in changed]
+        return keep, spill
+
+    def var_slot(self, var):
+        if var.offset is None:
+            var.offset = self.alloc_slot()
+        return var.offset
 
     def push(self, v):
         self.to_r0(v)
@@ -1760,7 +1955,8 @@ class CodeGen:
 
     def gen_call(self, node):
         fty = node.func_ty
-        saved = self.save_live()
+        keep, spill = self.vars_across(node)
+        saved = self.save_live([self.var_regs[v] for v in keep])
         nfixed = len(fty.params)
         pushed = 0
         fixed_args = node.args[:nfixed] if fty.variadic else node.args
@@ -1779,24 +1975,26 @@ class CodeGen:
             self.ins("STK", "PUSH")
             pushed += 1
         f = node.func
-        if f.kind == "var" and f.var.is_function:
+        direct = f.kind == "var" and f.var.is_function
+        if not direct:
+            fv = self.gen(f)
+            fr = self.to_reg(fv, node) if fv.kind != "addr" else \
+                self.to_reg(self.materialize(fv.addr, node), node)
+        for v in spill:                          # changed by the arguments: keep in memory
+            self.ins("CPY", f"R{self.var_regs[v]}", "R0")
+            self.ins("DATA", f"R{SCRATCH}", str(self.var_slot(v)))
+            self.ins("STK", "SET", f"R{SCRATCH}")
+        if direct:
             self.use(f.var.asm_name)
             self.ins("CALL", f.var.asm_name, str(pushed)) if pushed else \
                 self.ins("CALL", f.var.asm_name)
         else:
-            fv = self.gen(f)
-            if fv.kind == "imm":
-                r = self.to_reg(fv, node)
-            elif fv.kind == "addr":
-                r = self.to_reg(self.materialize(fv.addr, node), node)
-            else:
-                r = self.to_reg(fv, node)
             back = self.new_label()
             self.ins("DATA", "R0", back)
             self.ins("STK", "PUSH")
             self.ins("STK", "CALL")
-            self.ins("JMRB", f"R{r}")
-            self.release(r)
+            self.ins("JMRB", f"R{fr}")
+            self.release(fr)
             self.label(back)
             if pushed:
                 self.ins("CPY", "R0", "R15")
@@ -1804,6 +2002,13 @@ class CodeGen:
                     self.ins("STK", "POP")
                 self.ins("CPY", "R15", "R0")
         self.restore_live(saved)
+        if spill:
+            self.ins("CPY", "R0", "R15")         # keep the result
+            for v in spill:
+                self.ins("DATA", f"R{SCRATCH}", str(self.var_slot(v)))
+                self.ins("STK", "GET", f"R{SCRATCH}")
+                self.ins("CPY", "R0", f"R{self.var_regs[v]}")
+            self.ins("CPY", "R15", "R0")
         if node.ret_buf is not None:
             return Val("addr", addr=Addr("frame", off=node.ret_buf.offset))
         if node.ty.is_void:

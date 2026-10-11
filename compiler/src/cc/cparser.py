@@ -1820,11 +1820,18 @@ class Parser:
         """Convert expr to ty (no-op casts are still recorded; folding
         removes the trivial ones)."""
         ty = T.unqualified(ty)
-        if expr.ty is ty:
+        if expr.ty is ty or self.same_type(expr.ty, ty):
             return expr
         node = Node("cast", t or expr.tok, lhs=expr)
         node.ty = ty
         return self.fold(node)
+
+    @staticmethod
+    def same_type(a, b):
+        """Arithmetic types that are the same apart from qualifiers: a cast
+        between them changes nothing."""
+        return (a.is_arith and a.kind == b.kind and a.unsigned == b.unsigned
+                and not a.is_const and not a.is_volatile)
 
     def arith_operands(self, lhs, rhs, t, what):
         if not lhs.ty.is_arith or not rhs.ty.is_arith:
