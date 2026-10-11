@@ -134,7 +134,8 @@ The language itself is described in [`c_language.md`](c_language.md).
   stack slot `i` is RAM `0x10000 + i`, `FCMP`'s A flag is a float compare.
 * `diag14`/`diag15`: float special cases (division by zero, NaN, INT out of
   range); see `TECHNICAL.md` section 8.
-* `compiler/examples/c/circuit_test.c` passes on the circuit.
+* `compiler/examples/c/circuit_test.c` passes on the circuit, and eight of
+  the test programs print exactly gcc's output there (2026-10-11).
 
 ## Guesses (not measured)
 
