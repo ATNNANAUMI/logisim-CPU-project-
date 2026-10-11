@@ -191,6 +191,12 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 | `0x5C` | text display (TTY) | prints the low 7 bits as ASCII; `0x0A` newline, `0x08` backspace |
 | `0x3C` | number display | latches the 32-bit word and shows it on 8 hex digits (the simulator shows it in the window, and as `HEX DISPLAY:` in headless output) |
 | `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08` |
+| `0x6C` | RGB screen (*planned wiring*) | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; on the 128×128 RGB Video only the low 7 bits of x and y are wired. Write-only |
+| `0x6D` | RGB screen clear (*planned*) | any word pulses the RGB Video's reset: all black |
+
+The RGB Video component is in `PC` but not wired yet; `0x6C`/`0x6D` are the
+wiring chosen for it (2026-10-11). The simulator and `gfx.h` follow it; the
+numbers are `VIDEO_*` in `config.py` and `GFX_*` in `gfx.h`.
 
 Each device compares the 8 low bits of the selected address against its own
 number with a gate decoder (the keyboard: bits 0–3 must be 0, bits 4–7 must
@@ -354,12 +360,12 @@ modules import each other by plain name, so run them as scripts
 | `isa.py` | opcode tables, `decode(word) -> Instr`, `disassemble(word, operand)`. `Instr.takes_operand` says whether a literal word follows |
 | `alu.py` | `int_op(name, a, b)` and `float_op(name, a, b)`, each returning `(R0 value, flag nibble)`; float32 ↔ bits helpers |
 | `memory.py` | `Memory` with two 64K banks, `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
-| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes), `Keyboard` (a deque; empty reads 0), `DeviceBus` (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
+| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes), `Keyboard` (a deque; empty reads 0), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `DeviceBus` (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()`, `reset()`, `resume()` |
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 15 checks on the core |
+| `selftest.py` | 16 checks on the core |
 
 ### 3.2 Execution model
 
@@ -379,7 +385,7 @@ ALU instructions call `alu.int_op` or `alu.float_op` with `a = R[RA]` and
 ### 3.3 Running it
 
 ```
-python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--trace] [--keys TEXT]
+python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--trace] [--keys TEXT] [--screen FILE.png]
 ```
 
 * without `--headless`: opens the window with the ROM loaded
@@ -387,6 +393,8 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
   prints the state, the registers and the display
 * `--trace`: prints every executed instruction (headless only)
 * `--keys`: preloads the keyboard buffer (use `$'...\n'` in bash for Enter)
+* `--screen FILE.png`: saves the RGB screen at the end (headless only; drawn
+  at twice the size)
 
 **The window:**
 
@@ -396,8 +404,9 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
   selected devices, instruction count, measured rate, run state)
 * middle: ROM and RAM tabs, 256 words per page, with optional disassembly and
   "follow IAR"; and a C source tab (below)
-* right: the display (`0x5C`), the keyboard field (`0xF0`), and the last
-  executed instructions
+* right: the display (`0x5C`) and the RGB screen (`0x6C`, a tab that comes
+  forward when a program first draws), the hex display, the keyboard field
+  (`0xF0`), and the last executed instructions
 
 Editing: type into any register/IAR/ESP/EBP box and press Enter, click the
 flags, or double-click a memory word. Values accept `0x1F`, `31`, `-5`,
@@ -718,6 +727,7 @@ line is empty (so it can't erase the prompt).
 | `tests/io_test.asm` | minimal keyboard → display loop for probing the circuit |
 | `c/hello.c` | C: `printf("hello, world\n")` |
 | `c/primes.c` | C: a sieve, `printf` with a width, the hex display (`cpu.h`) |
+| `c/gfx_demo.c` | C: the RGB screen with `gfx.h`: gradient, text, shapes, a sine wave (`--screen` saves the picture) |
 | `c/structs.c` | C: an array of structs, `qsort`, `malloc`, `printf("%.2f")` |
 | `c/guess.c` | C: guess the number with `scanf`; seeded by how long the first key takes (`key_pressed`); the header has a transcript |
 | `c/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
@@ -809,7 +819,7 @@ python compiler/src/asm/selftest.py   # 19 checks: encodings, values, strings, j
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 15 checks: immediates, flags, carry flag, DIV by 0, RAM,
+python cpu_sim/src/selftest.py        # 16 checks: immediates, flags, carry flag, DIV by 0, RAM,
                                       # ROM writes, stack, frames, floats, FCMP flags,
                                       # keyboard, backspace, ADDR/JMRB, float specials
 python compiler/src/cc/selftest.py    # 14 checks: preprocessor, error messages (several per run), warnings,
@@ -843,6 +853,7 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | carry flag | as in 1.5 | confirmed (`diag12.asm`, `diag13.asm`, 2026-10-10). The simulator used to set C on `SUB`/`CMP` when there was *no* borrow, and on `MULT` overflow; it now matches the circuit |
 | float division by zero, NaN, `INT` out of range | as in 1.5 | confirmed (`diag14.asm`, `diag15.asm`, 2026-10-10). The simulator used to give `0.0/0.0 = +inf`, `1.0/-0.0 = +inf` and `INT(inf) = 0`; it now matches the circuit |
 | number display `0x3C` | shows the last word sent (window and headless output) | 8 hex digits in `PC` |
+| RGB screen `0x6C`/`0x6D` | 128×128 RGB565, the "RGB screen" tab, `--screen` | RGB Video in `PC`, not wired yet |
 | timing | one instruction per step | several clock cycles per instruction (stepper) |
 
 ---
@@ -888,7 +899,7 @@ how the compiler works.
 ```
 python compiler/src/cc compile prog.c [-o prog.asm]                 # C -> assembly
 python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map] [--no-libc] [--lib x.asm]
-python compiler/src/cc run   prog.c [...] [--keys TEXT] [--steps N] [--stats] [--trace]
+python compiler/src/cc run   prog.c [...] [--keys TEXT] [--steps N] [--stats] [--trace] [--screen FILE.png]
         common options: -I dir, -D NAME[=value], -w (no warnings)
 ```
 
@@ -1021,7 +1032,8 @@ leads to after an unconditional jump.
 
 `compiler/libc/` holds the headers (`include/`), the library in C (one file
 per group of functions: `printf.c`, `format.c`, `fdigits.c`, `scanf.c`,
-`string.c`, `malloc.c`, `math.c`, ...), `local.h` (shared by the library
+`string.c`, `malloc.c`, `math.c`, `gfx.c` and `gfx_text.c` for the RGB
+screen, ...), `local.h` (shared by the library
 files only) and two assembly files: `runtime.asm` (`_pow2`, `_udiv`,
 `_umod`, `_Exit`) and `setjmp.asm`.
 

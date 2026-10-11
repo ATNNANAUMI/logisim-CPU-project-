@@ -20,7 +20,9 @@ circuit.
 picks RAM (`0x10000`–`0x1FFFF`) over ROM (`0x00000`–`0x0FFFF`), four flags
 (`C A N Z`), a hardware stack in the first 16K words of RAM, integer and
 IEEE-754 float ALUs, and I/O through a single `COMM` instruction: a text
-display at `0x5C`, a hex number display at `0x3C` and a keyboard at `0xF0`.
+display at `0x5C`, a hex number display at `0x3C` and a keyboard at `0xF0`
+(plus a 128×128 RGB screen at `0x6C`, wiring planned; the simulator and C's
+`gfx.h` already use it).
 Every ALU result goes to **R0**.
 
 ## Requirements

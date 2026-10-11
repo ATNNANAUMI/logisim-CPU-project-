@@ -61,7 +61,7 @@ logisim-CPU-project-/
 │   │   ├── selftest.py       14 checks (incl. every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
 │   │                         fuzz.py: random programs, gcc vs tiny C
-│   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, ...),
+│   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod, _Exit), setjmp.asm
 │   ├── examples/
 │   │   ├── programs/         hello, print_a-z, count_0-9, sum_1-10, abs_value, stack_reverse, echo (no stdlib); guess, untested (with stdlib)
@@ -70,7 +70,7 @@ logisim-CPU-project-/
 │   │   ├── stdlib/stdlib_input_demo.asm  read_line / read_int / read_float / read_char
 │   │   ├── stdlib/stdlib_more_demo.asm   the functions added 2026-10-03 (no typing, no hex display)
 │   │   ├── two_files/main.asm, lib.asm   multi-file linking example
-│   │   ├── c/                C examples: hello, primes, structs, guess (input); circuit_test (self-checking, for the circuit)
+│   │   ├── c/                C examples: hello, primes, structs, guess (input), gfx_demo (RGB screen); circuit_test (self-checking, for the circuit)
 │   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
 │   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag),
 │   │                         diag14, diag15 (float division by zero, NaN, INT out of range)
@@ -83,12 +83,12 @@ logisim-CPU-project-/
     │   ├── isa.py            decode(), disassemble(), opcode tables
     │   ├── alu.py            int_op(), float_op() → (R0 value, flags)
     │   ├── memory.py         ROM/RAM banks, v2.0 raw loader
-    │   ├── devices.py        Display (0x5C), Keyboard (0xF0, empty reads 0), DeviceBus (+ hex display value, 0x3C)
+    │   ├── devices.py        Display (0x5C), Keyboard (0xF0, empty reads 0), Video (RGB 0x6C, clear 0x6D), DeviceBus (+ hex display value, 0x3C)
     │   ├── cpu.py            CPU: step(), run(), reset(), stack ops, COMM
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
-    │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG]`
-    │   └── selftest.py       15 checks
+    │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png]`
+    │   └── selftest.py       16 checks
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -141,7 +141,9 @@ The design follows the "But How Do It Know?" style: a single bus,
   (no jump). `STK SET/GET, RB` = `stack[EBP+RB]`; on the circuit that sum
   wraps across the whole RAM (EBP=0, RB=-1 → last RAM word `0x1FFFF`).
 * `COMM INDATA|INADDR|OUTDATA|OUTADDR, RB`. Display `0x5C`, number display
-  `0x3C`, keyboard `0xF0` (empty reads 0).
+  `0x3C`, keyboard `0xF0` (empty reads 0). RGB screen (planned wiring, in
+  the simulator and `gfx.h`): `0x6C` one pixel per word (x bits 31–24, y
+  23–16, RGB565 15–0), `0x6D` clears.
 
 ## Assembler conventions
 

@@ -22,6 +22,15 @@ DISPLAY_ADDR = 0x5C
 HEX_DISPLAY_ADDR = 0x3C       # 8-digit hex display: shows the last word sent
 KEYBOARD_ADDR = 0xF0           # its decoder wants bits 0-3 = 0, bits 4-7 = 1
 
+# RGB Video (565 colour). Planned wiring, not yet on the circuit: each word
+# sent to VIDEO_ADDR is one pixel, x in bits 31-24, y in 23-16, colour in
+# 15-0; only the low bits of x and y that fit the screen are wired. Any word
+# sent to VIDEO_CLEAR_ADDR pulses the component's reset (all black).
+VIDEO_ADDR = 0x6C
+VIDEO_CLEAR_ADDR = 0x6D
+VIDEO_WIDTH = 128              # powers of two (the extra x/y bits are not wired)
+VIDEO_HEIGHT = 128
+
 # ------------------------------------------------------------------ TWEAKS
 # A flag = "RA > RB".  Signed compare (True) or unsigned magnitude (False)?
 # Confirmed: signed.

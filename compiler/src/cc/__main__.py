@@ -57,6 +57,8 @@ def main(argv=None):
             p.add_argument("--trace", action="store_true", help="print every instruction")
             p.add_argument("--stats", action="store_true",
                            help="print the instruction count and the registers at the end")
+            p.add_argument("--screen", default="", metavar="FILE.png",
+                           help="save the RGB screen (gfx.h) as a PNG at the end")
 
     args = cli.parse_args(argv)
     warn = None if args.no_warn else driver.print_warning
@@ -86,6 +88,8 @@ def main(argv=None):
         sys.stdout.write(text)
         if text and not text.endswith("\n"):
             sys.stdout.write("\n")
+        if args.screen:
+            Path(args.screen).write_bytes(cpu.bus.video.png(scale=2))
         if not cpu.halted:
             print(f"--- stopped after {cpu.instructions} instructions without halting ---",
                   file=sys.stderr)

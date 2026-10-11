@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # three self-check suites (assembler 19, simulator 15, C compiler 14), then check_docs.py
+python run.py test                                   # three self-check suites (assembler 19, simulator 16, C compiler 14), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (~40 s: runs every test program)
@@ -24,7 +24,7 @@ python -c "import sys; sys.path.insert(0,'compiler/src/cc'); import selftest; se
 python compiler/src/asm build prog.asm compiler/examples/stdlib/stdlib.asm [-o name.rom] [--map]
 python compiler/src/asm build prog.asm --lib compiler/examples/stdlib/stdlib.asm   # link only the stdlib functions used
 python cpu_sim/src/main.py compiler/ROM/prog.rom                             # GUI
-python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 [--trace] [--keys $'text\n']
+python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 [--trace] [--keys $'text\n'] [--screen out.png]
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom [--seconds N]   # real circuit, headless
 
 python compiler/src/cc run prog.c [--keys $'text\n'] [--stats]       # C: build + run in the simulator
