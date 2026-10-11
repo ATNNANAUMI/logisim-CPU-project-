@@ -1008,10 +1008,13 @@ files only) and two assembly files: `runtime.asm` (`_pow2`, `_udiv`,
   would have a `<name>.keys` file and a hand-written `.expected` (the echo
   of typed keys makes gcc's output differ).
 * `python compiler/src/cc/tests/fuzz.py [--count N] [--seed S]` writes
-  random programs free of undefined behaviour (unsigned arithmetic, masked
-  shift counts, divisors that can't be 0, loops, switches, arrays, struct
-  members, calls between functions), builds each with gcc and with this
-  compiler and compares their checksums; a program that differs is saved in
-  `compiler/ROM/fuzz/`. 230 programs agreed on 2026-10-11.
+  random programs free of undefined behaviour and of unspecified evaluation
+  order (unsigned arithmetic, masked shift counts, divisors that can't be 0;
+  loops, switches, arrays, struct members, a local array whose address is
+  taken, a global pointer, structs by value, calls between functions; floats
+  kept in range and printed as bits), builds each with gcc and with this
+  compiler and compares their output; programs gcc's sanitizer objects to
+  are skipped, one that differs is saved in `compiler/ROM/fuzz/`. 246
+  programs with floats and pointers agreed on 2026-10-11.
 * `compiler/examples/c/circuit_test.c` runs the compiler's tricky code
   paths on the circuit (all lines `ok` on 2026-10-10).
