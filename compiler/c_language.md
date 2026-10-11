@@ -291,6 +291,7 @@ calls a helper; signed division is one instruction.
 python compiler/src/cc/selftest.py           # part of python run.py test
 python compiler/src/cc/tests/difftest.py     # every test program against gcc (needs gcc)
 python compiler/src/cc/tests/difftest.py --update   # rewrite the .expected files
+python compiler/src/cc/tests/fuzz.py --count 50     # random programs, gcc against tiny C (needs gcc)
 ```
 
 `compiler/examples/c/circuit_test.c` checks the compiler's tricky code
