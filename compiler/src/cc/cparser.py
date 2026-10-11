@@ -13,11 +13,12 @@ import struct
 from dataclasses import dataclass, field
 
 import typesys as T
-from cerror import CError, error_at
+from cerror import CError, CErrors, error_at
 from lexer import Token, describe
 from nodes import Node, Obj
 
 MASK = 0xFFFFFFFF
+MAX_ERRORS = 20          # stop after this many, like gcc's -fmax-errors
 
 
 def wrap(value, unsigned):
@@ -112,6 +113,7 @@ class Parser:
         self.counter = 0
         self.warnings = []
         self.warn_fn = warn
+        self.errors = []
 
     # ================================================================ tokens
     @property
@@ -230,31 +232,75 @@ class Parser:
         return var
 
     # ================================================================ program
+    # ================================================================ errors
+    def record(self, err):
+        """Note an error and carry on (up to MAX_ERRORS)."""
+        if not any(str(e) == str(err) for e in self.errors):
+            self.errors.append(err)
+        if len(self.errors) >= MAX_ERRORS:
+            raise CErrors(self.errors)
+
+    def skip_after_error(self):
+        """Skip to just after the next ';' at this nesting level, past a
+        block that opens here, or up to the '}' that closes the current block."""
+        depth = 0
+        while self.tok.kind != "eof":
+            if self.equal("{"):
+                depth += 1
+            elif self.equal("}"):
+                if depth == 0:
+                    return
+                depth -= 1
+                if depth == 0:
+                    self.next()
+                    return
+            elif self.equal(";") and depth == 0:
+                self.next()
+                return
+            self.next()
+
     def program(self):
         while self.tok.kind != "eof":
-            if self.consume(";"):
-                continue
-            if self.equal("_Static_assert"):
-                self.static_assert()
-                continue
-            if self.equal("asm") or self.equal("__asm__") or self.equal("__asm"):
-                node = self.asm_stmt()
-                var = self.new_anon_gvar(T.int_type(), "_A")
-                var.asm_text = node.text
-                continue
-            attr = VarAttr()
-            basety = self.declspec(attr)
-            if attr.is_typedef:
-                self.parse_typedef(basety)
-                continue
-            if self.is_function():
-                self.function(basety, attr)
-                continue
-            self.global_variable(basety, attr)
+            start = self.pos
+            try:
+                self.external_declaration()
+            except CError as e:
+                self.record(e)
+                del self.scopes[1:]
+                self.fn = None
+                self.brk = self.cont = self.switch = None
+                if self.pos == start and self.equal("}"):
+                    self.next()                   # a stray '}'
+                else:
+                    self.skip_after_error()
         for g in self.globals:
             if g.is_function and g.is_referenced and not g.is_definition and g.is_static:
-                raise error_at(g.tok, f"static function '{g.name}' used but never defined")
+                self.record(error_at(g.tok, f"static function '{g.name}' used but never defined"))
+        if self.errors:
+            raise CErrors(self.errors)
         return Program(self.globals, self.warnings)
+
+    def external_declaration(self):
+        """One declaration or definition at file scope."""
+        if self.consume(";"):
+            return
+        if self.equal("_Static_assert"):
+            self.static_assert()
+            return
+        if self.equal("asm") or self.equal("__asm__") or self.equal("__asm"):
+            node = self.asm_stmt()
+            var = self.new_anon_gvar(T.int_type(), "_A")
+            var.asm_text = node.text
+            return
+        attr = VarAttr()
+        basety = self.declspec(attr)
+        if attr.is_typedef:
+            self.parse_typedef(basety)
+            return
+        if self.is_function():
+            self.function(basety, attr)
+            return
+        self.global_variable(basety, attr)
 
     def is_function(self):
         if self.equal(";"):
@@ -868,13 +914,20 @@ class Parser:
         while not self.consume("}"):
             if self.tok.kind == "eof":
                 raise error_at(open_tok, "missing '}' at end of the block")
-            if self.is_typename() and not self.equal(":", self.peek()):
-                node.body.extend(self.declaration())
-                continue
-            if self.equal("_Static_assert"):
-                self.static_assert()
-                continue
-            node.body.append(self.stmt())
+            saved = (len(self.scopes), self.brk, self.cont, self.switch)
+            try:
+                if self.is_typename() and not self.equal(":", self.peek()):
+                    node.body.extend(self.declaration())
+                    continue
+                if self.equal("_Static_assert"):
+                    self.static_assert()
+                    continue
+                node.body.append(self.stmt())
+            except CError as e:
+                self.record(e)
+                del self.scopes[saved[0]:]
+                self.brk, self.cont, self.switch = saved[1:]
+                self.skip_after_error()
         if new_scope:
             self.leave_scope()
         return node

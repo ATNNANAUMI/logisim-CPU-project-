@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import driver
-from cerror import CError
+from cerror import CError, CErrors
 from cparser import parse
 from driver import BuildError
 from preprocessor import Preprocessor
@@ -57,6 +57,10 @@ def expect_error(text, fragment):
         if fragment in e.message:
             return
         raise AssertionError(f"wrong error for {text!r}: {e}")
+    except CErrors as e:
+        if any(fragment in x.message for x in e.errors):
+            return
+        raise AssertionError(f"wrong errors for {text!r}: {e}")
     raise AssertionError(f"no error for {text!r}")
 
 
@@ -95,6 +99,25 @@ def check_errors():
     expect_error("#error stop here\n", "#error stop here")
     expect_error("int main(void) { return 1 }", "expected ';'")
     expect_error("_Static_assert(1 == 2, \"no\");", "static assertion failed")
+
+
+def check_several_errors():
+    """Errors in different statements and functions are all reported."""
+    text = """
+        int f(void) { return x; }
+        int g(void) { int a = 1; a = ; return a; }
+        int main(void) { undeclared(); y = 2; return 0; }
+    """
+    try:
+        parse(Preprocessor().run_text(text, "t.c"))
+    except CErrors as e:
+        messages = [str(x) for x in e.errors]
+        assert len(messages) == 4, messages
+        assert "'x' undeclared" in messages[0] and "t.c:2:" in messages[0], messages
+        assert "expected an expression" in messages[1], messages
+        assert "implicit declaration" in messages[2] and "'y' undeclared" in messages[3], messages
+        return
+    raise AssertionError("no errors")
 
 
 def check_warnings():
@@ -272,6 +295,7 @@ def check_command_line():
 CHECKS = [
     check_preprocessor,
     check_errors,
+    check_several_errors,
     check_warnings,
     check_sizes,
     check_exit_and_atexit,
