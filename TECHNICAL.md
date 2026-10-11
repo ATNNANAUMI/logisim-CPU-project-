@@ -1017,4 +1017,8 @@ files only) and two assembly files: `runtime.asm` (`_pow2`, `_udiv`,
   are skipped, one that differs is saved in `compiler/ROM/fuzz/`. 246
   programs with floats and pointers agreed on 2026-10-11.
 * `compiler/examples/c/circuit_test.c` runs the compiler's tricky code
-  paths on the circuit (all lines `ok` on 2026-10-10).
+  paths on the circuit (all lines `ok` on 2026-10-10, again on 2026-10-11
+  after the call changes). On 2026-10-11 eight test programs (`c99`,
+  `jumps`, `preproc`, `arrays`, `features`, `globals`, `structs`,
+  `control`) also ran on the circuit and printed exactly their
+  `.expected` (gcc's) output.
