@@ -920,9 +920,13 @@ Unsigned `/` and `%` by a power of two are shifts and masks, otherwise a call
 to `_udiv`/`_umod`. Conversions: `FLOAT`/`INT` (truncation, as C wants),
 with corrections for unsigned values of 2^31 and above.
 
-**Calls.** Arguments are pushed with `STK PUSH` (structs word by word) and
-the call is the assembler's `CALL f, N`, or for a function pointer the same
-sequence with `JMRB`. Live temporaries and the register variables still
+**Calls.** Arguments are pushed with `STK PUSH` (structs word by word); the
+call is the `CALL` pseudo-instruction's sequence written out, with `RJMP f`
+for a direct call (or `JMRB` through a function pointer) in place of
+`DATA R0, f` + `JMRB R0`. Afterwards the arguments are popped and the saved
+registers put back in one sequence, keeping R0 (in R15) only when the result
+is used. A `void` function returns with `STK RET`, `STK POP`, `JMRB R0`
+instead of the 6-word `RET`. Live temporaries and the register variables still
 needed after the call are kept with `SAVE`/`RESTORE`; a register variable
 that the arguments themselves change is written to its stack slot before
 the call and read back after. Variadic calls push the variadic arguments,

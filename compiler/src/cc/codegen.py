@@ -534,7 +534,13 @@ class CodeGen:
         prologue = self.code
         self.code = []
         self.label(self.ret_label)
-        self.ins("RET")
+        if fn.ty.return_ty.is_void:
+            # no result to keep: drop the frame, pop the return address, jump
+            self.ins("STK", "RET")
+            self.ins("STK", "POP")
+            self.ins("JMRB", "R0")
+        else:
+            self.ins("RET")
         epilogue = self.code
         return self.format(peephole.optimize(prologue + body + epilogue))
 
@@ -738,6 +744,8 @@ class CodeGen:
         elif k == "cast" and node.ty.is_void:
             self.discard(node.lhs)
             return
+        elif k == "funcall":
+            v = self.gen_call(node, want=False)
         else:
             v = self.gen(node)
         self.free_val(v)
@@ -1961,7 +1969,7 @@ class CodeGen:
         self.push(v)
         return 1
 
-    def gen_call(self, node):
+    def gen_call(self, node, want=True):
         fty = node.func_ty
         keep, spill = self.vars_across(node)
         saved = self.save_live([self.var_regs[v] for v in keep])
@@ -1992,34 +2000,43 @@ class CodeGen:
             self.ins("CPY", f"R{self.var_regs[v]}", "R0")
             self.ins("DATA", f"R{SCRATCH}", str(self.var_slot(v)))
             self.ins("STK", "SET", f"R{SCRATCH}")
+        # the call: like the CALL pseudo-instruction, with RJMP for a direct
+        # call (one instruction less than DATA + JMRB)
+        back = self.new_label()
+        self.ins("DATA", "R0", back)
+        self.ins("STK", "PUSH")
+        self.ins("STK", "CALL")
         if direct:
             self.use(f.var.asm_name)
-            self.ins("CALL", f.var.asm_name, str(pushed)) if pushed else \
-                self.ins("CALL", f.var.asm_name)
+            self.ins("RJMP", f.var.asm_name)
         else:
-            back = self.new_label()
-            self.ins("DATA", "R0", back)
-            self.ins("STK", "PUSH")
-            self.ins("STK", "CALL")
             self.ins("JMRB", f"R{fr}")
             self.release(fr)
-            self.label(back)
-            if pushed:
-                self.ins("CPY", "R0", "R15")
-                for _ in range(pushed):
-                    self.ins("STK", "POP")
-                self.ins("CPY", "R15", "R0")
-        self.restore_live(saved)
-        if spill:
-            self.ins("CPY", "R0", "R15")         # keep the result
-            for v in spill:
-                self.ins("DATA", f"R{SCRATCH}", str(self.var_slot(v)))
-                self.ins("STK", "GET", f"R{SCRATCH}")
-                self.ins("CPY", "R0", f"R{self.var_regs[v]}")
+        self.label(back)
+        # after it: drop the arguments, put back what was saved, keeping
+        # R0 (in R15) only when the result is used
+        temps, regs = saved
+        keep_r0 = want and not node.ty.is_void and node.ret_buf is None
+        busy = pushed or regs or spill
+        if keep_r0 and busy:
+            self.ins("CPY", "R0", "R15")
+        for _ in range(pushed):
+            self.ins("STK", "POP")
+        for r in reversed(regs):
+            self.ins("STK", "POP")
+            self.ins("CPY", "R0", f"R{r}")
+        for r in temps:
+            if r in self.free:
+                self.free.remove(r)
+        for v in spill:                          # changed by the arguments: read back
+            self.ins("DATA", f"R{SCRATCH}", str(self.var_slot(v)))
+            self.ins("STK", "GET", f"R{SCRATCH}")
+            self.ins("CPY", "R0", f"R{self.var_regs[v]}")
+        if keep_r0 and busy:
             self.ins("CPY", "R15", "R0")
         if node.ret_buf is not None:
             return Val("addr", addr=Addr("frame", off=node.ret_buf.offset))
-        if node.ty.is_void:
+        if node.ty.is_void or not want:
             return Val("void")
         return Val("r0")
 

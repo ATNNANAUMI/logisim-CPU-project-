@@ -69,6 +69,11 @@ The language itself is described in [`c_language.md`](c_language.md).
     rejects get a `_X` prefix. Labels the compiler makes start with `_` and a
     capital letter (reserved in C).
 
+32. **Calls are written out instead of using `CALL`/`RET`**: `RJMP` to the
+    function, no R0-keeping copies when the result is unused, a 3-instruction
+    return from `void` functions. Same stack layout and registers, so
+    assembly code still calls C and C still calls assembly.
+
 ### Data and start-up
 
 18. **String literals and `const` global data live in ROM.** Writes to
