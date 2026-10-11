@@ -5,8 +5,13 @@ outputs must be the same.
 
 Each program is free of undefined behaviour (unsigned arithmetic, shift
 counts masked to 0..31, divisors that can't be 0 or -1, array indexes
-masked to the array, no recursion without a bound) and prints checksums of
-its variables. A program whose outputs differ is saved in compiler/ROM/fuzz/
+masked to the array, no recursion) and of unspecified evaluation order (a
+call is always a whole statement, never part of an expression), and prints
+checksums of its variables. Programs gcc's sanitizer or warnings object to
+are skipped, as the generator's fault. Float values are kept between -1e6 and 1e6 (sq()), so no
+infinity or NaN appears, and are printed as their bits: any difference in
+rounding shows. Programs also use a local array whose address is taken,
+a global pointer into an array, and a struct passed and returned by value. A program whose outputs differ is saved in compiler/ROM/fuzz/
 (git-ignored) for a closer look; --keep saves every program.
 """
 
@@ -31,6 +36,7 @@ class Gen:
     def __init__(self, rng):
         self.r = rng
         self.lines = []
+        self.scope = set()
 
     def const(self):
         r = self.r.random()
@@ -42,17 +48,50 @@ class Gen:
             return f"{self.r.randint(0, 0xFFFFFFFF)}u"
         return self.r.choice(["0x80000000u", "0xFFFFFFFFu", "0x7FFFFFFFu", "1u", "31u"])
 
+    def fexpr(self, names, depth):
+        """A float expression with |value| < 1e6 * 1e6 (callers wrap it in sq())."""
+        if depth <= 0 or self.r.random() < 0.3:
+            pick = self.r.random()
+            if pick < 0.4:
+                return self.r.choice(["fv0", "fv1", "g_f"])
+            if pick < 0.6:
+                return f"({self.r.choice(['', '-'])}{self.r.randint(0, 999)}.{self.r.randint(0, 99)}f)"
+            if pick < 0.8:
+                return f"(float)({self.expr(names, 1)} & 0xFFFFu)"
+            if pick < 0.9:
+                return f"sq((float){self.expr(names, 1)})"
+            return f"sq((float)(int){self.expr(names, 1)})"
+        a = self.fexpr(names, 0 if depth <= 1 else depth - 1)
+        b = self.fexpr(names, 0)
+        op = self.r.choice(["+", "-", "*", "/", "neg"])
+        if op == "/":
+            return f"({a} / ({b} * {b} + 1.0f))"
+        if op == "neg":
+            return f"(-({a}))"
+        return f"sq({a} {op} {b})"
+
     def expr(self, names, depth, fns=()):
         """An unsigned expression."""
         r = self.r.random()
         if depth <= 0 or r < 0.25:
             pick = self.r.random()
-            if pick < 0.55 and names:
+            if pick < 0.5 and names:
                 return self.r.choice(names)
-            if pick < 0.7:
+            if pick < 0.6:
                 return f"g_arr[{self.expr(names, 0)} & {ARRAY - 1}]"
-            if pick < 0.8:
+            if pick < 0.66:
                 return f"g_s.{self.r.choice('abc')}"
+            if pick < 0.72 and "la" in self.scope:
+                return f"la[{self.expr(names, 0)} & {ARRAY - 1}]"
+            if pick < 0.76:
+                return "*g_p"
+            if pick < 0.8:
+                c = self.r.choice(["<", "<=", ">", ">=", "==", "!="])
+                return f"(unsigned)({self.fexpr(names, 1)} {c} {self.fexpr(names, 1)})"
+            if pick < 0.84:
+                return f"(unsigned)(int)sq({self.fexpr(names, 1)})"
+            if pick < 0.87:
+                return f"sum(mk({self.expr(names, 0)}, {self.expr(names, 0)}))"
             return self.const()
         a = self.expr(names, depth - 1, fns)
         b = self.expr(names, depth - 1, fns)
@@ -82,7 +121,11 @@ class Gen:
         if op == "!":
             return f"(unsigned)(!{a})"
         if op == "call":
-            if not fns:
+            # A call inside a bigger expression could change a global the
+            # rest of the expression reads, and C leaves that order
+            # unspecified (gcc and this compiler differ). Calls are whole
+            # statements instead (see stmt); here it is just an addition.
+            if True:
                 return f"({a} + {b})"
             f, n = self.r.choice(fns)
             args = ", ".join(self.expr(names, depth - 1) for _ in range(n))
@@ -130,6 +173,22 @@ class Gen:
             targets = ["g0"]
         t = self.r.choice(targets)
         r = self.r.random()
+        if r < 0.06:
+            self.lines.append(f"{pad}{self.r.choice(['fv0', 'fv1', 'g_f'])} = sq({self.fexpr(names, 2)});")
+            return
+        if r < 0.09 and "la" in self.scope:
+            self.lines.append(f"{pad}la[{self.expr(names, 1)} & {ARRAY - 1}] = {self.expr(names, 2, fns)};")
+            return
+        if r < 0.11:
+            self.lines.append(f"{pad}g_p = g_arr + ({self.expr(names, 1)} & {ARRAY - 1});")
+            return
+        if r < 0.13:
+            self.lines.append(f"{pad}*g_p += {self.expr(names, 1)};")
+            return
+        if r < 0.15 and "la" in self.scope:
+            self.lines.append(f"{pad}fill(la, {self.expr(names, 1)});")
+            return
+        r = self.r.random()
         if r < 0.1:
             self.lines.append(f"{pad}g_arr[{self.expr(names, 1)} & {ARRAY - 1}] = {self.expr(names, 2, fns)};")
         elif r < 0.17:
@@ -161,21 +220,42 @@ class Gen:
         self.lines.append(f"static unsigned f{i}({sig})")
         self.lines.append("{")
         self.lines.append("    unsigned k0, k1, k2;")
+        self.lines.append("    float fv0 = g_f, fv1 = 0.5f;")
+        self.scope = set()
+        if self.r.random() < 0.5:
+            first = self.expr(params, 1)          # before la exists: it can't read la
+            self.lines.append(f"    unsigned la[{ARRAY}];")
+            self.lines.append(f"    fill(la, {first});")
+            self.scope = {"la"}
         for v in locs:
             self.lines.append(f"    unsigned {v} = {self.expr(params, 2)};")
         names = params + locs + ["g0", "g1"]
         self.block(names, 2, 1, fns, [])
-        self.lines.append(f"    return {self.expr(names, 3)};")
+        ret = self.expr(names, 3)
+        if self.scope:
+            ret = f"({ret}) ^ la[{self.expr(names, 0)} & {ARRAY - 1}]"
+        self.lines.append(f"    return {ret} ^ (unsigned)(int)sq(fv0 + fv1);")
+        self.scope = set()
         self.lines.append("}")
         self.lines.append("")
 
     def program(self):
         L = self.lines
+        self.scope = set()
         L.append("#include <stdio.h>")
         L.append("")
         L.append(f"unsigned g0 = {self.const()}, g1;")
         L.append(f"unsigned g_arr[{ARRAY}] = {{ " + ", ".join(self.const() for _ in range(ARRAY)) + " };")
         L.append(f"struct {{ unsigned a, b, c; }} g_s = {{ {self.const()}, {self.const()}, {self.const()} }};")
+        L.append(f"float g_f = {self.r.randint(-500, 500)}.25f;")
+        L.append("unsigned *g_p = g_arr;")
+        L.append("struct pt { unsigned a, b; float c; };")
+        L.append("")
+        L.append("static float sq(float x) { return x > 1e6f ? 1e6f : x < -1e6f ? -1e6f : x; }")
+        L.append("static struct pt mk(unsigned a, unsigned b) { struct pt p; p.a = a; p.b = b ^ a; p.c = (float)(a & 0xFFu); return p; }")
+        L.append("static unsigned sum(struct pt p) { return p.a * 3u + p.b + (unsigned)(int)p.c; }")
+        L.append(f"static void fill(unsigned *a, unsigned v) {{ unsigned i; for (i = 0; i < {ARRAY}u; i++) a[i] = v * i + 7u; }}")
+        L.append("static unsigned fbits(float f) { union { float f; unsigned u; } b; b.f = f; return b.u; }")
         L.append("")
         fns = []
         for i in range(self.r.randint(2, 5)):
@@ -185,6 +265,7 @@ class Gen:
         L.append("int main(void)")
         L.append("{")
         L.append("    unsigned k0, k1, k2, r = 0;")
+        L.append("    float fv0 = 1.0f, fv1 = -2.5f;")
         for f, n in fns:
             args = ", ".join(self.expr(["g0", "g1"], 2) for _ in range(n))
             L.append(f"    r ^= {f}({args});")
@@ -192,11 +273,32 @@ class Gen:
         L.append("    for (k0 = 0; k0 < 8u; k0++)")
         L.append("        printf(\"%u \", g_arr[k0]);")
         L.append("    printf(\"\\n%u %u %u\\n\", g_s.a, g_s.b, g_s.c);")
+        L.append("    printf(\"%08x %u\\n\", fbits(g_f), (unsigned)(g_p - g_arr));")
         L.append("    (void)k1;")
+        L.append("    (void)fv0;")
+        L.append("    (void)fv1;")
         L.append("    (void)k2;")
         L.append("    return 0;")
         L.append("}")
         return "\n".join(L) + "\n"
+
+
+def well_defined(src, tmp):
+    """gcc's view: no uninitialised reads or missing returns it can see, and
+    no undefined behaviour its sanitizer catches when the program runs. A
+    program that fails this is the generator's fault, not the compiler's."""
+    c = Path(tmp) / "chk.c"
+    exe = Path(tmp) / "chk"
+    c.write_text(src)
+    r = subprocess.run(["gcc", "-std=gnu99", "-O1", "-w", "-Werror=uninitialized",
+                        "-Werror=return-type", "-fsanitize=undefined,float-cast-overflow",
+                        "-fno-sanitize-recover", "-o", str(exe), str(c)], capture_output=True)
+    if r.returncode:
+        return False
+    try:
+        return subprocess.run([str(exe)], capture_output=True, timeout=20).returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
 
 
 def gcc_run(src, tmp):
@@ -225,11 +327,15 @@ def main(argv):
     ap.add_argument("--keep", action="store_true")
     args = ap.parse_args(argv)
     bad = 0
+    skipped = 0
     total_steps = 0
     with tempfile.TemporaryDirectory() as tmp:
         for i in range(args.count):
             seed = args.seed + i
             src = Gen(random.Random(seed)).program()
+            if not well_defined(src, tmp):
+                skipped += 1
+                continue
             try:
                 want = gcc_run(src, tmp)
             except subprocess.TimeoutExpired:
@@ -249,8 +355,8 @@ def main(argv):
                     if a != b:
                         print(f"   gcc:  {a}\n   tiny: {b}")
                         break
-    print(f"{args.count - bad} of {args.count} random programs agree "
-          f"({total_steps} instructions in all)")
+    print(f"{args.count - bad - skipped} of {args.count - skipped} random programs agree "
+          f"({total_steps} instructions in all; {skipped} skipped as not well defined)")
     return bad == 0
 
 
