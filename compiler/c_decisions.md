@@ -69,61 +69,61 @@ The language itself is described in [`c_language.md`](c_language.md).
     rejects get a `_X` prefix. Labels the compiler makes start with `_` and a
     capital letter (reserved in C).
 
-32. **Calls are written out instead of using `CALL`/`RET`**: `RJMP` to the
+18. **Calls are written out instead of using `CALL`/`RET`**: `RJMP` to the
     function, no R0-keeping copies when the result is unused, a 3-instruction
     return from `void` functions. Same stack layout and registers, so
     assembly code still calls C and C still calls assembly.
 
 ### Data and start-up
 
-18. **String literals and `const` global data live in ROM.** Writes to
+19. **String literals and `const` global data live in ROM.** Writes to
     them are ignored (undefined behaviour in C anyway). Saves RAM and the
     copy at start-up.
-19. **Initialised globals: starting values in ROM, copied to RAM by a
+20. **Initialised globals: starting values in ROM, copied to RAM by a
     per-file `_init_` routine that also clears the other globals.** The
     start-up code (crt0, generated per build) calls them all, so a reset
     without clearing RAM restarts the program correctly.
-20. **`main` is called as `main(0, {NULL})`; its result goes to `exit`,
+21. **`main` is called as `main(0, {NULL})`; its result goes to `exit`,
     which halts with the status in R0.** HALT is in a loop so RESUME stops
     again instead of running into whatever follows.
-21. **malloc's heap is everything from `_end` (a label the build puts after
+22. **malloc's heap is everything from `_end` (a label the build puts after
     all RAM data) to the end of RAM.** One-word headers, first fit, free
     neighbours joined during the search.
 
 ### The library
 
-22. **The C library is written in C (plus `runtime.asm` and
+23. **The C library is written in C (plus `runtime.asm` and
     `setjmp.asm`), and `stdlib.asm` is not linked into C programs.**
     `stdlib.asm` exports names like `min`, `max`, `print_int` and an integer
     `pow`, which could clash with a program's own functions; a valid C
     program must be able to use those names.
-23. **Library files are linked only when needed**, like a static library,
+24. **Library files are linked only when needed**, like a static library,
     and a program's own definition of a library function wins. The library
     is compiled once and cached in `compiler/ROM/libc/` (rebuilt when the
     compiler or the library changes).
-24. **stdin is line-buffered with echo and backspace editing; Ctrl-D at
+25. **stdin is line-buffered with echo and backspace editing; Ctrl-D at
     the start of a line is end of file** - like a terminal, so programs that
     read with `scanf` or `getchar` behave as on a PC.
-25. **printf prints floats exactly** (exact decimal expansion of the
+26. **printf prints floats exactly** (exact decimal expansion of the
     float, ties to even), so its digits match glibc's for the same float.
     This costs a few thousand instructions per float.
-26. **`rand` is the C standard's example generator**, not glibc's: tests
+27. **`rand` is the C standard's example generator**, not glibc's: tests
     can't compare random numbers with gcc anyway, and this one is small.
-27. **`time()` and `clock()` return -1** (no clock); `getenv` returns NULL;
+28. **`time()` and `clock()` return -1** (no clock); `getenv` returns NULL;
     `fopen` fails; `signal` handlers run only for `raise`.
-28. **math.h:** `sqrt`, `fmod` and the rounding functions are exact; the
+29. **math.h:** `sqrt`, `fmod` and the rounding functions are exact; the
     others aim for 1-2 units in the last place; `sin`/`cos`/`tan` use
     Payne-Hanek reduction above 100 so any argument works.
 
 ### Process
 
-29. **Tests compare with gcc.** Every program in `compiler/src/cc/tests/`
+30. **Tests compare with gcc.** Every program in `compiler/src/cc/tests/`
     must print exactly what gcc's build prints; the `.expected` files come
     from gcc. Programs avoid undefined behaviour and type sizes.
-30. **Accepted from GNU C**: case ranges, `typeof`, `, ## __VA_ARGS__`,
+31. **Accepted from GNU C**: case ranges, `typeof`, `, ## __VA_ARGS__`,
     `asm("...")`, `__attribute__` (ignored), binary constants. Not accepted:
     statement expressions, `?:` with the middle part left out.
-31. **The compiler stops at the first error** (no error recovery).
+32. **The compiler stops at the first error** (no error recovery).
 
 ## Measured on the circuit while doing this
 
