@@ -928,6 +928,13 @@ class CodeGen:
                 self.ins("RJMP", label)
             return
         jump_if_set = positive == when
+        if len(flag) > 1 and not jump_if_set:
+            # jump when none of the flags is set: RJNF would jump when any is clear
+            skip = self.new_label()
+            self.ins("RJF", flag, skip)
+            self.ins("RJMP", label)
+            self.label(skip)
+            return
         self.ins("RJF" if jump_if_set else "RJNF", flag, label)
 
     def compare(self, kind, ty, a, b, node):
@@ -1030,12 +1037,13 @@ class CodeGen:
             self.free_val(a)
             self.free_val(b)
             return "N", True
-        # le: a <= b  <=>  !(b < a)
-        rb = self.reg_name(b)
-        self.ins("FCMP", rb, self.operand(a))
+        # le: a < b or a == b (N or Z). Not !(b < a): with a NaN that is true,
+        # and C wants every ordered comparison with a NaN to be false.
+        ra = self.reg_name(a)
+        self.ins("FCMP", ra, self.operand(b))
         self.free_val(a)
         self.free_val(b)
-        return "N", False
+        return "NZ", True
 
     def gen_bool(self, node):
         """A condition's value as 0 or 1."""

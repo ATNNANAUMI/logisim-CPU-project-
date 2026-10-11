@@ -139,8 +139,17 @@ Division or modulo by zero returns the dividend unchanged.
 For `FCMP` the "result" is `RA − RB` (rounded to float32), so `N` means
 `RA < RB` and `Z` means equal, the same as the integer `CMP`.
 `INT` truncates toward zero (`INT(1.7) = 1`, `INT(-3.7) = -3`, `INT(0.5) = 0`),
-confirmed on the circuit. `FDIV` by zero gives ±infinity with the dividend's sign. `INT` of NaN or
-infinity gives 0.
+confirmed on the circuit. Measured with `diag14.asm`/`diag15.asm`:
+
+* the float unit follows IEEE-754: `x / 0` is infinity with the sign of `x`
+  XOR the zero's sign (`1.0 / -0.0 = -inf`), `0/0`, `inf - inf`, `inf * 0`
+  and anything with a NaN give NaN (`0x7FC00000`); subnormals are kept
+* `INT` works like Java's `(long)` cast followed by keeping the low 32 bits:
+  out-of-range values wrap (`INT(3e9) = 0xB2D05E00`), values at or above
+  2^63 and +infinity give `0xFFFFFFFF`, at or below -2^63 and -infinity
+  give 0, NaN gives 0
+* `FCMP` with a NaN clears every flag, so `<`, `<=`, `==` with a NaN are all
+  false when tested on N and Z
 
 ### 1.6 Stack instructions (`STK`, `0x0Bob`)
 
@@ -348,7 +357,7 @@ modules import each other by plain name, so run them as scripts
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()`, `reset()`, `resume()` |
 | `gui.py` | the Tk window |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 14 checks on the core |
+| `selftest.py` | 15 checks on the core |
 
 ### 3.2 Execution model
 
@@ -672,6 +681,8 @@ line is empty (so it can't erase the prompt).
 | `tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x14000`; they are also printed in hex |
 | `tests/diag12.asm` | what the C compiler relies on: reading and setting `ESP`/`EBP` with `STK CALL`/`STK RET`, stack slot `i` being RAM `0x10000 + i`, the carry flag after `CMP`/`SUB`/`ADD`, the `A` flag after `FCMP` (a float compare), `MULT`'s low 32 bits, `DIV` by `0x80000000`. Link it first; 30 results from `0x14000`, also printed |
 | `tests/diag13.asm` | the carry flag (and A N Z) after `SUB`, `--`, `++`, `NEG`, `SHL`, `SHR`, `MULT`, `ADD`, `AND`, `TEST`: on the circuit `SUB` sets C on a borrow and `CMP`/`--`/`NEG`/`MULT` never set it. Link it first; 24 results from `0x14000`, also printed |
+| `tests/diag14.asm` | float special cases: division by ±0, NaN, infinity, `INT` out of range, overflow, subnormals. Link it first; 22 results from `0x14000`, also printed |
+| `tests/diag15.asm` | more of the same after diag14: `INT` of -infinity and of large values, the remaining divisions by zero. Link it first; 15 results from `0x14000`, also printed |
 
 All of these build and run correctly in the simulator. Built images go in
 `compiler/ROM/`, which git ignores. Rebuild them after changing a source
@@ -750,7 +761,7 @@ python compiler/src/asm/selftest.py   # 18 checks: encodings, values, strings, j
                                       # CALL/RET, SAVE/RESTORE, linking, link errors
                                       # (RAM calls, unexported externs), warnings,
                                       # raw output, .obj round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 14 checks: immediates, flags, carry flag, DIV by 0, RAM,
+python cpu_sim/src/selftest.py        # 15 checks: immediates, flags, carry flag, DIV by 0, RAM,
                                       # ROM writes, stack, frames, floats, FCMP flags,
                                       # keyboard, backspace, ADDR/JMRB
 python check_docs.py                  # 3 checks on the docs: every repo path they name
@@ -777,7 +788,7 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | does `STK GET` also write `RB`? | no | no: fixed in the circuit (STK GET/SET/PUSH no longer misuse RB) |
 | float `SHL/SHR/++/--`, undefined float opcodes | write 0 (`FLOAT_NOP_RESULT`) | a guess |
 | carry flag | as in 1.5 | confirmed (`diag12.asm`, `diag13.asm`, 2026-10-10). The simulator used to set C on `SUB`/`CMP` when there was *no* borrow, and on `MULT` overflow; it now matches the circuit |
-| float divide by zero | ±infinity | not verified |
+| float division by zero, NaN, `INT` out of range | as in 1.5 | confirmed (`diag14.asm`, `diag15.asm`, 2026-10-10). The simulator used to give `0.0/0.0 = +inf`, `1.0/-0.0 = +inf` and `INT(inf) = 0`; it now matches the circuit |
 | number display `0x3C` | shows the last word sent (window and headless output) | 8 hex digits in `PC` |
 | timing | one instruction per step | several clock cycles per instruction (stepper) |
 
