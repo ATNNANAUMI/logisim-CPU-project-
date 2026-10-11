@@ -124,6 +124,31 @@ def _divide(sa: int, sb: int) -> tuple[int, int]:
 
 
 # ----------------------------------------------------------------- float op
+def _float_divide(fa: float, fb: float) -> float:
+    """IEEE-754 division, as measured on the circuit (diag14, diag15):
+    x/0 is infinity with the sign of x XOR the zero's sign, 0/0 is NaN."""
+    if fb == 0:
+        if fa == 0 or math.isnan(fa):
+            return math.nan
+        return math.copysign(math.inf, math.copysign(1.0, fa) * math.copysign(1.0, fb))
+    return fa / fb
+
+
+def _float_to_int(fb: float) -> int:
+    """INT, as measured on the circuit (diag14, diag15): like Java's (long)
+    cast, then the low 32 bits. NaN gives 0; values at or beyond 2^63 (and
+    infinity) give the largest long, so FFFFFFFF; at or below -2^63 (and
+    -infinity) the smallest, so 0; everything else is truncated toward zero
+    and wraps at 32 bits (3e9 gives B2D05E00)."""
+    if math.isnan(fb):
+        return 0
+    if fb >= 9.223372036854775807e18:
+        return ((1 << 63) - 1) & MASK
+    if fb <= -9.223372036854775808e18:
+        return 0
+    return int(fb) & MASK
+
+
 def float_op(name: str, a: int, b: int) -> tuple[int, int]:
     """Float group.  a = RA bits, b = RB/immediate bits."""
     a &= MASK
@@ -138,7 +163,7 @@ def float_op(name: str, a: int, b: int) -> tuple[int, int]:
         elif name == "MULT":
             value = fa * fb
         else:
-            value = math.copysign(math.inf, fa) if fb == 0 else fa / fb
+            value = _float_divide(fa, fb)
         bits = float_to_bits(value)
         return bits, _float_flags(fa, fb, bits_to_float(bits))
 
@@ -147,11 +172,7 @@ def float_op(name: str, a: int, b: int) -> tuple[int, int]:
         return bits, _float_flags(fa, fb, bits_to_float(bits))
 
     if name == "INT":                            # float -> int
-        if math.isnan(fb) or math.isinf(fb):
-            value = 0
-        else:
-            value = int(fb)
-        bits = value & MASK
+        bits = _float_to_int(fb)
         return bits, pack_flags(False, fa > fb, bits & SIGN, bits == 0)
 
     if name == "NEG":

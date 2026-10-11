@@ -48,6 +48,12 @@ int main(void)
     a += i;
     i += 2.75f;
     printf("%f %d\n", a, i);
+    {
+        volatile float zero = 0.0f;
+        float nan = zero / zero;
+        printf("nan: %d %d %d %d %d %d\n", nan < 1.0f, nan <= 1.0f, nan > 1.0f, nan >= 1.0f,
+               nan == nan, nan != nan);
+    }
     if (a)
         printf("nonzero\n");
     if (!0.0f)

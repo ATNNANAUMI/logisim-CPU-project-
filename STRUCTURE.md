@@ -50,7 +50,8 @@ logisim-CPU-project-/
 │   │   ├── stdlib/stdlib_more_demo.asm   the functions added 2026-10-03 (no typing, no hex display)
 │   │   ├── two_files/main.asm, lib.asm   multi-file linking example
 │   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
-│   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag)
+│   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag),
+│   │                         diag14, diag15 (float division by zero, NaN, INT out of range)
 │   └── ROM/                  build output (.obj/.rom/.map), git-ignored, created on first build
 │
 └── cpu_sim/
@@ -63,7 +64,7 @@ logisim-CPU-project-/
     │   ├── cpu.py            CPU: step(), run(), reset(), stack ops, COMM
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, display, live keyboard, breakpoints, speed)
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG]`
-    │   └── selftest.py       14 checks
+    │   └── selftest.py       15 checks
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -105,6 +106,9 @@ The design follows the "But How Do It Know?" style: a single bus,
 * Carry flag (measured, `diag12`/`diag13`): `ADD`/`++` carry out, `SUB` sets C
   on a **borrow** (`RA < RB` unsigned), `SHL`/`SHR` the bit shifted out;
   `CMP`, `--`, `NEG`, `MULT` never set it.
+* Floats (measured, `diag14`/`diag15`): IEEE-754 (`0/0` = NaN, `1/-0` = -inf,
+  subnormals kept); `INT` = Java's `(long)` cast, low 32 bits (`INT(3e9)` wraps,
+  `INT(+inf)` = `FFFFFFFF`, `INT(NaN)` = 0); `FCMP` with a NaN clears all flags.
 * System ops: NOP LD ST DATA RJMP RJF RJNF CLF COMM ADDR JMRB STK ALD AST CPY HALT.
   `CPY RA, RB` copies RA → RB. `ALD`/`AST` use R0 with `mem[RA+RB]`.
 * Jumps are relative to the **address of the offset word**. `RJF` = any
@@ -150,6 +154,8 @@ python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom   (jar: $LOGISI
 * The carry flag was documented as "set when there is no borrow" for
   `SUB`/`CMP`; the circuit sets it on a borrow for `SUB` and never for `CMP`
   (`diag12.asm`, `diag13.asm`). The simulator now matches the circuit.
+* The simulator also gave `0.0/0.0 = +inf`, `1.0/-0.0 = +inf` and `INT(inf) = 0`;
+  `diag14.asm`/`diag15.asm` measured the circuit and the simulator now matches.
 * Still-unconfirmed behaviours can be switched in `cpu_sim/src/config.py`
   (TWEAKS).
 * Outdated notes: `logisim/cpu datas/` (see TECHNICAL.md §9). The old

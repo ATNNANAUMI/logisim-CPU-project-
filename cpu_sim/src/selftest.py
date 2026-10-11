@@ -100,6 +100,19 @@ def test_float_div_by_zero_is_inf():
     assert cpu.regs[0] == 0x7F800000
 
 
+def test_float_special_cases_match_circuit():
+    # Measured with diag14/diag15. FDIV R1,R2 with R1 = 0.0, R2 = 0.0 -> NaN
+    cpu = run([0x0301, 0, 0x0302, 0, 0x3312, 0x0F00])
+    assert cpu.regs[0] == 0x7FC00000
+    # 1.0 / -0.0 -> -infinity
+    cpu = run([0x0301, 0x3F800000, 0x0302, 0x80000000, 0x3312, 0x0F00])
+    assert cpu.regs[0] == 0xFF800000
+    # INT of +infinity -> FFFFFFFF, of -infinity -> 0, of 3e9 -> low 32 bits
+    assert run([0x0301, 0x7F800000, 0x3701, 0x0F00]).regs[0] == 0xFFFFFFFF
+    assert run([0x0301, 0xFF800000, 0x3701, 0x0F00]).regs[0] == 0
+    assert run([0x0301, 0x4F32D05E, 0x3701, 0x0F00]).regs[0] == 0xB2D05E00
+
+
 def test_keyboard_input():
     # DATA R3,0x55 ; DATA R1,0xF0 ; COMM INADDR,R1 ; COMM INDATA,R2 ; COMM INDATA,R3
     cpu = run([0x0303, 0x55, 0x0301, 0xF0, 0x0811, 0x0802, 0x0803, 0x0F00], keys="A")

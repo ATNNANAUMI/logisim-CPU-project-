@@ -107,6 +107,12 @@ int main(void)
     check("float math", f * g == -1.875f && f + g == 1.75f && f / 2 == 1.25f && g < f);
     check("float conversion", (int)(f * 3) == 7 && (int)g == 0 && (float)s == 5.0f
           && (unsigned)(float)big == 3000000000u && (float)u == 4000000000.0f);
+    {
+        volatile float zero = 0.0f;
+        float nan = zero / zero;
+        check("NaN compares false", !(nan < f) && !(nan <= f) && !(nan > f) && !(nan >= f)
+              && !(nan == nan) && nan != nan && !(f <= nan));
+    }
     q = swap(p);
     check("struct by value", q.a == 2 && q.b == 1 && p.a == 1);
     check("recursion", fib(10) == 55);
