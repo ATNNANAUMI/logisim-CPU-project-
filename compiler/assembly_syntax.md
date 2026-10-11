@@ -409,3 +409,10 @@ Check the tools themselves with:
 ```
 python compiler/src/asm/selftest.py
 ```
+
+C files are built by the C compiler, which also takes `.asm` and `.obj`
+files and links them with the C library:
+`python compiler/src/cc build prog.c helper.asm` (see
+[`c_language.md`](c_language.md) section 1). Assembly functions called from C
+follow the calling convention of section 7; a C function is called from
+assembly with `CALL name, N` like any other.

@@ -12,6 +12,7 @@ file has the details.
 7. [Tooling: `run.py`, `run_rom.py`, self-checks](#7-tooling)
 8. [Simulator vs. circuit: open questions](#8-simulator-vs-circuit-open-questions)
 9. [Outdated files and stale information](#9-outdated-files-and-stale-information)
+10. [The C compiler (`compiler/src/cc/`) and the C library (`compiler/libc/`)](#10-the-c-compiler-compilersrccc-and-the-c-library-compilerlibc)
 
 ---
 
@@ -677,6 +678,11 @@ line is empty (so it can't erase the prompt).
 | `programs/untested.asm` | `show_hex` and `try_read_char`, the two stdlib functions not yet run on the circuit (needs typing) |
 | `two_files/main.asm`, `lib.asm` | two files, `.extern`/`.global`, `CALL` inside a call, a RAM variable |
 | `tests/io_test.asm` | minimal keyboard → display loop for probing the circuit |
+| `c/hello.c` | C: `printf("hello, world\n")` |
+| `c/primes.c` | C: a sieve, `printf` with a width, the hex display (`cpu.h`) |
+| `c/structs.c` | C: an array of structs, `qsort`, `malloc`, `printf("%.2f")` |
+| `c/guess.c` | C: guess the number with `scanf`; seeded by how long the first key takes (`key_pressed`); the header has a transcript |
+| `c/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
 | `tests/diag10.asm` | `INT` on floats below 1 (diagnostic, resolved: they give 0) |
 | `tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x14000`; they are also printed in hex |
 | `tests/diag12.asm` | what the C compiler relies on: reading and setting `ESP`/`EBP` with `STK CALL`/`STK RET`, stack slot `i` being RAM `0x10000 + i`, the carry flag after `CMP`/`SUB`/`ADD`, the `A` flag after `FCMP` (a float compare), `MULT`'s low 32 bits, `DIV` by `0x80000000`. Link it first; 30 results from `0x14000`, also printed |
@@ -684,9 +690,11 @@ line is empty (so it can't erase the prompt).
 | `tests/diag14.asm` | float special cases: division by ±0, NaN, infinity, `INT` out of range, overflow, subnormals. Link it first; 22 results from `0x14000`, also printed |
 | `tests/diag15.asm` | more of the same after diag14: `INT` of -infinity and of large values, the remaining divisions by zero. Link it first; 15 results from `0x14000`, also printed |
 
-All of these build and run correctly in the simulator. Built images go in
-`compiler/ROM/`, which git ignores. Rebuild them after changing a source
-or the stdlib; an image there can be older than its source.
+All of these build and run correctly in the simulator. The `c/` programs
+are C: build them with `python compiler/src/cc build <file>` (or `run`,
+section 10.1), which links the C library instead of `stdlib.asm`. Built
+images go in `compiler/ROM/`, which git ignores. Rebuild them after changing
+a source or the stdlib; an image there can be older than its source.
 
 ---
 
@@ -717,14 +725,15 @@ lets you pick files from the project (it skips `.git`, `.venv`,
 
 | command | does |
 | --- | --- |
-| `python run.py asm <files…> [-o out.rom]` | `compiler/src/asm build …` |
+| `python run.py asm <files…> [-o out.rom]` | `compiler/src/asm build …`, or `compiler/src/cc build …` when a `.c` file is among them |
 | `python run.py sim [rom]` | `cpu_sim/src/main.py [rom]` (the window) |
-| `python run.py build <files…> -o out.rom` | assembles, then opens the result in the simulator |
-| `python run.py test` | runs both self-checks, then `check_docs.py` |
+| `python run.py build <files…> -o out.rom` | the same build, then opens the result in the simulator |
+| `python run.py test` | runs the three self-check suites, then `check_docs.py` |
 
 It checks for `tkinter` before opening the window and prints install hints
 when it is missing. In the menu, the output of `asm`/`build` is the first
-source file with `.rom`.
+source file with `.rom`; the menu offers `.asm` and `.c` files (not the C
+library's own).
 
 ### 7.2 `logisim/run_rom.py`
 
@@ -763,10 +772,15 @@ python compiler/src/asm/selftest.py   # 18 checks: encodings, values, strings, j
                                       # raw output, .obj round trip, CLI, examples
 python cpu_sim/src/selftest.py        # 15 checks: immediates, flags, carry flag, DIV by 0, RAM,
                                       # ROM writes, stack, frames, floats, FCMP flags,
-                                      # keyboard, backspace, ADDR/JMRB
+                                      # keyboard, backspace, ADDR/JMRB, float specials
+python compiler/src/cc/selftest.py    # 12 checks: preprocessor, error messages, warnings,
+                                      # type sizes, exit/atexit, keyboard input, globals
+                                      # after a reset, library override, reserved names,
+                                      # mixing C and assembly, CLI, and every test program
+                                      # in compiler/src/cc/tests/ against gcc's output
 python check_docs.py                  # 3 checks on the docs: every repo path they name
-                                      # exists, every example is listed in 5.3, every
-                                      # TWEAKS switch is in 3.4
+                                      # exists, every example (.asm, .c) is listed in
+                                      # 5.3, every TWEAKS switch is in 3.4
 ```
 
 `check_docs.py` checks only mechanical facts. It skips build output under
@@ -818,3 +832,176 @@ are still in the git history.
 | --- | --- |
 | subcircuits `ROM`, `program_loader`, `sign_controller`, `teste` | not used anywhere. `ROM` is an older memory block (the program now lives in the ROM inside `RAM`); `teste` is the FPU prototype, with π and e as test constants |
 | comparator against `0x287` in `RAM` | a debugging watch on one address, not part of the design |
+
+---
+
+## 10. The C compiler (`compiler/src/cc/`) and the C library (`compiler/libc/`)
+
+The language as a user sees it (what C is accepted, type sizes, the
+library, mixing with assembly) is in
+[`compiler/c_language.md`](compiler/c_language.md). The choices made while
+building it, and what is still a guess, are in
+[`compiler/c_decisions.md`](compiler/c_decisions.md). This section explains
+how the compiler works.
+
+### 10.1 Command line
+
+```
+python compiler/src/cc compile prog.c [-o prog.asm]                 # C -> assembly
+python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map] [--no-libc]
+python compiler/src/cc run   prog.c [...] [--keys TEXT] [--steps N] [--stats] [--trace]
+        common options: -I dir, -D NAME[=value], -w (no warnings)
+```
+
+Output paths follow the assembler's rule (4.1): `compiler/ROM/<first
+input>.rom`, `-o name` inside `compiler/ROM/`, an `-o` with a folder as
+written. `build` and `run` also write `<name>.asm` for each `.c` next to the
+`.rom`. `run` builds, runs the image in the simulator without a window and
+prints the display; it exits with 2 if the program doesn't halt within
+`--steps` (default 50 million).
+
+### 10.2 Modules
+
+| file | role |
+| --- | --- |
+| `__main__.py` | the command line above |
+| `cerror.py` | `CError` (`file:line:col: error: ...`), `error_at(token, message)` |
+| `lexer.py` | text -> preprocessing tokens (line splicing, comments, pp-numbers, literals with prefixes), and `parse_number` / `decode_literal` for after preprocessing |
+| `preprocessor.py` | `#include`, `#define`, `#if`..., macro expansion with hide sets (Prosser's algorithm), predefined macros, `#if` arithmetic; then keywords, numbers and string joining |
+| `typesys.py` | `Type` (sizes in words, all alignment 1), integer promotion, usual arithmetic conversions, compatibility, `type_name` for messages |
+| `nodes.py` | `Node` (one expression or statement; the kinds are listed in the file) and `Obj` (a variable or function) |
+| `cparser.py` | recursive-descent parser that type-checks as it builds (in the style of chibicc): declarations, initializers, constant folding, constant evaluation for static data, implicit conversions as `cast` nodes |
+| `regalloc.py` | which locals live in registers, and which of them each call must keep |
+| `codegen.py` | syntax tree -> assembly text, one function at a time |
+| `peephole.py` | clean-ups on each function's instructions |
+| `driver.py` | compiles files, caches and selects the C library, writes crt0, links (with `compiler/src/asm`'s assembler and linker), runs the simulator |
+| `selftest.py` | the self-checks (7.3) |
+| `tests/` | the test programs, their gcc outputs (`.expected`) and `difftest.py` |
+
+Like the assembler, the modules import each other by plain name; the
+driver puts `compiler/src/asm/` on `sys.path` to use `assembler`, `linker`
+and `objfile` (the module names don't overlap).
+
+### 10.3 Code generation
+
+**Registers.** R0 takes every ALU result. R1-R12 hold expression
+temporaries and register variables (the temporaries get the low numbers,
+at least five of them). R13 is scratch for frame indexes and addresses.
+R14 and R15 are left to the `CALL`/`RET`/`RESTORE` pseudo-instructions and
+the runtime helpers.
+
+**Values.** Each expression evaluates to a `Val`: a constant (used directly
+as `#imm` or `DATA`), a temporary register, a variable's register (read but
+not changed), R0 (moved out before anything else uses the ALU), or the
+address of an aggregate. An lvalue is an `Addr`: a frame slot
+(`EBP + offset`, maybe plus a register), a memory address (label + offset,
+maybe plus a register), or a register variable. Loads and stores pick the
+cheapest instruction: `STK GET/SET` for frame slots, `LD`/`ST` for a known
+address, `ALD`/`AST` for base + index (array elements). A local's address is
+needed only when it escapes (`&x`, an array passed to a function): then the
+function computes `FP = 0x10000 + EBP` once in its prologue (`STK CALL`,
+`STK GET 0`, `STK RET` read EBP) and keeps it in a frame slot.
+
+**Evaluation order.** Of two operands, the one that needs no code goes
+last, the one with a call goes first (fewer registers to keep across the
+call), otherwise the deeper one first.
+
+**Comparisons and jumps.** Conditions compile straight to jumps (`&&`,
+`||`, `!` without making 0/1 values). Signed: `CMP` and the A flag
+(`a < c` is "not A after `CMP a, #c-1`"). Unsigned: `SUB` and C, which is a
+borrow. Floats: `FCMP` and N/Z only, so a NaN compares false (`a <= b` is
+"N or Z after `FCMP a, b`"). Pointers compare as signed (addresses are below
+2^17).
+
+**Arithmetic.** `x << k` is `MULT x, #2^k`; logical `x >> k` is `SHR x` then
+`DIV R0, #2^(k-1)`; arithmetic `>>` of a negative number is
+`NOT(NOT x >> k)`. By a variable count, `2^n` comes from the `_pow2` table.
+Unsigned `/` and `%` by a power of two are shifts and masks, otherwise a call
+to `_udiv`/`_umod`. Conversions: `FLOAT`/`INT` (truncation, as C wants),
+with corrections for unsigned values of 2^31 and above.
+
+**Calls.** Arguments are pushed with `STK PUSH` (structs word by word) and
+the call is the assembler's `CALL f, N`, or for a function pointer the same
+sequence with `JMRB`. Live temporaries and the register variables still
+needed after the call are kept with `SAVE`/`RESTORE`; a register variable
+that the arguments themselves change is written to its stack slot before
+the call and read back after. Variadic calls push the variadic arguments,
+then the fixed ones, then the variadic word count; `va_start` computes
+`FP - (fixed words + 2) - count`.
+
+**Frames.** Parameters are at negative offsets from EBP, locals (and
+struct-result buffers, and the slots of register variables a call keeps in
+memory) at EBP+1 up. The prologue
+reserves the frame with `STK PUSH`es, or above 15 words sets ESP directly
+(two `STK RET`s, as `setjmp.asm` explains), then loads the register
+parameters. Every return jumps to one `RET`.
+
+**Register variables** (`regalloc.py`): scalar locals and parameters whose
+address is never taken. Uses count 8 times more per enclosing loop; a
+variable gets a register if 2 instructions per use outweigh 4 for every call
+where it must be kept (and 3 to load a parameter). A call keeps a variable
+if it is used later in the function, in the same statement, or anywhere in
+a loop around the call; with labels and `goto` in the function, at every
+call.
+
+**Other statements.** A `switch` with 5 or more cases spread over at most 3
+slots per case becomes a jump table (`ALD` + `JMRB` through a `.word` list);
+others a chain of `CMP`/`RJF`. Struct copies up to 8 words are unrolled,
+longer ones a loop. Bit-fields are read and written with `MULT`, the shift
+sequences and `AND`/`OR` on their word.
+
+**Peephole pass** (`peephole.py`): drops a `DATA` or `CPY` that would
+reload a value a register already has (within straight-line code), a `TEST`
+whose flags the previous integer ALU instruction already set (before a jump
+on Z/N), jumps to the next instruction and jump chains, and code no label
+leads to after an unconditional jump.
+
+### 10.4 Data and start-up
+
+* Functions, string literals, `const` data, jump tables and the starting
+  values of initialised variables go in `.rom`. Variables go in `.ram`
+  (`.space`): the initialised ones together, then the zeroed ones.
+* Each C file gets an `_init_<file>` routine (only when it has RAM data): it
+  copies its starting values from the `_T_<file>` template in ROM, and
+  clears the rest. `driver.crt0_source` writes the start-up code for each
+  build: `start` calls every linked `_init_` routine, then
+  `main(0, {NULL})`, then `exit` with main's result. The build links, in
+  order: crt0, the given files, the library files they need, and a last
+  object whose `.ram` label `_end` marks the end of all variables (where
+  malloc's heap starts).
+* Labels: C names as they are (or `_X` + name, 5 in `c_language.md`);
+  compiler labels `_K<n>` (code), `_L<n>` (statements), `_S<n>` (strings),
+  `_F<n>` (`__func__`), `_V<n>_<name>` (static locals), `_C<n>`, `_G<n>`.
+
+### 10.5 The C library
+
+`compiler/libc/` holds the headers (`include/`), the library in C (one file
+per group of functions: `printf.c`, `format.c`, `fdigits.c`, `scanf.c`,
+`string.c`, `malloc.c`, `math.c`, ...), `local.h` (shared by the library
+files only) and two assembly files: `runtime.asm` (`_pow2`, `_udiv`,
+`_umod`, `_Exit`) and `setjmp.asm`.
+
+* The driver compiles each library file the first time it is needed and
+  keeps the `.obj` (and the `.asm`, for reading) in `compiler/ROM/libc/`,
+  with a key made from the file, the compiler's sources and the headers: a
+  change to any of them rebuilds it.
+* `driver.select_library` links a library file only when it defines a name
+  that is still missing, repeating until nothing is: like a static library,
+  so a program's own `puts` wins and nothing unused is linked.
+* `runtime.asm`'s helpers are called with `DATA R14, back` / `RJMP _udiv`
+  and return with `JMRB R14`; they change only R0, R13, R14, R15.
+* `format.c` prints floats exactly: `fdigits.c` turns the float's exact
+  value into decimal digits (base-10000 pieces for big integer parts, a
+  160-bit binary fraction for the rest) and rounds ties to even.
+
+### 10.6 Checking it
+
+* `compiler/src/cc/selftest.py` (part of `python run.py test`, 7.3).
+* `compiler/src/cc/tests/*.c`: programs whose output must match gcc's,
+  stored in `<name>.expected`. `python compiler/src/cc/tests/difftest.py`
+  builds each one with gcc and with this compiler and compares;
+  `--update` rewrites the `.expected` files from gcc. A test reading input
+  would have a `<name>.keys` file and a hand-written `.expected` (the echo
+  of typed keys makes gcc's output differ).
+* `compiler/examples/c/circuit_test.c` runs the compiler's tricky code
+  paths on the circuit (all lines `ok` on 2026-10-10).

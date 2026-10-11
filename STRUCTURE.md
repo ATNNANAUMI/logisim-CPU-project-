@@ -2,17 +2,20 @@
 
 Project: **logisim-CPU-project**. A 32-bit CPU built from logic gates in
 Logisim-evolution 4.1.0, plus its toolchain: an assembler and linker written
-in Python, an assembly standard library, and a Python simulator that runs the
-same ROM images as the circuit. Python 3.10+, standard library only (`tkinter`
-for the simulator window). Detailed docs are in `TECHNICAL.md`. The assembly
-language reference is `compiler/assembly_syntax.md`.
+in Python, an assembly standard library, a C compiler ("tiny C") with its
+own C library, and a Python simulator that runs the same ROM images as the
+circuit. Python 3.10+, standard library only (`tkinter` for the simulator
+window). Detailed docs are in `TECHNICAL.md`. The assembly language
+reference is `compiler/assembly_syntax.md`, the C one `compiler/c_language.md`.
 
 ## Pipeline
 
 ```
+.c ──(C compiler)──► .asm
+                       │
 .asm ──(assembler)──► .obj (JSON) ──(linker)──► .rom (Logisim "v2.0 raw")
-                                                   ├──► cpu_sim/src/main.py      (Python simulator)
-                                                   └──► logisim/run_rom.py       (real circuit, headless)
+                                    ▲             ├──► cpu_sim/src/main.py      (Python simulator)
+       crt0 + C library (.obj) ─────┘             └──► logisim/run_rom.py       (real circuit, headless)
 ```
 
 ## Directory tree
@@ -32,6 +35,8 @@ logisim-CPU-project-/
 │
 ├── compiler/
 │   ├── assembly_syntax.md    CURRENT assembly language reference
+│   ├── c_language.md         the C language (tiny C): types, what's supported, library, mixing with asm
+│   ├── c_decisions.md        why the C compiler is the way it is; guesses; open questions
 │   ├── src/asm/              assembler + linker (run as `python compiler/src/asm <cmd>`)
 │   │   ├── __main__.py       CLI: assemble | link | build  (-o out, --map); writes to compiler/ROM/; reports errors from every input
 │   │   ├── parser.py         text → pieces: comments, labels, operands, strings, value expressions
@@ -42,6 +47,21 @@ logisim-CPU-project-/
 │   │   ├── errors.py         AsmError (file:line: message), AsmErrors (batch)
 │   │   ├── selftest.py       18 checks (incl. building every compiler/examples program)
 │   │   └── asm_grammar.py    generates railroad-diagram HTML of the grammar (needs railroad-diagrams)
+│   ├── src/cc/               C compiler (run as `python compiler/src/cc <cmd>`); imports src/asm's modules
+│   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; run: --keys --steps --stats --trace)
+│   │   ├── lexer.py, preprocessor.py   tokens; #include/#define/#if, macro expansion (hide sets)
+│   │   ├── typesys.py        types (sizes in words), promotions, compatibility
+│   │   ├── nodes.py          syntax tree Node, Obj (variable/function)
+│   │   ├── cparser.py        parser + type checker (chibicc style), initializers, constant folding
+│   │   ├── regalloc.py       which locals get registers; which a call must keep
+│   │   ├── codegen.py        tree → assembly (Val/Addr model, calls, frames, switch tables)
+│   │   ├── peephole.py       clean-ups per function
+│   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0, link, run in simulator
+│   │   ├── cerror.py         CError (file:line:col: error: ...)
+│   │   ├── selftest.py       12 checks (incl. every tests/ program against gcc's output)
+│   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update)
+│   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, ...),
+│   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod, _Exit), setjmp.asm
 │   ├── examples/
 │   │   ├── programs/         hello, print_a-z, count_0-9, sum_1-10, abs_value, stack_reverse, echo (no stdlib); guess, untested (with stdlib)
 │   │   ├── stdlib/stdlib.asm             standard library (I/O, strings, memory, math, conversion)
@@ -49,10 +69,12 @@ logisim-CPU-project-/
 │   │   ├── stdlib/stdlib_input_demo.asm  read_line / read_int / read_float / read_char
 │   │   ├── stdlib/stdlib_more_demo.asm   the functions added 2026-10-03 (no typing, no hex display)
 │   │   ├── two_files/main.asm, lib.asm   multi-file linking example
+│   │   ├── c/                C examples: hello, primes, structs, guess (input); circuit_test (self-checking, for the circuit)
 │   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
 │   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag),
 │   │                         diag14, diag15 (float division by zero, NaN, INT out of range)
-│   └── ROM/                  build output (.obj/.rom/.map), git-ignored, created on first build
+│   └── ROM/                  build output (.obj/.rom/.map/.asm), git-ignored, created on first build;
+│                             ROM/libc/ caches the compiled C library
 │
 └── cpu_sim/
     ├── src/                  simulator (modules import each other by plain name: run as scripts)
@@ -135,6 +157,26 @@ The design follows the "But How Do It Know?" style: a single bus,
   `STK GET` index `-(N+1)+(i-1)`; the last arg is at -2.
 * stdlib: `read_char` doesn't echo; `read_line` echoes and handles backspace.
 
+## C compiler conventions (details: `compiler/c_language.md`)
+
+* Every scalar is one word: `sizeof(char) == sizeof(int) == 1`, `CHAR_BIT`
+  is 32; `double` is the 32-bit float; no `long long` (an error). Strings are
+  one char per word, like the asm stdlib's.
+* Same calling convention as the asm stdlib; C names are asm labels
+  (`_X` prefix for names the assembler rejects, like `add`). Variadic calls
+  push variadic args first, then fixed ones, then the variadic word count.
+* Registers in compiled code: R1-R12 temporaries and register variables,
+  R13 scratch, R14/R15 left to CALL/RET/RESTORE and the runtime helpers.
+* C programs link the C library (`compiler/libc/`), not `stdlib.asm`; only
+  the library files a program needs are linked; a program's own function
+  with a library name wins.
+* String literals and const globals are in ROM (writes ignored).
+  Initialised globals are copied to RAM by per-file `_init_` routines that
+  crt0 calls before `main`; malloc's heap runs from `_end` to `0x1FFFF`.
+* stdin: a line at a time, echoed, backspace edits, Ctrl-D (0x04) = EOF.
+* Tests: `compiler/src/cc/tests/*.c` must print exactly gcc's output
+  (`.expected`); `difftest.py` checks with gcc.
+
 ## Common commands
 
 ```
@@ -143,6 +185,10 @@ python compiler/src/asm build prog.asm compiler/examples/stdlib/stdlib.asm [--ma
 python cpu_sim/src/main.py compiler/ROM/prog.rom                       # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 --keys $'text\n'
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom   (jar: $LOGISIM_JAR or the Arch package path)
+python compiler/src/cc run prog.c [--keys $'12\n'] [--stats]      # C: build + run in the simulator
+python compiler/src/cc build prog.c [more.c x.asm] [-o prog.rom]   # C: -> compiler/ROM/prog.rom (+ prog.asm)
+python run.py build prog.c                                          # C or asm: build, then open the simulator
+python compiler/src/cc/tests/difftest.py [--update]                # C tests against gcc
 ```
 
 ## Open questions / gotchas
@@ -158,5 +204,11 @@ python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom   (jar: $LOGISI
   `diag14.asm`/`diag15.asm` measured the circuit and the simulator now matches.
 * Still-unconfirmed behaviours can be switched in `cpu_sim/src/config.py`
   (TWEAKS).
+* The C library is compiled once and cached in `compiler/ROM/libc/`; the
+  cache key includes the compiler's sources and the headers, so it rebuilds
+  itself. Deleting `compiler/ROM/` is always safe.
+* The circuit runs about 160 instructions a second: a C program for the
+  circuit should avoid `printf` in loops (a float `printf` costs thousands of
+  instructions). `compiler/examples/c/circuit_test.c` takes about 15 000.
 * Outdated notes: `logisim/cpu datas/` (see TECHNICAL.md §9). The old
   hand-assembled programs were removed on 2026-10-06 (still in git history).
