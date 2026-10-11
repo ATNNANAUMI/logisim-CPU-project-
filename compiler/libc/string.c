@@ -1,6 +1,5 @@
 /* string.h: strings and memory blocks. A char is a whole 32-bit word. */
 #include <string.h>
-#include <stdlib.h>
 
 void *memcpy(void *dst, const void *src, size_t n)
 {
@@ -233,11 +232,3 @@ char *strerror(int errnum)
     }
 }
 
-char *strdup(const char *s)
-{
-    size_t n = strlen(s) + 1;
-    char *p = malloc(n);
-    if (p)
-        memcpy(p, s, n);
-    return p;
-}

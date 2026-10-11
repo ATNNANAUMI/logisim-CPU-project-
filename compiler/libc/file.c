@@ -3,11 +3,6 @@
 #include <stdio.h>
 #include "local.h"
 
-struct _FILE {
-    int output;          /* 1 for stdout/stderr */
-    int eof;
-    int error;
-};
 
 static struct _FILE in_file = { 0, 0, 0 };
 static struct _FILE out_file = { 1, 0, 0 };
@@ -41,29 +36,6 @@ int fputs(const char *s, FILE *stream)
     while (*s)
         __builtin_out(_DISPLAY, *s++);
     return 0;
-}
-
-int vfprintf(FILE *stream, const char *fmt, va_list ap)
-{
-    _Sink out;
-    if (!stream->output) {
-        stream->error = 1;
-        return -1;
-    }
-    out.buf = 0;
-    out.size = 0;
-    out.len = 0;
-    return _format(&out, fmt, ap);
-}
-
-int fprintf(FILE *stream, const char *fmt, ...)
-{
-    va_list ap;
-    int n;
-    va_start(ap, fmt);
-    n = vfprintf(stream, fmt, ap);
-    va_end(ap);
-    return n;
 }
 
 int fflush(FILE *stream)
@@ -140,64 +112,3 @@ void perror(const char *s)
     fputs("error\n", stderr);
 }
 
-/* the input side: see getchar.c */
-int fgetc(FILE *stream)
-{
-    int c;
-    if (stream->output) {
-        stream->error = 1;
-        return EOF;
-    }
-    c = getchar();
-    if (c == EOF)
-        stream->eof = 1;
-    return c;
-}
-
-int getc(FILE *stream)
-{
-    return fgetc(stream);
-}
-
-char *fgets(char *buf, int size, FILE *stream)
-{
-    int n = 0;
-    if (size <= 0)
-        return 0;
-    while (n < size - 1) {
-        int c = fgetc(stream);
-        if (c == EOF)
-            break;
-        buf[n++] = c;
-        if (c == '\n')
-            break;
-    }
-    if (n == 0)
-        return 0;
-    buf[n] = 0;
-    return buf;
-}
-
-size_t fread(void *ptr, size_t size, size_t count, FILE *stream)
-{
-    char *p = ptr;
-    size_t i, n = size * count;
-    for (i = 0; i < n; i++) {
-        int c = fgetc(stream);
-        if (c == EOF)
-            break;
-        p[i] = c;
-    }
-    return size ? i / size : 0;
-}
-
-int fscanf(FILE *stream, const char *fmt, ...)
-{
-    va_list ap;
-    int n;
-    (void)stream;
-    va_start(ap, fmt);
-    n = vscanf(fmt, ap);
-    va_end(ap);
-    return n;
-}
