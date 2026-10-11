@@ -65,6 +65,7 @@ class Assembler:
         self.externs = {}      # name -> line of its .extern
         self.statements = []
         self.part_marks = []   # ROM offsets of .part directives
+        self.locs = []         # [ROM offset, source file, line] from .loc
         self.part_starts = [0]
         self.rom = []
         self.relocs = []
@@ -92,6 +93,7 @@ class Assembler:
             externs=sorted(self.externs),
             relocs=self.relocs,
             parts=self.part_list(),
+            lines=self.locs,
         )
         return obj, self.warnings
 
@@ -236,6 +238,17 @@ class Assembler:
                 raise AsmError('expected .string "text"')
             codes = parse_string(args[0]) + [0]
             self.add_statement(line, name, rest, len(codes), codes)
+
+        elif name == ".loc":
+            args = split_operands(rest)
+            if len(args) != 2:
+                raise AsmError('expected .loc "file", line')
+            path = "".join(chr(c) for c in parse_string(args[0]))
+            line_no, is_float = self.constant(args[1])
+            if is_float or line_no < 0:
+                raise AsmError(".loc needs a line number")
+            if self.section == "rom":
+                self.locs.append([self.sizes["rom"], path, line_no])
 
         elif name == ".part":
             if rest:

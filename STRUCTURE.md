@@ -58,7 +58,7 @@ logisim-CPU-project-/
 │   │   ├── peephole.py       clean-ups per function
 │   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0, link, run in simulator
 │   │   ├── cerror.py         CError (file:line:col: error: ...)
-│   │   ├── selftest.py       13 checks (incl. every tests/ program against gcc's output)
+│   │   ├── selftest.py       14 checks (incl. every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
 │   │                         fuzz.py: random programs, gcc vs tiny C
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, ...),
@@ -85,7 +85,8 @@ logisim-CPU-project-/
     │   ├── memory.py         ROM/RAM banks, v2.0 raw loader
     │   ├── devices.py        Display (0x5C), Keyboard (0xF0, empty reads 0), DeviceBus (+ hex display value, 0x3C)
     │   ├── cpu.py            CPU: step(), run(), reset(), stack ops, COMM
-    │   ├── gui.py            Tk window (registers, ROM/RAM panes, display, live keyboard, breakpoints, speed)
+    │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
+    │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG]`
     │   └── selftest.py       15 checks
 ```
@@ -144,7 +145,8 @@ The design follows the "But How Do It Know?" style: a single bus,
 
 ## Assembler conventions
 
-* Directives: `.rom .ram .global .extern .equ .word .string .space`.
+* Directives: `.rom .ram .global .extern .equ .word .string .space .part .loc`
+  (`.loc "file", line`: source line info for the `.map`, written by the C compiler).
   `.ram` allows only labels + `.space`.
 * Immediates use `#`: `ADD R1, #5`. Values can be dec, hex, bin, `'c'`, or
   floats (stored as float32 bits), with `+`/`-` and at most one label.

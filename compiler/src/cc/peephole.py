@@ -16,7 +16,8 @@ program does:
                    label leads to goes
 
 Items are the code generator's tuples: ("ins", op, args), ("label", name),
-("comment", text), ("raw", text).
+("comment", text), ("loc", file, line) (a .loc: treated like a comment),
+("raw", text).
 """
 
 import re
@@ -171,7 +172,7 @@ def jumps(items):
         while label in target_of and label not in seen:
             seen.add(label)
             j = target_of[label] + 1
-            while j < len(items) and items[j][0] in ("label", "comment"):
+            while j < len(items) and items[j][0] in ("label", "comment", "loc"):
                 j += 1
             if j < len(items) and items[j][0] == "ins" and items[j][1] == "RJMP":
                 label = items[j][2][0]
@@ -196,7 +197,7 @@ def jumps(items):
             # RJF x, A / RJMP B / A:  ->  RJNF x, B / A:
             if op in ("RJF", "RJNF") and len(args[0]) == 1:
                 j = i + 1
-                while j < len(items) and items[j][0] == "comment":
+                while j < len(items) and items[j][0] in ("comment", "loc"):
                     j += 1
                 if j < len(items) and items[j][0] == "ins" and items[j][1] == "RJMP" and \
                         labels_before_next(items, j + 1, dest):
@@ -232,7 +233,7 @@ def labels_before_next(items, i, label):
         if item[0] == "label":
             if item[1] == label:
                 return True
-        elif item[0] != "comment":
+        elif item[0] not in ("comment", "loc"):
             return False
         i += 1
     return False

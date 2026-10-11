@@ -42,6 +42,7 @@ class Program:
     rom: list          # the ROM image, from address 0
     ram_used: int      # words of RAM reserved above the stack
     symbols: list      # every label's final address (for the map file)
+    lines: list = None # (address, file, line) where source lines start
 
 
 @dataclass
@@ -55,6 +56,7 @@ class _View:
     globals: list
     externs: list
     relocs: list
+    lines: list
 
 
 def _parts(obj):
@@ -124,7 +126,8 @@ def _view(obj, keep):
     parts = _parts(obj)
     if keep == set(range(len(parts))):
         return _View(obj.source, list(obj.rom), obj.ram_size, dict(obj.labels),
-                     list(obj.globals), list(obj.externs), list(obj.relocs))
+                     list(obj.globals), list(obj.externs), list(obj.relocs),
+                     [list(e) for e in obj.lines])
     pieces = []                       # (old start, old end, new start)
     rom = []
     for i, (start, end, _) in enumerate(parts):
@@ -158,7 +161,12 @@ def _view(obj, keep):
             addend = move(r.addend)
         relocs.append(type(r)(at, r.kind, r.symbol, r.section, addend, r.line, r.rom_only))
     globals_ = [g for g in obj.globals if g in labels]
-    return _View(obj.source, rom, obj.ram_size, labels, globals_, list(obj.externs), relocs)
+    lines = []
+    for offset, path, line in obj.lines:
+        if any(s <= offset < e for s, e, _ in pieces):
+            lines.append([move(offset), path, line])
+    return _View(obj.source, rom, obj.ram_size, labels, globals_, list(obj.externs), relocs,
+                 lines)
 
 
 def link(objects, libraries=()):
@@ -253,7 +261,9 @@ def link(objects, libraries=()):
     if errors:
         raise AsmErrors(errors)
     symbols.sort(key=lambda s: (s.address, s.name))
-    return Program(rom, ram_next - RAM_DATA_START, symbols)
+    lines = sorted((base["rom"] + offset, path, line)
+                   for obj, base in zip(objects, bases) for offset, path, line in obj.lines)
+    return Program(rom, ram_next - RAM_DATA_START, symbols, lines)
 
 
 def format_raw(words, per_line=8):
@@ -282,4 +292,9 @@ def format_map(program, title):
     for s in program.symbols:
         mark = "  (global)" if s.is_global else ""
         lines.append(f"{s.address:05x}      {s.section:<7}  {s.name:<25} {s.source}{mark}")
+    if program.lines:
+        lines.append("# source lines: where each line's code starts")
+        lines.append("# address  line   file")
+        for address, path, line in program.lines:
+            lines.append(f"{address:05x}      {line:<6} {path}")
     return "\n".join(lines) + "\n"

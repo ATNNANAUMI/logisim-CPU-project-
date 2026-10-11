@@ -8,7 +8,8 @@ build and run take .c, .asm and .obj files together. The C library is
 linked in automatically (--no-libc leaves it out; then the program needs
 its own 'start'). Output goes to compiler/ROM/ like the assembler's; -o picks
 the name (a path with a folder is used as written). build also writes the
-.asm of each .c file next to the .rom, for reading.
+.asm of each .c file and a .map (labels and C source lines, which the
+simulator window uses) next to the .rom.
 """
 
 import argparse
@@ -72,7 +73,9 @@ def main(argv=None):
                                   asm_dir=out.parent, use_libc=not args.no_libc, warn=warn,
                                   libs=args.lib)
         out.write_text(driver.format_rom(program), encoding="utf-8")
-        if args.map:
+        if args.map or args.command == "build":
+            # build always writes the map: the simulator window reads it to
+            # show the C source (its "source lines" section)
             out.with_suffix(".map").write_text(driver.format_map(program, out.name),
                                                encoding="utf-8")
         if args.command == "build":
