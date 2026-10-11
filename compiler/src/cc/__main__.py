@@ -46,6 +46,8 @@ def main(argv=None):
         p.add_argument("-o", "--output", help="output file (default: compiler/ROM/<first input>.rom)")
         p.add_argument("--map", action="store_true", help="also write a .map file of label addresses")
         p.add_argument("--no-libc", action="store_true", help="don't link the C library")
+        p.add_argument("--lib", action="append", default=[], metavar="FILE",
+                       help="link FILE (.asm/.obj) as a library: only what the program uses")
         add_common(p)
         if name == "run":
             p.add_argument("--keys", default="", help="keys typed before the program starts")
@@ -67,7 +69,8 @@ def main(argv=None):
 
         out = driver.output_path(args.output, args.inputs[0], ".rom")
         program, _ = driver.build(args.inputs, args.include, args.define,
-                                  asm_dir=out.parent, use_libc=not args.no_libc, warn=warn)
+                                  asm_dir=out.parent, use_libc=not args.no_libc, warn=warn,
+                                  libs=args.lib)
         out.write_text(driver.format_rom(program), encoding="utf-8")
         if args.map:
             out.with_suffix(".map").write_text(driver.format_map(program, out.name),

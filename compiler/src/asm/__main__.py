@@ -9,6 +9,11 @@ it works from any folder). -o picks the output: a bare name (-o demo.rom)
 still goes into compiler/ROM/, a path with a folder (-o out/demo.rom,
 -o ./demo.rom) is used as written. --map (link and build) also writes a .map
 file next to the .rom, listing every label's final address.
+
+--lib FILE (link and build, repeatable) links FILE as a library: only the
+functions the program uses (and what they use) go in, after the other files:
+
+    python compiler/src/asm build prog.asm --lib compiler/examples/stdlib/stdlib.asm
 """
 
 import argparse
@@ -69,12 +74,17 @@ def load_object(path, command):
 
 def run_link(args):
     objects, problems = [], []
-    for path in args.inputs:                  # keep going to report every file
+    libraries = []
+    lib_paths = args.lib or []
+    for path in args.inputs + lib_paths:      # keep going to report every file
         try:
             if args.command == "link" or path.lower().endswith(".obj"):
-                objects.append(load_object(path, args.command))
+                obj = load_object(path, args.command)
             else:
-                objects.append(assemble_file(path))
+                obj = assemble_file(path)
+            objects.append(obj)
+            if path in lib_paths and len(objects) > len(args.inputs):
+                libraries.append(obj)
         except AsmErrors as e:
             problems.extend(e.errors)
         except AsmError as e:
@@ -84,7 +94,7 @@ def run_link(args):
     if problems:
         raise AsmErrors(problems)
 
-    program = linker.link(objects)
+    program = linker.link(objects, libraries)
     out = output_path(args.output, args.inputs[0], ".rom")
     out.write_text(linker.format_raw(program.rom), encoding="utf-8")
     print(f"{out}: {len(program.rom)} words of ROM, {program.ram_used} words of RAM")
@@ -112,6 +122,8 @@ def main(argv=None):
         p.add_argument("-o", "--output", help="output file (default: compiler/ROM/<first input>.rom)")
         p.add_argument("--map", action="store_true",
                        help="also write a .map file with every label's address")
+        p.add_argument("--lib", action="append", metavar="FILE",
+                       help="link FILE as a library: only the parts the program needs")
 
     args = cli.parse_args(argv)
     try:

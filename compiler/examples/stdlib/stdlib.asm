@@ -20,6 +20,8 @@
 ;
 ; BUILD (from the project root; the ROM lands in compiler/ROM/yourprog.rom)
 ;   python compiler/src/asm build yourprog.asm compiler/examples/stdlib/stdlib.asm
+; or, to link only the functions yourprog uses (and the ones they call):
+;   python compiler/src/asm build yourprog.asm --lib compiler/examples/stdlib/stdlib.asm
 ;
 ; FUNCTIONS                                   returns
 ;   output

@@ -6,7 +6,8 @@
 The C library (compiler/libc/: .c and .asm files, headers in include/) is
 compiled once and cached in compiler/ROM/libc/. Like a static library, only
 the files that define something the program needs are linked in, so a
-program can define its own function with a library name.
+program can define its own function with a library name; and of those files
+only the functions and data the program needs (the linker's library mode).
 
 The start-up code (crt0) is generated for each build: it calls every linked
 file's _init_ routine (which puts global variables in their starting state),
@@ -232,14 +233,16 @@ def output_path(given, first_input, suffix):
     return out
 
 
-def build(inputs, include_dirs=(), defines=(), asm_dir=None, use_libc=True, warn=None):
+def build(inputs, include_dirs=(), defines=(), asm_dir=None, use_libc=True, warn=None,
+          libs=()):
     """Compile, assemble and link. Returns (Program, list of object files).
 
-    asm_dir: where to write the .asm made from each .c (None: don't write)."""
+    asm_dir: where to write the .asm made from each .c (None: don't write).
+    libs: more files (.asm, .obj) linked as libraries: only what is used."""
     taken = set()
     objects = []
     errors = []
-    for path in inputs:
+    for path in list(inputs) + list(libs):
         path = str(path)
         try:
             if path.endswith(".c"):
@@ -270,16 +273,19 @@ def build(inputs, include_dirs=(), defines=(), asm_dir=None, use_libc=True, warn
     if errors:
         raise BuildError(errors)
 
+    user_libs = objects[len(inputs):]
+    objects = objects[:len(inputs)]
     if use_libc:
         library = library_objects(warn)
-        chosen = select_library(objects, library)
-        crt0, _ = assemble(crt0_source(objects + chosen), "<crt0>")
+        chosen = select_library(objects + user_libs, library)
+        crt0, _ = assemble(crt0_source(objects + user_libs + chosen), "<crt0>")
         end, _ = assemble(END_SOURCE, "<end>")
-        all_objects = [crt0] + objects + chosen + [end]
+        all_objects = [crt0] + objects + user_libs + chosen + [end]
     else:
-        all_objects = objects
+        chosen = []
+        all_objects = objects + user_libs
     try:
-        program = linker.link(all_objects)
+        program = linker.link(all_objects, user_libs + chosen)
     except AsmErrors as e:
         raise BuildError([str(x) for x in e.errors]) from None
     return program, all_objects

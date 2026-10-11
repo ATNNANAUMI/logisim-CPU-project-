@@ -322,6 +322,57 @@ def check_link_errors():
           "        .global buf\n        .ram\nbuf: .space 1")
 
 
+def check_library_parts():
+    """--lib: only the parts the program needs are linked."""
+    main = """
+            .global start
+            .extern used, falls, table
+    start:  CALL used
+            CALL falls
+            DATA R1, table
+            HALT
+    """
+    lib = """
+            .global used, unused, falls, next_one, table
+    used:   CALL helper
+            RJMP done_part       ; a jump into another part
+    helper: RET                  ; private: belongs to used's part
+    unused: DATA R1, 99
+            RET
+    falls:  DATA R2, 1           ; no RET: falls through into next_one
+    next_one:
+            RET
+            .part
+    done_part:
+            RET
+    table:  .word 7, 8, 9
+    """
+    objects = [assemble(main, "main.asm")[0], assemble(lib, "lib.asm")[0]]
+    program = linker.link(objects, [objects[1]])
+    names = {sym.name for sym in program.symbols if sym.source == "lib.asm"}
+    assert names == {"used", "helper", "falls", "next_one", "done_part", "table"}, names
+    assert 99 not in program.rom                          # unused is gone
+    whole = linker.link([assemble(main, "main.asm")[0], assemble(lib, "lib.asm")[0]])
+    assert len(program.rom) == len(whole.rom) - 8         # unused: DATA (2) + RET (6)
+    # the jump from used into done_part still lands on done_part
+    addr = {sym.name: sym.address for sym in program.symbols}
+    jump_word = next(a for a in range(addr["used"], addr["helper"])
+                     if program.rom[a] == 0x0400) + 1
+    assert jump_word + linker_signed(program.rom[jump_word]) == addr["done_part"]
+    # a library nothing uses is left out entirely
+    alone = linker.link([assemble("        .global start\nstart: HALT", "m.asm")[0],
+                         assemble(lib, "lib.asm")[0]],
+                        [])
+    unused_lib = assemble(lib, "lib.asm")[0]
+    tiny = linker.link([assemble("        .global start\nstart: HALT", "m.asm")[0], unused_lib],
+                       [unused_lib])
+    assert len(tiny.rom) == 3 and len(alone.rom) > 3
+
+
+def linker_signed(v):
+    return v - (1 << 32) if v & 0x80000000 else v
+
+
 def check_raw_output():
     words = [1, 2, 0, 0, 0, 0, 0, 7, 0xFFFFFFFF] + [0] * 20
     text = linker.format_raw(words)
@@ -364,6 +415,11 @@ def check_command_line():
         assert cli.main(["link", str(tmp / "main.obj"), str(tmp / "lib.obj"),
                          "-o", str(tmp / "linked.rom")]) == 0
         assert parse_raw((tmp / "linked.rom").read_text()) == built
+        # --lib links only what is used
+        (tmp / "big.asm").write_text("        .global f, g\nf:      RET\ng:      DATA R1, 5\n        RET\n")
+        assert cli.main(["build", str(tmp / "main.asm"), "--lib", str(tmp / "big.asm"),
+                         "-o", str(tmp / "small.rom")]) == 0
+        assert parse_raw((tmp / "small.rom").read_text()) == built   # g left out
         # build reports a bad .asm AND a bad .obj, not just the first one
         (tmp / "bad.asm").write_text("        FOO R1\n")
         (tmp / "bad.obj").write_text("not json")
@@ -438,6 +494,7 @@ CHECKS = [
     check_errors,
     check_warnings,
     check_link_errors,
+    check_library_parts,
     check_raw_output,
     check_object_file_round_trip,
     check_command_line,

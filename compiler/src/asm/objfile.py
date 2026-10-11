@@ -9,10 +9,12 @@ Words are stored as hex strings.
     globals   labels other files may use
     externs   labels this file uses from other files
     relocs    words the linker fills in (see Reloc)
+    parts     [start, falls_through] of each part of the ROM (see assembler.py);
+              left out by older object files, which then have one part
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from errors import AsmError
 
@@ -57,6 +59,7 @@ class ObjectFile:
     globals: list
     externs: list
     relocs: list       # Reloc
+    parts: list = field(default_factory=list)   # [start, falls_through]
 
     def to_json(self):
         # Written by hand so it stays readable: 8 words per line, and one
@@ -78,6 +81,7 @@ class ObjectFile:
             f'"globals": {json.dumps(self.globals)}',
             f'"externs": {json.dumps(self.externs)}',
             '"relocs": ' + block("[", "]", [json.dumps(r.to_dict()) for r in self.relocs]),
+            f'"parts": {json.dumps(self.parts)}',
         ]
         return "{\n" + ",\n".join(" " + f for f in fields) + "\n}"
 
@@ -99,6 +103,7 @@ class ObjectFile:
                 globals=list(d["globals"]),
                 externs=list(d["externs"]),
                 relocs=[Reloc.from_dict(r) for r in d["relocs"]],
+                parts=[[int(start), bool(falls)] for start, falls in d.get("parts", [])],
             )
         except (ValueError, KeyError, TypeError, AttributeError):
             raise AsmError("not an object file from this assembler", path) from None

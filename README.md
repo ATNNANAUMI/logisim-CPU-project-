@@ -48,6 +48,7 @@ Or call the tools directly:
 # assemble + link a program with the standard library
 python compiler/src/asm build compiler/examples/stdlib/stdlib_demo.asm \
                               compiler/examples/stdlib/stdlib.asm -o demo.rom
+# (--lib compiler/examples/stdlib/stdlib.asm instead links only the functions used)
 # (written to compiler/ROM/demo.rom; an -o with a folder, like ./demo.rom, is used as is)
 
 # run it in the simulator (window, or terminal only)

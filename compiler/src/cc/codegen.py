@@ -376,6 +376,7 @@ class CodeGen:
             const = self.is_const_object(g.ty)
             if g.in_rom or (const and g.init_data is not None) or (const and g.is_tentative):
                 rom.append("")
+                rom.append("        .part")              # the linker may leave it out
                 rom.extend(self.data_words(g.asm_name, g.init_data or [0] * g.ty.size,
                                            g.is_string))
             elif g.init_data is not None and any(w != 0 for w in g.init_data):
@@ -384,6 +385,7 @@ class CodeGen:
                 ram_zero.append(g)
         if ram_init:
             templates.append("")
+            templates.append("        .part")
             templates.append(f"; starting values of {self.unit}'s initialised variables")
             templates.append(f"{self.template_label()}:")
             for g in ram_init:
@@ -431,7 +433,7 @@ class CodeGen:
         and clear the rest (RAM is not cleared by a reset)."""
         if not ram_init and not ram_zero:
             return []
-        lines = ["", f"; puts {self.unit}'s global variables in their starting state",
+        lines = ["", "        .part", f"; puts {self.unit}'s global variables in their starting state",
                  f"{self.init_label()}:"]
         n = 0
         if ram_init:
@@ -546,6 +548,7 @@ class CodeGen:
 
     def comment_header(self, fn):
         self.raw("")
+        self.raw("        .part")                # each function: a part the linker may drop
         self.raw(f"; {T.type_name(fn.ty, fn.name)}")
 
     def falls_through(self):
