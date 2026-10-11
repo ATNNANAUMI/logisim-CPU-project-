@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # three self-check suites (assembler 18, simulator 15, C compiler 12), then check_docs.py
+python run.py test                                   # three self-check suites (assembler 18, simulator 15, C compiler 13), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (~40 s: runs every test program)

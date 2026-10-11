@@ -46,7 +46,7 @@ python run.py build prog.c                         # build, then open the simula
   thousand.
 
 Errors and warnings look like gcc's: `prog.c:12:5: error: 'x' undeclared`.
-The compiler stops at the first error.
+After an error the compiler skips to the next statement or declaration and goes on, so one run reports up to 20 errors (a preprocessor error still stops it).
 
 
 ## 2. The machine as C sees it

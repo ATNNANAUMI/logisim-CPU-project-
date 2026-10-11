@@ -773,7 +773,7 @@ python compiler/src/asm/selftest.py   # 18 checks: encodings, values, strings, j
 python cpu_sim/src/selftest.py        # 15 checks: immediates, flags, carry flag, DIV by 0, RAM,
                                       # ROM writes, stack, frames, floats, FCMP flags,
                                       # keyboard, backspace, ADDR/JMRB, float specials
-python compiler/src/cc/selftest.py    # 12 checks: preprocessor, error messages, warnings,
+python compiler/src/cc/selftest.py    # 13 checks: preprocessor, error messages (several per run), warnings,
                                       # type sizes, exit/atexit, keyboard input, globals
                                       # after a reset, library override, reserved names,
                                       # mixing C and assembly, CLI, and every test program
@@ -865,7 +865,7 @@ prints the display; it exits with 2 if the program doesn't halt within
 | file | role |
 | --- | --- |
 | `__main__.py` | the command line above |
-| `cerror.py` | `CError` (`file:line:col: error: ...`), `error_at(token, message)` |
+| `cerror.py` | `CError` (`file:line:col: error: ...`), `CErrors` (several), `error_at(token, message)` |
 | `lexer.py` | text -> preprocessing tokens (line splicing, comments, pp-numbers, literals with prefixes), and `parse_number` / `decode_literal` for after preprocessing |
 | `preprocessor.py` | `#include`, `#define`, `#if`..., macro expansion with hide sets (Prosser's algorithm), predefined macros, `#if` arithmetic; then keywords, numbers and string joining |
 | `typesys.py` | `Type` (sizes in words, all alignment 1), integer promotion, usual arithmetic conversions, compatibility, `type_name` for messages |

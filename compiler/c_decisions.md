@@ -123,7 +123,7 @@ The language itself is described in [`c_language.md`](c_language.md).
 31. **Accepted from GNU C**: case ranges, `typeof`, `, ## __VA_ARGS__`,
     `asm("...")`, `__attribute__` (ignored), binary constants. Not accepted:
     statement expressions, `?:` with the middle part left out.
-32. **The compiler stops at the first error** (no error recovery).
+32. **After an error the parser skips to the next statement or declaration** and carries on, up to 20 errors; the code generator only runs when there were none. Errors after the first can be knock-on effects of it, as with gcc.
 
 ## Measured on the circuit while doing this
 
