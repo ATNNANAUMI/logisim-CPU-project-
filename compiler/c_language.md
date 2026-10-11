@@ -179,8 +179,9 @@ int twice(int n);              /* in twice.asm, .global twice */
 example in both directions. The assembly standard library
 (`compiler/examples/stdlib/stdlib.asm`) is not linked into C programs: the
 C library has its own functions with the standard names. It can still be
-listed as an input, but some of its names (`abs`, `rand`, `malloc`, `pow`,
-...) are also C library names, and `pow` there works on integers.
+listed as an input, but some of its names (`abs`, `rand`, `malloc`, ...)
+are also C library names. (Its integer power function is `ipow`, so it
+doesn't clash with C's `pow`.)
 
 
 ## 6. Machine-specific features
