@@ -1,0 +1,6 @@
+setjmp returned 0 (try 1)
+setjmp returned 50 (try 2)
+depth 5
+longjmp with 0 gives 1
+signal 2
+locale C
