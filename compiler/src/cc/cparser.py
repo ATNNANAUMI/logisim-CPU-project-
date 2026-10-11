@@ -787,7 +787,7 @@ class Parser:
         self.leave_scope()
         self.leave_scope()
         for gname, gtok in self.gotos:
-            if gname not in self.labels:
+            if not self.labels[gname][1]:
                 raise error_at(gtok, f"label '{gname}' used but not defined")
         fn.locals = self.locals
         fn.labels = self.labels
@@ -995,8 +995,8 @@ class Parser:
                 if not (hi < c.lo or lo > c.hi):
                     raise error_at(t, "duplicate case value")
             node = Node("case", t, lo=lo, hi=hi, label=self.unique("_L"))
-            node.lhs = self.stmt_after_label()
             self.switch.cases.append(node)
+            node.lhs = self.stmt_after_label()
             return node
 
         if self.equal("default"):
@@ -1007,8 +1007,8 @@ class Parser:
             if self.switch.default is not None:
                 raise error_at(t, "multiple default labels in one switch")
             node = Node("case", t, lo=None, hi=None, label=self.unique("_L"))
-            node.lhs = self.stmt_after_label()
             self.switch.default = node
+            node.lhs = self.stmt_after_label()
             return node
 
         if self.equal("for"):

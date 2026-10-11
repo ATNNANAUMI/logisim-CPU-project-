@@ -1,0 +1,12 @@
+fib: 55 610 6765
+ack: 9 61
+even/odd: 1 1 0
+op0: 10
+op1: 4
+op2: 21
+sum: 0 6 150
+average: 2.625
+[42-x-y]
+counter: 3
+many: -4
+nested calls: -1
