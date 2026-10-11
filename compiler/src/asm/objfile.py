@@ -11,6 +11,8 @@ Words are stored as hex strings.
     relocs    words the linker fills in (see Reloc)
     parts     [start, falls_through] of each part of the ROM (see assembler.py);
               left out by older object files, which then have one part
+    lines     [offset, file, line]: where source lines start (from .loc, which
+              the C compiler writes), for debuggers; often empty
 """
 
 import json
@@ -60,6 +62,7 @@ class ObjectFile:
     externs: list
     relocs: list       # Reloc
     parts: list = field(default_factory=list)   # [start, falls_through]
+    lines: list = field(default_factory=list)   # [offset, file, line]
 
     def to_json(self):
         # Written by hand so it stays readable: 8 words per line, and one
@@ -82,6 +85,7 @@ class ObjectFile:
             f'"externs": {json.dumps(self.externs)}',
             '"relocs": ' + block("[", "]", [json.dumps(r.to_dict()) for r in self.relocs]),
             f'"parts": {json.dumps(self.parts)}',
+            '"lines": ' + block("[", "]", [json.dumps(entry) for entry in self.lines]),
         ]
         return "{\n" + ",\n".join(" " + f for f in fields) + "\n}"
 
@@ -104,6 +108,7 @@ class ObjectFile:
                 externs=list(d["externs"]),
                 relocs=[Reloc.from_dict(r) for r in d["relocs"]],
                 parts=[[int(start), bool(falls)] for start, falls in d.get("parts", [])],
+                lines=[[int(o), str(f), int(n)] for o, f, n in d.get("lines", [])],
             )
         except (ValueError, KeyError, TypeError, AttributeError):
             raise AsmError("not an object file from this assembler", path) from None

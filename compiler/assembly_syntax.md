@@ -184,6 +184,7 @@ assembler warns about the two easy mix-ups:
 | `.string "text"` | one character per word, then a 0 word (ROM only) |
 | `.space n` | n words: zeros in ROM, reserved space in RAM |
 | `.part` | starts a new *part* here (ROM only; see section 6). Takes no space |
+| `.loc "file", line` | the code from here on comes from that source line (ROM only). Takes no space; the C compiler writes it, the linker lists it in the `.map` for the simulator's C view |
 
 A constant used by `.equ` or `.space` must be defined above that line.
 

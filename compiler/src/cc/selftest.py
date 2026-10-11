@@ -292,6 +292,39 @@ def check_command_line():
     assert out.getvalue() == "42\n", repr(out.getvalue())
 
 
+def check_line_info():
+    # build writes the C lines into the .map; the simulator window steps by them
+    import sys
+    if str(driver.SIM_DIR) not in sys.path:
+        sys.path.append(str(driver.SIM_DIR))
+    from cpu import CPU
+    from debuginfo import DebugInfo, step_line, step_out
+    from memory import load_image
+    with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
+        tmp = Path(tmp)
+        src = tmp / "lines.c"
+        src.write_text("int twice(int x)\n{\n    return x + x;\n}\n"
+                       "int main(void)\n{\n    int a = twice(2);\n"
+                       "    a = twice(a);\n    return a;\n}\n")
+        assert cli.main(["build", str(src), "-o", str(tmp / "lines.rom")]) == 0
+        info = DebugInfo.for_rom(tmp / "lines.rom")
+        cpu = CPU()
+        cpu.mem.load_rom(load_image(tmp / "lines.rom"))
+        where = []
+        for how in ("over", "over", "into", "out", "over"):
+            if how == "out":
+                assert step_out(cpu, info) == "line"
+            else:
+                assert step_line(cpu, info, over=(how == "over")) == "line"
+            where.append((info.function_at(cpu.iar), info.line_at(cpu.iar)[1]))
+        assert where == [("main", 7), ("main", 8), ("twice", 3), ("main", 8), ("main", 9)], where
+        cpu.breakpoints.update(info.addresses_of(str(src.resolve()), 3))
+        cpu.reset()
+        assert step_line(cpu, info, over=True) == "line"      # main:7
+        assert step_line(cpu, info, over=True) == "breakpoint"
+        assert info.line_at(cpu.iar)[1] == 3
+
+
 CHECKS = [
     check_preprocessor,
     check_errors,
@@ -305,6 +338,7 @@ CHECKS = [
     check_names_the_assembler_reserves,
     check_mixed_with_assembly,
     check_command_line,
+    check_line_info,
     check_programs,
 ]
 

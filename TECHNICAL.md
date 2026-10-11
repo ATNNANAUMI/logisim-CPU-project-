@@ -357,6 +357,7 @@ modules import each other by plain name, so run them as scripts
 | `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes), `Keyboard` (a deque; empty reads 0), `DeviceBus` (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()`, `reset()`, `resume()` |
 | `gui.py` | the Tk window |
+| `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
 | `selftest.py` | 15 checks on the core |
 
@@ -394,7 +395,7 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
   registers, IAR, ESP, EBP, the flags as checkboxes, and a status block (bank,
   selected devices, instruction count, measured rate, run state)
 * middle: ROM and RAM tabs, 256 words per page, with optional disassembly and
-  "follow IAR"
+  "follow IAR"; and a C source tab (below)
 * right: the display (`0x5C`), the keyboard field (`0xF0`), and the last
   executed instructions
 
@@ -403,6 +404,15 @@ flags, or double-click a memory word. Values accept `0x1F`, `31`, `-5`,
 `0b1010`, and `1.5` / `1.5f` (stored as float32 bits). Right-click a memory
 word to toggle a breakpoint; a running CPU stops *before* executing that
 address. `clear bp` removes them all.
+
+C source: when a `.map` with source lines sits next to the ROM (`cc build`
+always writes one), the C source tab shows the file of the line being run
+with that line highlighted, and the state box shows the function and line.
+Right-click a source line for a breakpoint on all of its code. The "C line"
+buttons run to the next line: *into* follows calls, *over* runs calls to
+the end (lines in a deeper frame, EBP above the current one, don't count),
+*out* runs until the function returns. The line table is read by
+`debuginfo.py`.
 
 The keyboard field is read-only: every key goes straight into the buffer
 (Enter as `0x0A`, Backspace as `0x08`, other printable ASCII as itself).
@@ -445,7 +455,8 @@ program needs (4.6). Libraries are placed after the other inputs.
 `build` accepts `.asm` and `.obj` files mixed; `link` takes only `.obj` (and
 suggests `build` when given something else). The default output name is the
 first input with `.rom`. `--map` also writes a `.map` file with every label's
-final address:
+final address, and (when the code has `.loc` lines, as C code does) a
+"source lines" section: the address where each source line's code starts.
 
 ```
 # labels in t.rom
@@ -489,6 +500,7 @@ current section (`.rom` or `.ram`), records `.equ` constants and the
 | `.string "…"` | one per character + a 0 |
 | `.space n` | n (zeros in ROM; only reserves room in RAM) |
 | `.part` | 0 (starts a new part) |
+| `.loc "file", line` | 0 (records where a source line's code starts) |
 | `CALL t` / `CALL t, n` | 7 / 9 + n |
 | `RET` | 6 |
 | `SAVE r…` | 2 per register |
@@ -800,10 +812,10 @@ python compiler/src/asm/selftest.py   # 19 checks: encodings, values, strings, j
 python cpu_sim/src/selftest.py        # 15 checks: immediates, flags, carry flag, DIV by 0, RAM,
                                       # ROM writes, stack, frames, floats, FCMP flags,
                                       # keyboard, backspace, ADDR/JMRB, float specials
-python compiler/src/cc/selftest.py    # 13 checks: preprocessor, error messages (several per run), warnings,
+python compiler/src/cc/selftest.py    # 14 checks: preprocessor, error messages (several per run), warnings,
                                       # type sizes, exit/atexit, keyboard input, globals
                                       # after a reset, library override, reserved names,
-                                      # mixing C and assembly, CLI, and every test program
+                                      # mixing C and assembly, CLI, C line stepping, and every test program
                                       # in compiler/src/cc/tests/ against gcc's output
 python check_docs.py                  # 3 checks on the docs: every repo path they name
                                       # exists, every example (.asm, .c) is listed in
@@ -883,7 +895,8 @@ python compiler/src/cc run   prog.c [...] [--keys TEXT] [--steps N] [--stats] [-
 Output paths follow the assembler's rule (4.1): `compiler/ROM/<first
 input>.rom`, `-o name` inside `compiler/ROM/`, an `-o` with a folder as
 written. `build` and `run` also write `<name>.asm` for each `.c` next to the
-`.rom`. `run` builds, runs the image in the simulator without a window and
+`.rom`; `build` always writes the `.map` too (with the C source lines, for
+the simulator window's C view; `.loc` directives carry them). `run` builds, runs the image in the simulator without a window and
 prints the display; it exits with 2 if the program doesn't halt within
 `--steps` (default 50 million).
 

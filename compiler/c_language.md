@@ -32,7 +32,9 @@ python run.py build prog.c                         # build, then open the simula
   the C library in. Output goes to `compiler/ROM/` like the assembler's (the
   first input's name with `.rom`; `-o name.rom` picks another name, an `-o`
   with a folder is used as written). `build` also writes each `.c` file's
-  `.asm` next to the `.rom`, with the C source lines as comments.
+  `.asm` next to the `.rom`, with the C source lines as comments, and a
+  `.map` (labels and C line addresses: the simulator window uses it to show
+  the C source and step by C lines).
 * `run` prints what the program writes on the display. `--keys TEXT` types
   keys first (`--keys $'12\n'` in bash for Enter), `--steps N` limits the
   instructions (default 50 million), `--stats` prints the instruction count

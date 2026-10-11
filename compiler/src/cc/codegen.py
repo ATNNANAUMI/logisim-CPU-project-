@@ -25,6 +25,7 @@ and written with STK GET/SET. A function that takes the address of a local
 computes FP = 0x10000 + EBP once (stack slot i is RAM word 0x10000 + i).
 """
 
+import os
 import struct
 
 import peephole
@@ -553,7 +554,7 @@ class CodeGen:
 
     def falls_through(self):
         for item in reversed(self.code):
-            if item[0] == "comment":
+            if item[0] in ("comment", "loc"):
                 continue
             if item[0] == "ins" and item[1] in ("RJMP", "RET", "JMRB", "HALT"):
                 return False
@@ -631,6 +632,9 @@ class CodeGen:
                 out.append(f"{item[1]}:")
             elif kind == "comment":
                 out.append(f"        ; {item[1]}")
+            elif kind == "loc":
+                path = item[1].replace("\\", "\\\\").replace('"', '\\"')
+                out.append(f'        .loc "{path}", {item[2]}')
             else:
                 out.append(item[1])
         return out
@@ -645,6 +649,8 @@ class CodeGen:
         if key == self.last_line:
             return
         self.last_line = key
+        if src.file and not src.file.startswith("<"):
+            self.code.append(("loc", os.path.abspath(src.file), src.line))
         lines = self.source.get(src.file)
         if lines and 0 < src.line <= len(lines):
             text = lines[src.line - 1].strip()
@@ -723,7 +729,7 @@ class CodeGen:
 
     def reachable(self):
         for item in reversed(self.code):
-            if item[0] == "comment":
+            if item[0] in ("comment", "loc"):
                 continue
             return not (item[0] == "ins" and item[1] in ("RJMP", "JMRB", "RET"))
         return True
