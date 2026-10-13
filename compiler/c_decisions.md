@@ -141,8 +141,10 @@ The language itself is described in [`c_language.md`](c_language.md).
 * `compiler/examples/c/circuit_test.c` passes on the circuit, and eight of
   the test programs print exactly gcc's output there (2026-10-11).
 * `diag16`/`diag17` (2026-10-13): N and Z after `DIV`, `MOD` and `NOT`, and
-  after `MULT`/`SHL` with a negative result, describe R0. Floats round to
-  nearest, ties to even.
+  after `MULT`/`SHL` with a negative result, describe R0, and so do they
+  after `OR` and `XOR` (`diag18`): with `diag13`, that covers every op the
+  peephole pass drops a `TEST R0` after. Floats round to nearest, ties to
+  even.
 * `diag16`/`diag17` (2026-10-13): **the circuit's `NOT` inverts RA, not
   RB.** C's `~` on a register variable went wrong on the circuit:
   `printf("%08x %08x", ~a, ~b)` printed `fffffffc 00000003` instead of
@@ -153,9 +155,6 @@ The language itself is described in [`c_language.md`](c_language.md).
 
 ## Guesses (not measured)
 
-* **N and Z after `OR` and `XOR`** are taken to describe R0, as the ISA
-  says (the peephole pass drops a `TEST R0` after them); every other op it
-  does that for is measured (`diag13`, `diag16`).
 * **Performance numbers** (about 160 instructions a second on the circuit,
   200 000 in the simulator) are from single runs on this machine.
 * **The cost model of the register allocator** (2/4/3 instructions) is an

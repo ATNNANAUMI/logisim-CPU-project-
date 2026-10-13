@@ -74,7 +74,8 @@ logisim-CPU-project-/
 │   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
 │   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag),
 │   │                         diag14, diag15 (float division by zero, NaN, INT out of range),
-│   │                         diag16, diag17 (STK SET/GET wrap, NOT, MOD by 0, float opcodes, rounding)
+│   │                         diag16, diag17 (STK SET/GET wrap, NOT, MOD by 0, float opcodes, rounding),
+│   │                         diag18 (flags after OR/XOR, NOT as assembled now)
 │   └── ROM/                  build output (.obj/.rom/.map/.asm), git-ignored, created on first build;
 │                             ROM/libc/ caches the compiled C library
 │

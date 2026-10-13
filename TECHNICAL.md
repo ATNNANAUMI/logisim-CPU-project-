@@ -752,6 +752,7 @@ line is empty (so it can't erase the prompt).
 | `tests/diag15.asm` | more of the same after diag14: `INT` of -infinity and of large values, the remaining divisions by zero. Link it first; 15 results from `0x14000`, also printed |
 | `tests/diag16.asm` | where `STK SET/GET` put `EBP + RB` (it wraps at 16 bits, across all of RAM), R0 and flags after `DIV`, `MOD` and `NOT` (`MOD` by 0 gives 0; `NOT` inverts RA), the float opcodes with no defined result, float rounding (to nearest, ties to even). Link it first; 52 results from `0x14000`, also printed |
 | `tests/diag17.asm` | follow-up to diag16: `NOT` encoded with RA and RB both set (it inverts RA, not RB), `DIV`/`MOD` by 0 and `0x80000000` by -1, float opcodes 4, 5, B, C with other inputs (4 doubles RB). Link it first; 30 results from `0x14000`, also printed |
+| `tests/diag18.asm` | the flags after `OR` and `XOR`, and `NOT` as the assembler writes it now (register in both fields: `~Rx`, `A` = 0); all as the simulator. Link it first; 16 results from `0x14000`, also printed |
 
 All of these build and run correctly in the simulator. The `c/` programs
 are C: build them with `python compiler/src/cc build <file>` (or `run`,
