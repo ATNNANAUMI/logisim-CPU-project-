@@ -94,7 +94,7 @@ Behaviour C leaves to the implementation:
 | `>>` on a negative number | arithmetic (sign bits come in), like gcc |
 | `/` and `%` | truncate toward zero, `%` has the dividend's sign (C99) |
 | signed overflow | wraps around (undefined in C: don't rely on it) |
-| division by 0 | gives the dividend (undefined in C) |
+| division by 0 | `x / 0` gives `x` and `x % 0` gives 0, like the CPU's `DIV`/`MOD` (an unsigned `x` of 2^31 or more gives something else; undefined in C) |
 | float to int out of range, or NaN | whatever the CPU's `INT` gives (see `c_decisions.md`) |
 | writing to a string literal | the write is ignored: string literals are in ROM (on the circuit it also raises the "tried writing in ROM" line) |
 | writing to a `const` global | the same: `const` global data is in ROM |

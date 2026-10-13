@@ -77,10 +77,10 @@ def int_op(name: str, a: int, b: int) -> tuple[int, int]:
         carry, result = a < b, (a - b) & MASK    # C = borrow, as on the circuit
     elif name == "MULT":
         result = (sa * sb) & MASK                # no carry on overflow (circuit)
-    elif name == "DIV":
+    elif name == "DIV":                          # x DIV 0 = x (circuit)
         result = a if sb == 0 else _divide(sa, sb)[0] & MASK
-    elif name == "MOD":
-        result = a if sb == 0 else _divide(sa, sb)[1] & MASK
+    elif name == "MOD":                          # x MOD 0 = 0 (circuit, diag16/17)
+        result = 0 if sb == 0 else _divide(sa, sb)[1] & MASK
     elif name == "SHL":
         carry, result = bool(b & SIGN), (b << 1) & MASK
     elif name == "SHR":
@@ -179,10 +179,14 @@ def float_op(name: str, a: int, b: int) -> tuple[int, int]:
         bits = float_to_bits(-fb)
         return bits, _float_flags(fa, fb, bits_to_float(bits))
 
+    if name == "SHL":                            # RB x 2, as measured on the circuit
+        bits = float_to_bits(fb * 2)             # (diag16/17, normal numbers only)
+        return bits, _float_flags(fa, fb, bits_to_float(bits))
+
     if name == "CMP":                            # flags from RA - RB, R0 = 0
         diff = bits_to_float(float_to_bits(fa - fb))
         return 0, _float_flags(fa, fb, diff)
 
-    # SHL, SHR, ++, -- and the undefined opcodes: do nothing
+    # SHR, ++, -- and the undefined opcodes: do nothing (config.FLOAT_NOP_RESULT)
     value = config.FLOAT_NOP_RESULT & MASK
     return value, pack_flags(False, fa > fb, value & SIGN, value == 0)

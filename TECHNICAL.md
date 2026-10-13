@@ -104,24 +104,32 @@ instructions compute `RA op RB` (or `RA op imm`). One-operand instructions use
 `RB` only, but `RA` is still fed to the comparator, so the `A` flag compares
 `R(RA field)` (normally `R0`) with `RB`.
 
+The exception is `NOT` on the circuit: it inverts `RA`, not `RB` (measured
+with `diag16.asm`/`diag17.asm`; the simulator inverts `RB`, as designed), so
+`NOT Rx` as assembled (`RA` = 0) gives `~R0` there. See section 8.
+
 | op | integer (`0x1…` / `0x5…`) | float (`0x3…` / `0x7…`) |
 | --- | --- | --- |
 | 0 | `ADD` | `FADD` |
 | 1 | `SUB` (RA − RB) | `FSUB` |
 | 2 | `MULT` (low 32 bits) | `FMULT` |
 | 3 | `DIV` (signed, truncates) | `FDIV` |
-| 4 | `SHL RB` | — (does nothing) |
-| 5 | `SHR RB` (logical) | — (does nothing) |
-| 6 | `NOT RB` | `FLOAT RB` (int → float) |
+| 4 | `SHL RB` | no mnemonic: writes `RB × 2` (measured) |
+| 5 | `SHR RB` (logical) | no defined result (see below) |
+| 6 | `NOT RB` (the circuit inverts `RA`, see above) | `FLOAT RB` (int → float) |
 | 7 | `AND` | `INT RB` (float → int) |
-| 8 | `OR` | undefined |
-| 9 | `XOR` | undefined |
-| A | `MOD` (sign of dividend) | undefined |
-| B | `++ RB` / `INC` | — (does nothing) |
-| C | `-- RB` / `DEC` | — (does nothing) |
+| 8 | `OR` | undefined: writes 0 (measured) |
+| 9 | `XOR` | undefined: writes 0 (measured) |
+| A | `MOD` (sign of dividend) | undefined: writes 0 (measured) |
+| B | `++ RB` / `INC` | no defined result (see below) |
+| C | `-- RB` / `DEC` | no defined result (see below) |
 | D | `NEG RB` | `FNEG RB` |
-| E | `TEST RB` (`R0 = RB`) | undefined |
+| E | `TEST RB` (`R0 = RB`) | undefined: writes 0 (measured) |
 | F | `CMP RA, RB` | `FCMP RA, RB` |
+
+Float opcodes 5, B and C read back as `0xFFFFFFFF` on the circuit with `N` and
+`Z` both on, which looks like an undriven bus; the simulator writes 0 for
+them instead (`FLOAT_NOP_RESULT`).
 
 `CMP` and `FCMP` write `0` to `R0`; only the flags carry the result.
 
@@ -134,11 +142,15 @@ instructions compute `RA op RB` (or `RA op imm`). One-operand instructions use
 | `N` | bit 31 of the result (for `CMP`, of `RA − RB`) |
 | `Z` | result is 0 (for `CMP`, `RA == RB`) |
 
-Division or modulo by zero returns the dividend unchanged.
+Division by zero returns the dividend unchanged; modulo by zero returns 0.
+`0x80000000 DIV -1` gives `0x80000000` and `MOD` gives 0 (all measured with
+`diag16.asm`/`diag17.asm`).
 
 **Float flags:** `C = 0`, `A = fa > fb`, `N = result < 0`, `Z = result == 0`.
 For `FCMP` the "result" is `RA − RB` (rounded to float32), so `N` means
-`RA < RB` and `Z` means equal, the same as the integer `CMP`.
+`RA < RB` and `Z` means equal, the same as the integer `CMP`. Results round to
+nearest, ties to even (measured with `diag16.asm`: `1 + 2^-24 = 1.0`,
+`1/3 = 0x3EAAAAAB`).
 `INT` truncates toward zero (`INT(1.7) = 1`, `INT(-3.7) = -3`, `INT(0.5) = 0`),
 confirmed on the circuit. Measured with `diag14.asm`/`diag15.asm`:
 
@@ -166,11 +178,11 @@ The sub-operation is in the RA field.
 | 5 | `GET, RB` | `R0 = stack[EBP + RB]` |
 
 The stack grows **upward** from RAM index 0. `SET`/`GET` are relative to
-`EBP`; negative `RB` reaches arguments below the frame. On the circuit,
-`EBP + RB` goes through the 17-bit address adder, so it wraps across the
-**entire RAM**, not just the 16K stack area: with `EBP = 0`, index `-1`
-reads or writes the last word of RAM (`0x1FFFF`). The simulator still wraps
-this index at 14 bits, so it lands on `0x13FFF` instead (see section 8).
+`EBP`; negative `RB` reaches arguments below the frame. `EBP + RB` wraps at
+16 bits, across the **entire RAM**, not just the 16K stack area: with
+`EBP = 0`, index `-1` reads or writes the last word of RAM (`0x1FFFF`) and
+index `0x8000` reaches `0x18000`; bits of `RB` above 15 are dropped. Measured
+on the circuit with `diag11.asm` and `diag16.asm`; the simulator does the same.
 
 ### 1.7 I/O (`COMM`, `0x08mb`)
 
@@ -365,7 +377,7 @@ modules import each other by plain name, so run them as scripts
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 16 checks on the core |
+| `selftest.py` | 18 checks on the core |
 
 ### 3.2 Execution model
 
@@ -440,7 +452,7 @@ skipped when more than 200 instructions run in one tick.
 | `SHR_ARITHMETIC` | `False`: `SHR` is logical, the top bit fills with 0 | confirmed |
 | `DIV_TRUNCATE` | `True`: `DIV` truncates toward zero, `MOD` keeps the dividend's sign (`-7 MOD 3 = -1`) | confirmed |
 | `STOP_ON_STACK_WRAP` | `False`: ESP/EBP wrap at 14 bits | wrapping confirmed; `True` stops the simulated CPU instead, to catch a runaway stack while debugging |
-| `FLOAT_NOP_RESULT` | `0`: written to `R0` by float `SHL/SHR/++/--` and the undefined float opcodes | still a guess |
+| `FLOAT_NOP_RESULT` | `0`: written to `R0` by float `SHR/++/--` and the undefined float opcodes | confirmed for the undefined opcodes (`diag16.asm`); on the circuit float `SHR/++/--` read back as `0xFFFFFFFF` with N and Z both on (an undriven bus?), which the simulator doesn't copy |
 
 ---
 
@@ -737,6 +749,8 @@ line is empty (so it can't erase the prompt).
 | `tests/diag13.asm` | the carry flag (and A N Z) after `SUB`, `--`, `++`, `NEG`, `SHL`, `SHR`, `MULT`, `ADD`, `AND`, `TEST`: on the circuit `SUB` sets C on a borrow and `CMP`/`--`/`NEG`/`MULT` never set it. Link it first; 24 results from `0x14000`, also printed |
 | `tests/diag14.asm` | float special cases: division by ±0, NaN, infinity, `INT` out of range, overflow, subnormals. Link it first; 22 results from `0x14000`, also printed |
 | `tests/diag15.asm` | more of the same after diag14: `INT` of -infinity and of large values, the remaining divisions by zero. Link it first; 15 results from `0x14000`, also printed |
+| `tests/diag16.asm` | where `STK SET/GET` put `EBP + RB` (it wraps at 16 bits, across all of RAM), R0 and flags after `DIV`, `MOD` and `NOT` (`MOD` by 0 gives 0; `NOT` inverts RA), the float opcodes with no defined result, float rounding (to nearest, ties to even). Link it first; 52 results from `0x14000`, also printed |
+| `tests/diag17.asm` | follow-up to diag16: `NOT` encoded with RA and RB both set (it inverts RA, not RB), `DIV`/`MOD` by 0 and `0x80000000` by -1, float opcodes 4, 5, B, C with other inputs (4 doubles RB). Link it first; 30 results from `0x14000`, also printed |
 
 All of these build and run correctly in the simulator. The `c/` programs
 are C: build them with `python compiler/src/cc build <file>` (or `run`,
@@ -819,9 +833,10 @@ python compiler/src/asm/selftest.py   # 19 checks: encodings, values, strings, j
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 16 checks: immediates, flags, carry flag, DIV by 0, RAM,
-                                      # ROM writes, stack, frames, floats, FCMP flags,
-                                      # keyboard, backspace, ADDR/JMRB, float specials
+python cpu_sim/src/selftest.py        # 18 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+                                      # ROM writes, stack, STK SET/GET across RAM, frames,
+                                      # floats, FCMP flags, keyboard, backspace, ADDR/JMRB,
+                                      # float specials, float SHL
 python compiler/src/cc/selftest.py    # 14 checks: preprocessor, error messages (several per run), warnings,
                                       # type sizes, exit/atexit, keyboard input, globals
                                       # after a reset, library override, reserved names,
@@ -847,9 +862,12 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | --- | --- | --- |
 | `A` signed, `SHR` logical, `DIV`/`MOD` truncate, stack wraps | as in 3.4 | confirmed (2026-10-02) |
 | `INT` (float → int) | truncates toward zero | confirmed: truncates (`diag10.asm`, `diag11.asm`) |
-| `STK SET/GET` with a negative index at `EBP = 0` | wraps at 14 bits, to the top of the stack area (`0x13FFF`) | **differs**: wraps across the entire RAM, to the last word (`0x1FFFF`), measured with `diag11.asm` |
+| `STK SET/GET`: where `EBP + RB` lands | wraps at 16 bits, across all of RAM | confirmed (`diag11.asm`, `diag16.asm`, 2026-10-13). The simulator used to wrap it at 14 bits, inside the stack area; it now matches the circuit |
 | does `STK GET` also write `RB`? | no | no: fixed in the circuit (STK GET/SET/PUSH no longer misuse RB) |
-| float `SHL/SHR/++/--`, undefined float opcodes | write 0 (`FLOAT_NOP_RESULT`) | a guess |
+| float opcodes 4, 5, B, C (`SHL/SHR/++/--`) and the undefined ones | 4 writes `RB × 2`; the others write 0 (`FLOAT_NOP_RESULT`) | measured (`diag16.asm`, `diag17.asm`, 2026-10-13): 4 doubles RB (normal numbers tried), 8/9/A/E write 0, **5, B and C differ**: `0xFFFFFFFF` with N and Z both on, which looks like an undriven bus |
+| `NOT` | inverts `RB`, as designed | **differs**: inverts `RA` (`diag16.asm`, `diag17.asm`, 2026-10-13), so `NOT Rx` gives `~R0` on the circuit; C's `~` on a register variable prints wrong values there |
+| `DIV`/`MOD` by 0, `0x80000000` by -1 | `DIV` gives the dividend, `MOD` gives 0; `0x80000000`, 0 | confirmed (`diag16.asm`, `diag17.asm`, 2026-10-13). The simulator used to give the dividend for `MOD` by 0 too |
+| float rounding | to nearest, ties to even (Python's float32 packing) | confirmed (`diag16.asm`, 2026-10-13): ties to even, not truncated or rounded up |
 | carry flag | as in 1.5 | confirmed (`diag12.asm`, `diag13.asm`, 2026-10-10). The simulator used to set C on `SUB`/`CMP` when there was *no* borrow, and on `MULT` overflow; it now matches the circuit |
 | float division by zero, NaN, `INT` out of range | as in 1.5 | confirmed (`diag14.asm`, `diag15.asm`, 2026-10-10). The simulator used to give `0.0/0.0 = +inf`, `1.0/-0.0 = +inf` and `INT(inf) = 0`; it now matches the circuit |
 | number display `0x3C` | shows the last word sent (window and headless output) | 8 hex digits in `PC` |

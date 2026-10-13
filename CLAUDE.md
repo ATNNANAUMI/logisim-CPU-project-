@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # three self-check suites (assembler 19, simulator 16, C compiler 14), then check_docs.py
+python run.py test                                   # three self-check suites (assembler 19, simulator 18, C compiler 14), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (~40 s: runs every test program)
@@ -46,7 +46,7 @@ C: `compiler/src/cc/` (preprocessor → parser/type checker → `codegen.py` + `
 
 `compiler/src/asm/`, `compiler/src/cc/` and `cpu_sim/src/` import their sibling modules by plain name, so run files as scripts (or put the directory on `sys.path`), not as packages. The assembler and the C compiler are invoked as directories (`python compiler/src/asm <cmd>`, `python compiler/src/cc <cmd>`, via `__main__.py`).
 
-**The circuit is the ground truth.** The simulator was written from the ISA, not derived from the circuit. Behaviours not yet verified on the circuit are switches in `cpu_sim/src/config.py` (TWEAKS, each marked confirmed/guess). Known mismatch: a negative `STK SET/GET` index at `EBP = 0` wraps at 14 bits in the simulator (`0x13FFF`) but across all of RAM on the circuit (`0x1FFFF`). Diagnostic programs used to measure circuit behaviour live in `compiler/examples/tests/`.
+**The circuit is the ground truth.** The simulator was written from the ISA, not derived from the circuit. Behaviours not yet verified on the circuit are switches in `cpu_sim/src/config.py` (TWEAKS, each marked confirmed/guess). Known mismatch: the circuit's `NOT` inverts RA, not RB, while the simulator inverts RB as designed (see TECHNICAL §8). Diagnostic programs used to measure circuit behaviour live in `compiler/examples/tests/`.
 
 Key ISA facts that trip people up (details in STRUCTURE.md):
 - Every ALU result goes to **R0**, and every ALU op rewrites all flags.

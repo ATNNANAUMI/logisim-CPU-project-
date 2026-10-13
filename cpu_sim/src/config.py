@@ -17,6 +17,10 @@ BANK_WORDS = 1 << 16           # 64K words of ROM and 64K words of RAM
 
 STACK_WORDS = BANK_WORDS // 4  # bottom 25% of RAM, 14-bit index
 STACK_MASK = STACK_WORDS - 1
+# STK SET/GET reach the RAM word EBP + RB, and that sum wraps at 16 bits,
+# across all of RAM, not at the stack area's 14 (measured on the circuit
+# with diag11 and diag16, 2026-10-13).
+STACK_INDEX_MASK = BANK_WORDS - 1
 
 DISPLAY_ADDR = 0x5C
 HEX_DISPLAY_ADDR = 0x3C       # 8-digit hex display: shows the last word sent
@@ -47,10 +51,13 @@ DIV_TRUNCATE = True
 
 # Confirmed on the circuit (2026-10-02): ESP and EBP are 14-bit registers,
 # so they overflow and wrap.  True stops the simulated CPU instead, which
-# can help catch a runaway stack while debugging.
-# small difference from circuit, circuit wraps the entire ram, not just the registers
+# can help catch a runaway stack while debugging.  (STK SET/GET add EBP and
+# RB in a wider sum that wraps across all of RAM: see STACK_INDEX_MASK.)
 STOP_ON_STACK_WRAP = False
 
-# Still a guess: undefined float opcodes (1000, 1001, 1010, 1110) and the
-# float ops that "do nothing" (SHL, SHR, ++, --) write this to R0.
+# Float opcodes with no defined result write this to R0. Confirmed on the
+# circuit (2026-10-13, diag16/diag17) for 1000, 1001, 1010 and 1110. Of the
+# float ops that "do nothing": SHL doubles RB (alu.py does that too); SHR,
+# ++ and -- read back as FFFFFFFF with N and Z both on, which looks like an
+# undriven bus, so the simulator doesn't copy it and writes this instead.
 FLOAT_NOP_RESULT = 0

@@ -140,15 +140,20 @@ The language itself is described in [`c_language.md`](c_language.md).
   range); see `TECHNICAL.md` section 8.
 * `compiler/examples/c/circuit_test.c` passes on the circuit, and eight of
   the test programs print exactly gcc's output there (2026-10-11).
+* `diag16`/`diag17` (2026-10-13): N and Z after `DIV`, `MOD` and `NOT`, and
+  after `MULT`/`SHL` with a negative result, describe R0. Floats round to
+  nearest, ties to even.
+* `diag16`/`diag17` (2026-10-13): **the circuit's `NOT` inverts RA, not
+  RB.** C's `~` on a register variable goes wrong on the circuit:
+  `printf("%08x %08x", ~a, ~b)` printed `fffffffc 00000003` instead of
+  gcc's `f0f0f0ed ff00ff03`. The compiler's other `NOT`s (in `>>` of
+  negative numbers) always run on a value already in R0.
 
 ## Guesses (not measured)
 
-* **N and Z after `DIV`, `MOD`, `MULT`, `SHL`, `SHR`, `NOT`, `NEG`** are
-  taken to describe R0, as the ISA says. The peephole pass drops a `TEST R0`
-  after these. `circuit_test.c` exercises some of it and passes.
-* **Logisim's float components round to nearest, ties to even** (Java
-  floats do). `printf`'s exactness and the gcc comparisons rely on IEEE
-  rounding; the circuit runs of `circuit_test.c` agree.
+* **N and Z after `OR` and `XOR`** are taken to describe R0, as the ISA
+  says (the peephole pass drops a `TEST R0` after them); every other op it
+  does that for is measured (`diag13`, `diag16`).
 * **Performance numbers** (about 160 instructions a second on the circuit,
   200 000 in the simulator) are from single runs on this machine.
 * **The cost model of the register allocator** (2/4/3 instructions) is an

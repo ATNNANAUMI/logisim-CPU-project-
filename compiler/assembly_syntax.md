@@ -132,7 +132,8 @@ Two-operand, with a register or an immediate:
 | `CMP RA, RB` | `CMP RA, #v` | flags from `RA - RB`, R0 = 0 | `0x1Fab` / `0x5Fa0`, v |
 
 `#` marks an immediate: the value goes in the next word and the instruction
-is 2 words long instead of 1.
+is 2 words long instead of 1. `DIV` by 0 gives `RA`, `MOD` by 0 gives 0
+(measured on the circuit).
 
 One-operand (register only):
 
@@ -161,7 +162,8 @@ Float mnemonics start with `F`, except the two conversions.
 | `FLOAT RB` | | int to float | `0x360b` |
 | `INT RB` | | float to int | `0x370b` |
 
-The float opcodes the ISA marks "nothing" or "undefined" have no mnemonic.
+The float opcodes the ISA marks "nothing" or "undefined" have no mnemonic
+(on the circuit, opcode 4 turns out to double `RB`: TECHNICAL §1.5).
 
 A float literal always becomes float32 bits, so `FADD R1, #1.5` is right. The
 assembler warns about the two easy mix-ups:

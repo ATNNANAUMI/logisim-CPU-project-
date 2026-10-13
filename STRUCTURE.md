@@ -73,7 +73,8 @@ logisim-CPU-project-/
 │   │   ├── c/                C examples: hello, primes, structs, guess (input), gfx_demo (RGB screen); circuit_test (self-checking, for the circuit)
 │   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
 │   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag),
-│   │                         diag14, diag15 (float division by zero, NaN, INT out of range)
+│   │                         diag14, diag15 (float division by zero, NaN, INT out of range),
+│   │                         diag16, diag17 (STK SET/GET wrap, NOT, MOD by 0, float opcodes, rounding)
 │   └── ROM/                  build output (.obj/.rom/.map/.asm), git-ignored, created on first build;
 │                             ROM/libc/ caches the compiled C library
 │
@@ -88,7 +89,7 @@ logisim-CPU-project-/
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png]`
-    │   └── selftest.py       16 checks
+    │   └── selftest.py       18 checks
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -126,20 +127,28 @@ The design follows the "But How Do It Know?" style: a single bus,
 * Confirmed on the circuit: the `A` flag (`RA > RB`) is signed, `SHR` is
   logical, `DIV` truncates and `MOD` keeps the dividend's sign, `INT`
   (float→int) truncates toward zero, ESP/EBP wrap at 14 bits, the `A` flag
-  after `FCMP` is a float compare.
+  after `FCMP` is a float compare. `DIV` by 0 gives the dividend, `MOD` by 0
+  gives 0 (`diag16`/`diag17`).
+* **`NOT` on the circuit inverts RA, not RB** (`diag16`/`diag17`); the
+  simulator inverts RB, as the ISA says. `NOT Rx` (assembled with RA = 0)
+  gives `~R0` on the circuit.
 * Carry flag (measured, `diag12`/`diag13`): `ADD`/`++` carry out, `SUB` sets C
   on a **borrow** (`RA < RB` unsigned), `SHL`/`SHR` the bit shifted out;
   `CMP`, `--`, `NEG`, `MULT` never set it.
 * Floats (measured, `diag14`/`diag15`): IEEE-754 (`0/0` = NaN, `1/-0` = -inf,
   subnormals kept); `INT` = Java's `(long)` cast, low 32 bits (`INT(3e9)` wraps,
   `INT(+inf)` = `FFFFFFFF`, `INT(NaN)` = 0); `FCMP` with a NaN clears all flags.
+  Rounding is to nearest, ties to even (`diag16`). Float opcode 4 (no
+  mnemonic) writes `RB × 2`; 8/9/A/E write 0; 5/B/C give `FFFFFFFF` with N and Z
+  both on (an undriven bus?), which the simulator doesn't copy.
 * System ops: NOP LD ST DATA RJMP RJF RJNF CLF COMM ADDR JMRB STK ALD AST CPY HALT.
   `CPY RA, RB` copies RA → RB. `ALD`/`AST` use R0 with `mem[RA+RB]`.
 * Jumps are relative to the **address of the offset word**. `RJF` = any
   listed flag on, `RJNF` = any listed flag off. Mask: C=8 A=4 N=2 Z=1.
 * Stack grows up. `STK PUSH/POP` use R0. `STK CALL/RET` only move the frame
-  (no jump). `STK SET/GET, RB` = `stack[EBP+RB]`; on the circuit that sum
-  wraps across the whole RAM (EBP=0, RB=-1 → last RAM word `0x1FFFF`).
+  (no jump). `STK SET/GET, RB` = `stack[EBP+RB]`; that sum wraps at 16 bits,
+  across the whole RAM (EBP=0, RB=-1 → last RAM word `0x1FFFF`; measured,
+  `diag11`/`diag16`, and the simulator matches).
 * `COMM INDATA|INADDR|OUTDATA|OUTADDR, RB`. Display `0x5C`, number display
   `0x3C`, keyboard `0xF0` (empty reads 0). RGB screen (planned wiring, in
   the simulator and `gfx.h`): `0x6C` one pixel per word (x bits 31–24, y
@@ -202,9 +211,15 @@ python compiler/src/cc/tests/difftest.py [--update]                # C tests aga
 
 ## Open questions / gotchas
 
-* Simulator mismatch: negative `STK SET/GET` index at `EBP = 0` wraps at
-  14 bits in the simulator (`0x13FFF`), but across the entire RAM on the
-  circuit (`0x1FFFF`, measured with `diag11.asm`).
+* Simulator vs. circuit: `NOT` inverts RA on the circuit, RB in the
+  simulator (and in the ISA), so C's `~` on a register variable prints wrong
+  values on the circuit. Rewiring the circuit's NOT to RB would end it
+  (`diag17.asm`).
+* Float opcodes 5, B and C read back as `FFFFFFFF` with N and Z both on, on
+  the circuit; the simulator writes 0. No mnemonic emits them.
+* `STK SET/GET` used to wrap at 14 bits in the simulator, but the circuit wraps
+  `EBP + RB` across the whole RAM (`diag11.asm`, `diag16.asm`); the simulator now
+  matches, and also gives 0 for `MOD` by 0 like the circuit.
 * `STK GET/SET/PUSH` misusing RB was a circuit bug, now fixed.
 * The carry flag was documented as "set when there is no borrow" for
   `SUB`/`CMP`; the circuit sets it on a borrow for `SUB` and never for `CMP`
