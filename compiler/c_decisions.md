@@ -144,10 +144,12 @@ The language itself is described in [`c_language.md`](c_language.md).
   after `MULT`/`SHL` with a negative result, describe R0. Floats round to
   nearest, ties to even.
 * `diag16`/`diag17` (2026-10-13): **the circuit's `NOT` inverts RA, not
-  RB.** C's `~` on a register variable goes wrong on the circuit:
+  RB.** C's `~` on a register variable went wrong on the circuit:
   `printf("%08x %08x", ~a, ~b)` printed `fffffffc 00000003` instead of
-  gcc's `f0f0f0ed ff00ff03`. The compiler's other `NOT`s (in `>>` of
-  negative numbers) always run on a value already in R0.
+  gcc's `f0f0f0ed ff00ff03`. The assembler now writes `NOT Rx` with x in both
+  fields, which fixed it, and `circuit_test.c` has a "bitwise not of a
+  register" line that says FAIL with the old encoding. The compiler's other
+  `NOT`s (in `>>` of negative numbers) always ran on a value already in R0.
 
 ## Guesses (not measured)
 

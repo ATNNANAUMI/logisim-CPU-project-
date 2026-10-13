@@ -70,7 +70,8 @@
 ;   B: as the ISA says, except
 ;     22/23  MOD 7, 0            00000000  00000005  (MOD by 0 gives 0)
 ;     24/25  NOT 0xFFFFFFFF      FFFFFFFF  00000006  (NOT inverts R0, the RA
-;            input: see diag17)
+;            input: see diag17. Lines 24-27 run the raw word 0x1602, NOT R2
+;            as the assembler wrote it then; it now writes 0x1622.)
 ;   C: opcode 4                  40400000  00000004  (3.0 = RB x 2)
 ;      opcodes 5, B, C           FFFFFFFF  00000007  (N and Z both on)
 ;      opcodes 8, 9, A, E        00000000  00000005  (as the simulator)
@@ -215,13 +216,13 @@ b7:
         DATA R2, 0xFFFFFFFF
         DATA R13, b8
         DATA R0, 0
-        NOT R2
+        .word 0x1602                ; NOT R2 as it was encoded (RA = 0)
         RJMP grab
 b8:
         DATA R2, 0
         DATA R13, b9
         DATA R0, 0
-        NOT R2
+        .word 0x1602                ; NOT R2 as it was encoded (RA = 0)
         RJMP grab
 b9:
         DATA R1, -3

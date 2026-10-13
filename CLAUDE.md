@@ -46,7 +46,7 @@ C: `compiler/src/cc/` (preprocessor → parser/type checker → `codegen.py` + `
 
 `compiler/src/asm/`, `compiler/src/cc/` and `cpu_sim/src/` import their sibling modules by plain name, so run files as scripts (or put the directory on `sys.path`), not as packages. The assembler and the C compiler are invoked as directories (`python compiler/src/asm <cmd>`, `python compiler/src/cc <cmd>`, via `__main__.py`).
 
-**The circuit is the ground truth.** The simulator was written from the ISA, not derived from the circuit. Behaviours not yet verified on the circuit are switches in `cpu_sim/src/config.py` (TWEAKS, each marked confirmed/guess). Known mismatch: the circuit's `NOT` inverts RA, not RB, while the simulator inverts RB as designed (see TECHNICAL §8). Diagnostic programs used to measure circuit behaviour live in `compiler/examples/tests/`.
+**The circuit is the ground truth.** The simulator was written from the ISA, not derived from the circuit. Behaviours not yet verified on the circuit are switches in `cpu_sim/src/config.py` (TWEAKS, each marked confirmed/guess). Known mismatch: the circuit's `NOT` inverts RA, not RB; the assembler writes `NOT Rx` with x in both fields so assembled code works on both, and the simulator keeps the designed behaviour (see TECHNICAL §8). Diagnostic programs used to measure circuit behaviour live in `compiler/examples/tests/`.
 
 Key ISA facts that trip people up (details in STRUCTURE.md):
 - Every ALU result goes to **R0**, and every ALU op rewrites all flags.

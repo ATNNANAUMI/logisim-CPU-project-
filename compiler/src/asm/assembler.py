@@ -588,7 +588,11 @@ class Assembler:
             if len(args) == 1 and args[0].startswith("#"):
                 raise AsmError(f"{op} takes a register, not an immediate")
             self.expect(op, shape, args, 1)
-            words.append(enc.word(prefix, opcode, 0, parse_register(args[0])))
+            rb = parse_register(args[0])
+            # The circuit's NOT inverts RA, not RB (diag16/diag17), so NOT
+            # names its register in both fields and works either way.
+            ra = rb if op == "NOT" else 0
+            words.append(enc.word(prefix, opcode, ra, rb))
             return words, relocs
 
         self.expect(op, shape, args, 2)

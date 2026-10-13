@@ -105,8 +105,9 @@ instructions compute `RA op RB` (or `RA op imm`). One-operand instructions use
 `R(RA field)` (normally `R0`) with `RB`.
 
 The exception is `NOT` on the circuit: it inverts `RA`, not `RB` (measured
-with `diag16.asm`/`diag17.asm`; the simulator inverts `RB`, as designed), so
-`NOT Rx` as assembled (`RA` = 0) gives `~R0` there. See section 8.
+with `diag16.asm`/`diag17.asm`; the simulator inverts `RB`, as designed). The
+assembler therefore writes `NOT Rx` with `x` in both fields (`0x16xx`), which
+gives `~Rx` on both, with `A` = 0.
 
 | op | integer (`0x1…` / `0x5…`) | float (`0x3…` / `0x7…`) |
 | --- | --- | --- |
@@ -742,7 +743,7 @@ line is empty (so it can't erase the prompt).
 | `c/gfx_demo.c` | C: the RGB screen with `gfx.h`: gradient, text, shapes, a sine wave (`--screen` saves the picture) |
 | `c/structs.c` | C: an array of structs, `qsort`, `malloc`, `printf("%.2f")` |
 | `c/guess.c` | C: guess the number with `scanf`; seeded by how long the first key takes (`key_pressed`); the header has a transcript |
-| `c/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
+| `c/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, `~` on registers, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
 | `tests/diag10.asm` | `INT` on floats below 1 (diagnostic, resolved: they give 0) |
 | `tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x14000`; they are also printed in hex |
 | `tests/diag12.asm` | what the C compiler relies on: reading and setting `ESP`/`EBP` with `STK CALL`/`STK RET`, stack slot `i` being RAM `0x10000 + i`, the carry flag after `CMP`/`SUB`/`ADD`, the `A` flag after `FCMP` (a float compare), `MULT`'s low 32 bits, `DIV` by `0x80000000`. Link it first; 30 results from `0x14000`, also printed |
@@ -865,7 +866,7 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | `STK SET/GET`: where `EBP + RB` lands | wraps at 16 bits, across all of RAM | confirmed (`diag11.asm`, `diag16.asm`, 2026-10-13). The simulator used to wrap it at 14 bits, inside the stack area; it now matches the circuit |
 | does `STK GET` also write `RB`? | no | no: fixed in the circuit (STK GET/SET/PUSH no longer misuse RB) |
 | float opcodes 4, 5, B, C (`SHL/SHR/++/--`) and the undefined ones | 4 writes `RB × 2`; the others write 0 (`FLOAT_NOP_RESULT`) | measured (`diag16.asm`, `diag17.asm`, 2026-10-13): 4 doubles RB (normal numbers tried), 8/9/A/E write 0, **5, B and C differ**: `0xFFFFFFFF` with N and Z both on, which looks like an undriven bus |
-| `NOT` | inverts `RB`, as designed | **differs**: inverts `RA` (`diag16.asm`, `diag17.asm`, 2026-10-13), so `NOT Rx` gives `~R0` on the circuit; C's `~` on a register variable prints wrong values there |
+| `NOT` | inverts `RB`, as designed | **differs**: inverts `RA` (`diag16.asm`, `diag17.asm`, 2026-10-13). The assembler writes `NOT Rx` with `x` in both fields, so code is right on both; whether to rewire the circuit is open |
 | `DIV`/`MOD` by 0, `0x80000000` by -1 | `DIV` gives the dividend, `MOD` gives 0; `0x80000000`, 0 | confirmed (`diag16.asm`, `diag17.asm`, 2026-10-13). The simulator used to give the dividend for `MOD` by 0 too |
 | float rounding | to nearest, ties to even (Python's float32 packing) | confirmed (`diag16.asm`, 2026-10-13): ties to even, not truncated or rounded up |
 | carry flag | as in 1.5 | confirmed (`diag12.asm`, `diag13.asm`, 2026-10-10). The simulator used to set C on `SUB`/`CMP` when there was *no* borrow, and on `MULT` overflow; it now matches the circuit |
@@ -1090,7 +1091,9 @@ files only) and two assembly files: `runtime.asm` (`_pow2`, `_udiv`,
   programs with floats and pointers agreed on 2026-10-11.
 * `compiler/examples/c/circuit_test.c` runs the compiler's tricky code
   paths on the circuit (all lines `ok` on 2026-10-10, again on 2026-10-11
-  after the call changes). On 2026-10-11 eight test programs (`c99`,
+  after the call changes, and on 2026-10-13 with the new "bitwise not of a
+  register" line, which says FAIL on the circuit when `NOT` is encoded the
+  old way, with RA = 0). On 2026-10-11 eight test programs (`c99`,
   `jumps`, `preproc`, `arrays`, `features`, `globals`, `structs`,
   `control`) also ran on the circuit and printed exactly their
   `.expected` (gcc's) output.

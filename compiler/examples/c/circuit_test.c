@@ -75,6 +75,18 @@ static int big_frame(int k)
     return s;
 }
 
+/* ~ on values held in registers: the circuit's NOT inverts RA, not RB, so
+   the assembler writes NOT Rx with x in both fields */
+static int not_in_registers(unsigned a, unsigned b)
+{
+    int k;
+    for (k = 0; k < 3; k++) {     /* used in a loop: a and b stay in registers */
+        a += k;
+        b ^= k;
+    }
+    return (~a == 0xF0F0F0EDu) + (~b == 0xFF00FF03u);
+}
+
 static int seen[4];
 static int note(int v)
 {
@@ -102,6 +114,7 @@ int main(void)
           && u % big == 1000000000u && 100u / d == 14u);
     check("shift by constant", (u >> 4) == 250000000u && (sh >> 3) == -125 && (s << 28) == 1342177280);
     check("shift by variable", (u >> s) == 125000000u && (sh >> s) == -32 && (1u << (s + 26)) == 0x80000000u);
+    check("bitwise not of a register", not_in_registers(0x0F0F0F0Fu, 0x00FF00FFu) == 2);
     check("signed compare", m < 0 && m <= -45 && !(m > -45) && n > m && -1 < 1);
     check("unsigned compare", u > d && big < u && !(u < big) && d <= 7u && (unsigned)-1 > 1u);
     check("float math", f * g == -1.875f && f + g == 1.75f && f / 2 == 1.25f && g < f);

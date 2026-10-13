@@ -17,7 +17,8 @@
 ;
 ; ---- A: NOT                                   R0 if NOT inverts ...
 ;                                               RB        RA        RA AND RB
-;  1/2   NOT R2, R0 = 12345678, R2 = 0F0F0F0F  F0F0F0F0  EDCBA987  FDFBF9F7
+;  1/2   word 0x1602 (NOT R2 as assembled       F0F0F0F0  EDCBA987  FDFBF9F7
+;        before 2026-10-13, RA = 0), R0 = 12345678, R2 = 0F0F0F0F
 ;  3/4   word 0x1612: RA = R1 = FFFF0000,      FF00FF00  0000FFFF  FF00FFFF
 ;        RB = R2 = 00FF00FF
 ;  5/6   word 0x1621: RA = R2, RB = R1         0000FFFF  FF00FF00  FF00FFFF
@@ -44,8 +45,8 @@
 ;
 ; MEASURED on the circuit (2026-10-13):
 ;   A: the "RA" column, every one: EDCBA987 00000006, 0000FFFF 00000000,
-;   FF00FF00 00000006. NOT inverts RA, so NOT Rx as assembled (RA = 0)
-;   gives ~R0 on the circuit.
+;   FF00FF00 00000006. NOT inverts RA. The assembler now writes NOT Rx with
+;   x in both fields, so it gives ~Rx on the circuit and in the simulator.
 ;   B: MOD -7, 0 gives 00000000 00000001 (MOD by 0 is 0); the other three
 ;   as the simulator.
 ;   C: opcode 4 gives 41200000 and 3FC00000 (RB x 2), flags 00000000;
@@ -72,7 +73,7 @@ start:
         DATA R2, 0x0F0F0F0F
         DATA R13, a1
         DATA R0, 0x12345678
-        NOT R2
+        .word 0x1602                ; NOT R2 as it was encoded (RA = 0)
         RJMP grab
 a1:
         DATA R1, 0xFFFF0000

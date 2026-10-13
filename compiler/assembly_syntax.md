@@ -141,11 +141,16 @@ One-operand (register only):
 | --- | --- | --- | --- |
 | `SHL RB` | | `RB << 1` | `0x140b` |
 | `SHR RB` | | `RB >> 1` | `0x150b` |
-| `NOT RB` | | `~RB` | `0x160b` |
+| `NOT RB` | | `~RB` | `0x16bb` |
 | `++ RB` | `INC RB` | `RB + 1` | `0x1B0b` |
 | `-- RB` | `DEC RB` | `RB - 1` | `0x1C0b` |
 | `NEG RB` | | `-RB` | `0x1D0b` |
 | `TEST RB` | | `R0 = RB`, sets N and Z | `0x1E0b` |
+
+`NOT` is the one that puts its register in both fields: the circuit's NOT
+inverts RA, not RB (measured with `diag16.asm`/`diag17.asm`), and the
+simulator inverts RB, so `0x16bb` gives `~RB` on both. The `A` flag after it
+is then always 0.
 
 ### Float ALU (result in R0, all flags rewritten)
 
