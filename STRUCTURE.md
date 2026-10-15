@@ -130,9 +130,9 @@ The design follows the "But How Do It Know?" style: a single bus,
   (float→int) truncates toward zero, ESP/EBP wrap at 14 bits, the `A` flag
   after `FCMP` is a float compare. `DIV` by 0 gives the dividend, `MOD` by 0
   gives 0 (`diag16`/`diag17`).
-* **`NOT` on the circuit inverts RA, not RB** (`diag16`/`diag17`). The
-  assembler writes `NOT Rx` with x in both fields (`0x16xx`), so it gives `~Rx`
-  on the circuit and in the simulator (which inverts RB); `A` after it is 0.
+* `NOT` inverts RB on the circuit since it was rewired on 2026-10-15
+  (`diag17`); before, it inverted RA. The assembler still writes `NOT Rx` with
+  x in both fields (`0x16xx`), which gives `~Rx` either way; `A` after it is 0.
 * Carry flag (measured, `diag12`/`diag13`): `ADD`/`++` carry out, `SUB` sets C
   on a **borrow** (`RA < RB` unsigned), `SHL`/`SHR` the bit shifted out;
   `CMP`, `--`, `NEG`, `MULT` never set it.
@@ -212,10 +212,6 @@ python compiler/src/cc/tests/difftest.py [--update]                # C tests aga
 
 ## Open questions / gotchas
 
-* Simulator vs. circuit: `NOT` inverts RA on the circuit, RB in the
-  simulator (and in the ISA). Assembled code is right on both because the
-  assembler puts the register in both fields; hand-made words with RA ≠ RB
-  differ. Rewiring the circuit's NOT to RB would end it (`diag17.asm`).
 * Float opcodes 5, B and C read back as `FFFFFFFF` with N and Z both on, on
   the circuit; the simulator writes 0. No mnemonic emits them.
 * `STK SET/GET` used to wrap at 14 bits in the simulator, but the circuit wraps

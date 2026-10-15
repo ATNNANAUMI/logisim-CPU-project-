@@ -589,8 +589,9 @@ class Assembler:
                 raise AsmError(f"{op} takes a register, not an immediate")
             self.expect(op, shape, args, 1)
             rb = parse_register(args[0])
-            # The circuit's NOT inverts RA, not RB (diag16/diag17), so NOT
-            # names its register in both fields and works either way.
+            # The circuit's NOT inverted RA, not RB (diag16/diag17), until it
+            # was rewired; NOT names its register in both fields, which works
+            # either way.
             ra = rb if op == "NOT" else 0
             words.append(enc.word(prefix, opcode, ra, rb))
             return words, relocs

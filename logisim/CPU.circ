@@ -87,6 +87,7 @@
   <lib desc="#FPArithmetic" name="4"/>
   <lib desc="#Memory" name="5">
     <tool name="Register">
+      <a name="appearance" val="logisim_evolution"/>
       <a name="width" val="16"/>
     </tool>
   </lib>
@@ -136,7 +137,7 @@
   <circuit name="PC">
     <a name="circuit" val="PC"/>
     <a name="clabelfont" val="SansSerif plain 12"/>
-    <a name="simulationFrequency" val="2048000.0"/>
+    <a name="simulationFrequency" val="1.0"/>
     <comp lib="0" loc="(300,130)" name="Pin">
       <a name="appearance" val="classic"/>
     </comp>
@@ -4765,8 +4766,10 @@ a0e e30 e0f b30 b10 e0e ef0 a0e
     <wire from="(400,270)" to="(460,270)"/>
     <wire from="(400,320)" to="(400,370)"/>
     <wire from="(400,320)" to="(460,320)"/>
-    <wire from="(400,370)" to="(400,490)"/>
+    <wire from="(400,370)" to="(400,400)"/>
     <wire from="(400,370)" to="(460,370)"/>
+    <wire from="(400,400)" to="(400,490)"/>
+    <wire from="(400,400)" to="(460,400)"/>
     <wire from="(400,490)" to="(400,530)"/>
     <wire from="(400,490)" to="(420,490)"/>
     <wire from="(400,530)" to="(400,570)"/>
@@ -4786,10 +4789,8 @@ a0e e30 e0f b30 b10 e0e ef0 a0e
     <wire from="(410,250)" to="(460,250)"/>
     <wire from="(410,300)" to="(410,350)"/>
     <wire from="(410,300)" to="(460,300)"/>
-    <wire from="(410,350)" to="(410,400)"/>
+    <wire from="(410,350)" to="(410,510)"/>
     <wire from="(410,350)" to="(460,350)"/>
-    <wire from="(410,400)" to="(410,510)"/>
-    <wire from="(410,400)" to="(460,400)"/>
     <wire from="(410,510)" to="(410,610)"/>
     <wire from="(410,610)" to="(410,680)"/>
     <wire from="(410,610)" to="(420,610)"/>

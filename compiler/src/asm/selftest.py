@@ -146,7 +146,7 @@ def check_alu_and_immediates():
         FNEG R5
         FCMP R1, R2
     """
-    # NOT R8 is 0x1688: NOT puts its register in RA too (the circuit inverts RA)
+    # NOT R8 is 0x1688: NOT puts its register in RA too (the circuit's NOT used RA)
     assert words_of(src) == [0x1112, 0x1A34, 0x1405, 0x1B06, 0x1B06, 0x1C07,
                              0x1C07, 0x1688, 0x5010, 5, 0x5F10, 0x7B,
                              0x7020, 0x3FC00000, 0x3603, 0x3704, 0x3D05, 0x3F12]

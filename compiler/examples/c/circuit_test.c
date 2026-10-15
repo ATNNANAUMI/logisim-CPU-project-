@@ -75,8 +75,8 @@ static int big_frame(int k)
     return s;
 }
 
-/* ~ on values held in registers: the circuit's NOT inverts RA, not RB, so
-   the assembler writes NOT Rx with x in both fields */
+/* ~ on values held in registers: the circuit's NOT inverted RA, not RB,
+   until it was rewired, so the assembler writes NOT Rx with x in both fields */
 static int not_in_registers(unsigned a, unsigned b)
 {
     int k;

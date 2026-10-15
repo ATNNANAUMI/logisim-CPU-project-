@@ -52,6 +52,10 @@
 ;   C: opcode 4 gives 41200000 and 3FC00000 (RB x 2), flags 00000000;
 ;   opcodes 5, B and C give FFFFFFFF 00000003 every time (N and Z both on).
 ;
+; MEASURED again (2026-10-15), after NOT was rewired to RB in the ALU:
+;   A: the "RB" column, every one: F0F0F0F0 00000006, FF00FF00 00000002,
+;   0000FFFF 00000004, as the simulator. B and C as on 2026-10-13.
+;
 ; After the 30 lines the program halts.
 ; ==================================================================
 

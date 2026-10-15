@@ -152,6 +152,8 @@ The language itself is described in [`c_language.md`](c_language.md).
   fields, which fixed it, and `circuit_test.c` has a "bitwise not of a
   register" line that says FAIL with the old encoding. The compiler's other
   `NOT`s (in `>>` of negative numbers) always ran on a value already in R0.
+  On 2026-10-15 the circuit's NOT was rewired to RB (`diag17` confirms it);
+  the both-fields encoding stays, since it is right either way.
 
 ## Guesses (not measured)
 

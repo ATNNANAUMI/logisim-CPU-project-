@@ -148,9 +148,9 @@ One-operand (register only):
 | `TEST RB` | | `R0 = RB`, sets N and Z | `0x1E0b` |
 
 `NOT` is the one that puts its register in both fields: the circuit's NOT
-inverts RA, not RB (measured with `diag16.asm`/`diag17.asm`), and the
-simulator inverts RB, so `0x16bb` gives `~RB` on both. The `A` flag after it
-is then always 0.
+inverted RA, not RB (measured with `diag16.asm`/`diag17.asm`), until it was
+rewired on 2026-10-15, and `0x16bb` gives `~RB` either way. The `A` flag
+after it is then always 0.
 
 ### Float ALU (result in R0, all flags rewritten)
 

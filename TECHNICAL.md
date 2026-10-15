@@ -104,10 +104,10 @@ instructions compute `RA op RB` (or `RA op imm`). One-operand instructions use
 `RB` only, but `RA` is still fed to the comparator, so the `A` flag compares
 `R(RA field)` (normally `R0`) with `RB`.
 
-The exception is `NOT` on the circuit: it inverts `RA`, not `RB` (measured
-with `diag16.asm`/`diag17.asm`; the simulator inverts `RB`, as designed). The
-assembler therefore writes `NOT Rx` with `x` in both fields (`0x16xx`), which
-gives `~Rx` on both, with `A` = 0.
+`NOT` on the circuit inverted `RA` instead of `RB` (measured with
+`diag16.asm`/`diag17.asm`) until it was rewired to `RB` on 2026-10-15
+(`diag17.asm` again). The assembler still writes `NOT Rx` with `x` in both
+fields (`0x16xx`), which gives `~Rx` either way, with `A` = 0.
 
 | op | integer (`0x1…` / `0x5…`) | float (`0x3…` / `0x7…`) |
 | --- | --- | --- |
@@ -117,7 +117,7 @@ gives `~Rx` on both, with `A` = 0.
 | 3 | `DIV` (signed, truncates) | `FDIV` |
 | 4 | `SHL RB` | no mnemonic: writes `RB × 2` (measured) |
 | 5 | `SHR RB` (logical) | no defined result (see below) |
-| 6 | `NOT RB` (the circuit inverts `RA`, see above) | `FLOAT RB` (int → float) |
+| 6 | `NOT RB` | `FLOAT RB` (int → float) |
 | 7 | `AND` | `INT RB` (float → int) |
 | 8 | `OR` | undefined: writes 0 (measured) |
 | 9 | `XOR` | undefined: writes 0 (measured) |
@@ -867,7 +867,7 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | `STK SET/GET`: where `EBP + RB` lands | wraps at 16 bits, across all of RAM | confirmed (`diag11.asm`, `diag16.asm`, 2026-10-13). The simulator used to wrap it at 14 bits, inside the stack area; it now matches the circuit |
 | does `STK GET` also write `RB`? | no | no: fixed in the circuit (STK GET/SET/PUSH no longer misuse RB) |
 | float opcodes 4, 5, B, C (`SHL/SHR/++/--`) and the undefined ones | 4 writes `RB × 2`; the others write 0 (`FLOAT_NOP_RESULT`) | measured (`diag16.asm`, `diag17.asm`, 2026-10-13): 4 doubles RB (normal numbers tried), 8/9/A/E write 0, **5, B and C differ**: `0xFFFFFFFF` with N and Z both on, which looks like an undriven bus |
-| `NOT` | inverts `RB`, as designed | **differs**: inverts `RA` (`diag16.asm`, `diag17.asm`, 2026-10-13). The assembler writes `NOT Rx` with `x` in both fields, so code is right on both; whether to rewire the circuit is open |
+| `NOT` | inverts `RB`, as designed | confirmed (`diag17.asm`, 2026-10-15) after the circuit was rewired. Before that it inverted `RA` (`diag16.asm`, `diag17.asm`, 2026-10-13), which is why the assembler writes `NOT Rx` with `x` in both fields |
 | `DIV`/`MOD` by 0, `0x80000000` by -1 | `DIV` gives the dividend, `MOD` gives 0; `0x80000000`, 0 | confirmed (`diag16.asm`, `diag17.asm`, 2026-10-13). The simulator used to give the dividend for `MOD` by 0 too |
 | float rounding | to nearest, ties to even (Python's float32 packing) | confirmed (`diag16.asm`, 2026-10-13): ties to even, not truncated or rounded up |
 | carry flag | as in 1.5 | confirmed (`diag12.asm`, `diag13.asm`, 2026-10-10). The simulator used to set C on `SUB`/`CMP` when there was *no* borrow, and on `MULT` overflow; it now matches the circuit |
