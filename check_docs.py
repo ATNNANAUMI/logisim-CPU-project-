@@ -10,7 +10,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 DOCS = ["README.md", "STRUCTURE.md", "TECHNICAL.md", "CLAUDE.md",
-        "compiler/assembly_syntax.md", ".claude/skills/circuit-check/SKILL.md"]
+        "compiler/assembly_syntax.md", "compiler/c_language.md", "compiler/c_decisions.md",
+        ".claude/skills/circuit-check/SKILL.md"]
 EXAMPLES = ROOT / "compiler" / "examples"
 
 # repo paths as the docs write them: compiler/..., cpu_sim/..., logisim/...
@@ -60,9 +61,10 @@ def check_paths_exist():
 
 
 def check_examples_listed():
-    """Every .asm under compiler/examples/ is listed in TECHNICAL.md (5.2/5.3)."""
+    """Every .asm and .c under compiler/examples/ is listed in TECHNICAL.md (5.2/5.3)."""
     text = (ROOT / "TECHNICAL.md").read_text()
-    unlisted = [str(p.relative_to(EXAMPLES)) for p in sorted(EXAMPLES.rglob("*.asm"))
+    sources = sorted(EXAMPLES.rglob("*.asm")) + sorted(EXAMPLES.rglob("*.c"))
+    unlisted = [str(p.relative_to(EXAMPLES)) for p in sources
                 if f"`{p.relative_to(EXAMPLES)}`" not in text
                 and f"`{p.relative_to(ROOT)}`" not in text
                 and f"{p.name}`" not in text]

@@ -16,7 +16,7 @@
         .extern print_float, print_hex
         .extern str_len, str_copy, str_eq
         .extern mem_copy, mem_set
-        .extern abs, min, max, pow
+        .extern abs, min, max, ipow
         .extern fabs, fmin, fmax
         .extern int_to_str, str_to_int
         .global start
@@ -99,11 +99,11 @@ start:
         STK PUSH
         CALL print_int, 1
         CALL space
-        DATA R0, 2                  ; pow(2, 10)
+        DATA R0, 2                  ; ipow(2, 10)
         STK PUSH
         DATA R0, 10
         STK PUSH
-        CALL pow, 2
+        CALL ipow, 2
         STK PUSH
         CALL print_int, 1
         CALL print_newline

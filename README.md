@@ -1,10 +1,12 @@
 # logisim-CPU-project
 
 A 32-bit CPU built from logic gates in Logisim-evolution, with the tools to
-program it: an assembler and linker, a small standard library, and a Python
-simulator that runs the same ROM images as the circuit.
+program it: an assembler and linker, a small standard library, a C compiler
+with a C library, and a Python simulator that runs the same ROM images as the
+circuit.
 
 ```
+  .c files ──► C compiler ──► .asm files (and the C library)
   .asm files ──► assembler ──► .obj ──► linker ──► .rom (Logisim "v2.0 raw")
                                                      │
                                 ┌────────────────────┴───────────────┐
@@ -18,7 +20,9 @@ simulator that runs the same ROM images as the circuit.
 picks RAM (`0x10000`–`0x1FFFF`) over ROM (`0x00000`–`0x0FFFF`), four flags
 (`C A N Z`), a hardware stack in the first 16K words of RAM, integer and
 IEEE-754 float ALUs, and I/O through a single `COMM` instruction: a text
-display at `0x5C`, a hex number display at `0x3C` and a keyboard at `0xF0`.
+display at `0x5C`, a hex number display at `0x3C` and a keyboard at `0xF0`
+(plus a 128×128 RGB screen at `0x6C`, wiring planned; the simulator and C's
+`gfx.h` already use it).
 Every ALU result goes to **R0**.
 
 ## Requirements
@@ -34,7 +38,7 @@ Everything can be driven from `run.py` at the project root:
 
 ```
 python run.py                     # interactive menu
-python run.py test                # assembler + simulator self-checks, docs check
+python run.py test                # assembler, simulator and C compiler self-checks, docs check
 python run.py asm   prog.asm lib.asm            # -> compiler/ROM/prog.rom
 python run.py sim   compiler/ROM/prog.rom
 python run.py build prog.asm lib.asm            # assemble, then open the simulator
@@ -46,6 +50,7 @@ Or call the tools directly:
 # assemble + link a program with the standard library
 python compiler/src/asm build compiler/examples/stdlib/stdlib_demo.asm \
                               compiler/examples/stdlib/stdlib.asm -o demo.rom
+# (--lib compiler/examples/stdlib/stdlib.asm instead links only the functions used)
 # (written to compiler/ROM/demo.rom; an -o with a folder, like ./demo.rom, is used as is)
 
 # run it in the simulator (window, or terminal only)
@@ -54,6 +59,15 @@ python cpu_sim/src/main.py compiler/ROM/demo.rom --headless --steps 2000000
 
 # run it on the real circuit, headless (finds an installed Logisim-evolution; --jar or $LOGISIM_JAR otherwise)
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/demo.rom
+```
+
+C programs go through the C compiler, which links the C library on its own:
+
+```
+python compiler/src/cc run compiler/examples/c/hello.c          # build + run in the simulator, print the display
+python compiler/src/cc build compiler/examples/c/primes.c       # -> compiler/ROM/primes.rom (+ primes.asm to read)
+python run.py build compiler/examples/c/guess.c                 # build, then open the simulator window
+python logisim/run_rom.py logisim/CPU.circ compiler/ROM/primes.rom
 ```
 
 ## A taste of the assembly
@@ -73,7 +87,22 @@ loop:   COMM OUTDATA, R1
         HALT
 ```
 
-More in `compiler/examples/programs/`.
+More in `compiler/examples/programs/`. And in C:
+
+```c
+#include <stdio.h>
+
+int main(void)
+{
+    for (int i = 1; i <= 5; i++)
+        printf("%d squared is %d\n", i, i * i);
+    return 0;
+}
+```
+
+The C is standard C99 (with a few C11 and GNU additions); every scalar type
+is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
+32 bits. See `compiler/c_language.md`.
 
 ## Layout
 
@@ -82,9 +111,13 @@ More in `compiler/examples/programs/`.
 | `logisim/CPU.circ` | the circuit (top level: `PC`) |
 | `logisim/run_rom.py` | load a ROM into the circuit and run Logisim headless |
 | `compiler/src/asm/` | assembler, linker, self-checks |
-| `compiler/examples/` | example programs, the standard library (`stdlib/stdlib.asm`), circuit diagnostics |
+| `compiler/src/cc/` | C compiler, self-checks, test programs compared with gcc (`tests/`) |
+| `compiler/libc/` | the C library: headers (`include/`), C and assembly sources |
+| `compiler/examples/` | example programs (assembly, and C in `c/`), the standard library (`stdlib/stdlib.asm`), circuit diagnostics |
 | `compiler/ROM/` | build output for ROM images (ignored by git) |
 | `compiler/assembly_syntax.md` | full assembly language reference |
+| `compiler/c_language.md` | the C language and library reference |
+| `compiler/c_decisions.md` | the C compiler's design decisions, guesses and open questions |
 | `cpu_sim/src/` | Python simulator (core, GUI, self-checks) |
 | `run.py` | one entry point for all of the above |
 
@@ -97,3 +130,6 @@ More in `compiler/examples/programs/`.
   pasted into a chat with an AI assistant.
 * [compiler/assembly_syntax.md](compiler/assembly_syntax.md) — the assembly
   language reference.
+* [compiler/c_language.md](compiler/c_language.md) — the C language (tiny C)
+  and its library; [compiler/c_decisions.md](compiler/c_decisions.md) — why
+  the C compiler works the way it does.

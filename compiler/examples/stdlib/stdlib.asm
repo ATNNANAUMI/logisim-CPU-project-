@@ -20,6 +20,8 @@
 ;
 ; BUILD (from the project root; the ROM lands in compiler/ROM/yourprog.rom)
 ;   python compiler/src/asm build yourprog.asm compiler/examples/stdlib/stdlib.asm
+; or, to link only the functions yourprog uses (and the ones they call):
+;   python compiler/src/asm build yourprog.asm --lib compiler/examples/stdlib/stdlib.asm
 ;
 ; FUNCTIONS                                   returns
 ;   output
@@ -58,7 +60,7 @@
 ;     rand()                                  0 .. 32767
 ;     srand_key()             waits for a key, seeds from the wait   the key
 ;   int math
-;     abs(n)  min(a, b)  max(a, b)  pow(base, exp)    (exp < 0 gives 0)
+;     abs(n)  min(a, b)  max(a, b)  ipow(base, exp)   (exp < 0 gives 0)
 ;   float math
 ;     fabs(f)  fmin(a, b)  fmax(a, b)
 ;     ffloor(f)               largest whole float <= f
@@ -90,7 +92,7 @@
         .global to_upper, to_lower, is_digit, is_alpha
         .global mem_copy, mem_set, mem_move, malloc, free
         .global srand, rand, srand_key
-        .global abs, min, max, pow
+        .global abs, min, max, ipow
         .global fabs, fmin, fmax, ffloor, fsqrt
         .global int_to_str, str_to_int
 
@@ -907,8 +909,10 @@ max_a:
         CPY R1, R0
         RET
 
-; pow(base, exp): base multiplied by itself exp times (exp < 0 gives 0)
-pow:
+; ipow(base, exp): base multiplied by itself exp times (exp < 0 gives 0).
+; (Called pow until 2026-10-11; renamed so it can't be mistaken for C's
+; float pow.)
+ipow:
         DATA R1, -3
         STK GET, R1
         CPY R0, R1                  ; R1 = base
@@ -917,19 +921,19 @@ pow:
         CPY R0, R2                  ; R2 = exp
         DATA R3, 1                  ; R3 = result
         TEST R2
-        RJF N, pow_neg
-pow_loop:
+        RJF N, ipow_neg
+ipow_loop:
         TEST R2
-        RJF Z, pow_done
+        RJF Z, ipow_done
         MULT R3, R1
         CPY R0, R3
         -- R2
         CPY R0, R2
-        RJMP pow_loop
-pow_done:
+        RJMP ipow_loop
+ipow_done:
         CPY R3, R0
         RET
-pow_neg:
+ipow_neg:
         DATA R0, 0
         RET
 

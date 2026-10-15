@@ -17,6 +17,7 @@
 ;              (the slot it should wrap to)                    sum didn't wrap there
 ;              MEASURED on the circuit: the write lands on 0x1FFFF (the last
 ;              RAM word): the sum wraps across all of RAM, not at 14 bits
+;              (diag16 pins it down; the simulator matches since 2026-10-13)
 ;  2  0x14001  GET at ebp-1                       CAFE0001
 ; ---- B: does STK GET also write RB?
 ;  3  0x14002  R0 after GET index 0               1234ABCD

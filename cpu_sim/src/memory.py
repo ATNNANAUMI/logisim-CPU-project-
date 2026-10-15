@@ -31,11 +31,13 @@ class Memory:
         return True
 
     # -------------------------------------------------- stack helpers
+    # Stack slot i is RAM word i. ESP and EBP only reach the 16K stack area,
+    # but STK SET/GET's EBP + RB can land anywhere in RAM.
     def stack_read(self, index: int) -> int:
-        return self.ram[index & config.STACK_MASK]
+        return self.ram[index & config.STACK_INDEX_MASK]
 
     def stack_write(self, index: int, value: int) -> None:
-        self.ram[index & config.STACK_MASK] = value & config.WORD_MASK
+        self.ram[index & config.STACK_INDEX_MASK] = value & config.WORD_MASK
 
     # ------------------------------------------------------------ images
     def load_rom(self, words) -> int:

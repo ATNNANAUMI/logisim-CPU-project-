@@ -214,12 +214,12 @@ class CPU:
             self.esp = self.ebp
             self.ebp = self.mem.stack_read(self.ebp) & config.STACK_MASK
             return f"frame back to 0x{self.ebp:04X}"
-        if name == "SET":                       # index counts from EBP
-            index = (self.ebp + self.regs[rb]) & config.STACK_MASK
+        if name == "SET":                       # EBP + RB, wrapping across all RAM
+            index = (self.ebp + self.regs[rb]) & config.STACK_INDEX_MASK
             self.mem.stack_write(index, self.regs[0])
             return f"stack[0x{index:04X}] <- R0"
         if name == "GET":
-            index = (self.ebp + self.regs[rb]) & config.STACK_MASK
+            index = (self.ebp + self.regs[rb]) & config.STACK_INDEX_MASK
             self.regs[0] = self.mem.stack_read(index)
             return f"R0 <- stack[0x{index:04X}]"
         return "undefined stack op"

@@ -12,6 +12,7 @@ file has the details.
 7. [Tooling: `run.py`, `run_rom.py`, self-checks](#7-tooling)
 8. [Simulator vs. circuit: open questions](#8-simulator-vs-circuit-open-questions)
 9. [Outdated files and stale information](#9-outdated-files-and-stale-information)
+10. [The C compiler (`compiler/src/cc/`) and the C library (`compiler/libc/`)](#10-the-c-compiler-compilersrccc-and-the-c-library-compilerlibc)
 
 ---
 
@@ -103,24 +104,33 @@ instructions compute `RA op RB` (or `RA op imm`). One-operand instructions use
 `RB` only, but `RA` is still fed to the comparator, so the `A` flag compares
 `R(RA field)` (normally `R0`) with `RB`.
 
+The exception is `NOT` on the circuit: it inverts `RA`, not `RB` (measured
+with `diag16.asm`/`diag17.asm`; the simulator inverts `RB`, as designed). The
+assembler therefore writes `NOT Rx` with `x` in both fields (`0x16xx`), which
+gives `~Rx` on both, with `A` = 0.
+
 | op | integer (`0x1…` / `0x5…`) | float (`0x3…` / `0x7…`) |
 | --- | --- | --- |
 | 0 | `ADD` | `FADD` |
 | 1 | `SUB` (RA − RB) | `FSUB` |
 | 2 | `MULT` (low 32 bits) | `FMULT` |
 | 3 | `DIV` (signed, truncates) | `FDIV` |
-| 4 | `SHL RB` | — (does nothing) |
-| 5 | `SHR RB` (logical) | — (does nothing) |
-| 6 | `NOT RB` | `FLOAT RB` (int → float) |
+| 4 | `SHL RB` | no mnemonic: writes `RB × 2` (measured) |
+| 5 | `SHR RB` (logical) | no defined result (see below) |
+| 6 | `NOT RB` (the circuit inverts `RA`, see above) | `FLOAT RB` (int → float) |
 | 7 | `AND` | `INT RB` (float → int) |
-| 8 | `OR` | undefined |
-| 9 | `XOR` | undefined |
-| A | `MOD` (sign of dividend) | undefined |
-| B | `++ RB` / `INC` | — (does nothing) |
-| C | `-- RB` / `DEC` | — (does nothing) |
+| 8 | `OR` | undefined: writes 0 (measured) |
+| 9 | `XOR` | undefined: writes 0 (measured) |
+| A | `MOD` (sign of dividend) | undefined: writes 0 (measured) |
+| B | `++ RB` / `INC` | no defined result (see below) |
+| C | `-- RB` / `DEC` | no defined result (see below) |
 | D | `NEG RB` | `FNEG RB` |
-| E | `TEST RB` (`R0 = RB`) | undefined |
+| E | `TEST RB` (`R0 = RB`) | undefined: writes 0 (measured) |
 | F | `CMP RA, RB` | `FCMP RA, RB` |
+
+Float opcodes 5, B and C read back as `0xFFFFFFFF` on the circuit with `N` and
+`Z` both on, which looks like an undriven bus; the simulator writes 0 for
+them instead (`FLOAT_NOP_RESULT`).
 
 `CMP` and `FCMP` write `0` to `R0`; only the flags carry the result.
 
@@ -128,19 +138,32 @@ instructions compute `RA op RB` (or `RA op imm`). One-operand instructions use
 
 | flag | meaning |
 | --- | --- |
-| `C` | carry out of the adder. `ADD`, `++`: unsigned overflow. `SUB`, `CMP`, `--`, `NEG`: set when there is **no** borrow. `SHL`: bit 31 shifted out. `SHR`: bit 0 shifted out. `MULT`: product does not fit in signed 32 bits. Everything else: 0 |
+| `C` | `ADD`, `++`: carry out (unsigned overflow). `SUB`: **borrow**, set when `RA < RB` unsigned. `SHL`: bit 31 shifted out. `SHR`: bit 0 shifted out. Everything else, including `CMP`, `--`, `NEG` and `MULT`: 0. Measured on the circuit with `diag12.asm` and `diag13.asm` |
 | `A` | `RA > RB`, signed |
 | `N` | bit 31 of the result (for `CMP`, of `RA − RB`) |
 | `Z` | result is 0 (for `CMP`, `RA == RB`) |
 
-Division or modulo by zero returns the dividend unchanged.
+Division by zero returns the dividend unchanged; modulo by zero returns 0.
+`0x80000000 DIV -1` gives `0x80000000` and `MOD` gives 0 (all measured with
+`diag16.asm`/`diag17.asm`).
 
 **Float flags:** `C = 0`, `A = fa > fb`, `N = result < 0`, `Z = result == 0`.
 For `FCMP` the "result" is `RA − RB` (rounded to float32), so `N` means
-`RA < RB` and `Z` means equal, the same as the integer `CMP`.
+`RA < RB` and `Z` means equal, the same as the integer `CMP`. Results round to
+nearest, ties to even (measured with `diag16.asm`: `1 + 2^-24 = 1.0`,
+`1/3 = 0x3EAAAAAB`).
 `INT` truncates toward zero (`INT(1.7) = 1`, `INT(-3.7) = -3`, `INT(0.5) = 0`),
-confirmed on the circuit. `FDIV` by zero gives ±infinity with the dividend's sign. `INT` of NaN or
-infinity gives 0.
+confirmed on the circuit. Measured with `diag14.asm`/`diag15.asm`:
+
+* the float unit follows IEEE-754: `x / 0` is infinity with the sign of `x`
+  XOR the zero's sign (`1.0 / -0.0 = -inf`), `0/0`, `inf - inf`, `inf * 0`
+  and anything with a NaN give NaN (`0x7FC00000`); subnormals are kept
+* `INT` works like Java's `(long)` cast followed by keeping the low 32 bits:
+  out-of-range values wrap (`INT(3e9) = 0xB2D05E00`), values at or above
+  2^63 and +infinity give `0xFFFFFFFF`, at or below -2^63 and -infinity
+  give 0, NaN gives 0
+* `FCMP` with a NaN clears every flag, so `<`, `<=`, `==` with a NaN are all
+  false when tested on N and Z
 
 ### 1.6 Stack instructions (`STK`, `0x0Bob`)
 
@@ -156,11 +179,11 @@ The sub-operation is in the RA field.
 | 5 | `GET, RB` | `R0 = stack[EBP + RB]` |
 
 The stack grows **upward** from RAM index 0. `SET`/`GET` are relative to
-`EBP`; negative `RB` reaches arguments below the frame. On the circuit,
-`EBP + RB` goes through the 17-bit address adder, so it wraps across the
-**entire RAM**, not just the 16K stack area: with `EBP = 0`, index `-1`
-reads or writes the last word of RAM (`0x1FFFF`). The simulator still wraps
-this index at 14 bits, so it lands on `0x13FFF` instead (see section 8).
+`EBP`; negative `RB` reaches arguments below the frame. `EBP + RB` wraps at
+16 bits, across the **entire RAM**, not just the 16K stack area: with
+`EBP = 0`, index `-1` reads or writes the last word of RAM (`0x1FFFF`) and
+index `0x8000` reaches `0x18000`; bits of `RB` above 15 are dropped. Measured
+on the circuit with `diag11.asm` and `diag16.asm`; the simulator does the same.
 
 ### 1.7 I/O (`COMM`, `0x08mb`)
 
@@ -181,6 +204,12 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 | `0x5C` | text display (TTY) | prints the low 7 bits as ASCII; `0x0A` newline, `0x08` backspace |
 | `0x3C` | number display | latches the 32-bit word and shows it on 8 hex digits (the simulator shows it in the window, and as `HEX DISPLAY:` in headless output) |
 | `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08` |
+| `0x6C` | RGB screen (*planned wiring*) | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; on the 128×128 RGB Video only the low 7 bits of x and y are wired. Write-only |
+| `0x6D` | RGB screen clear (*planned*) | any word pulses the RGB Video's reset: all black |
+
+The RGB Video component is in `PC` but not wired yet; `0x6C`/`0x6D` are the
+wiring chosen for it (2026-10-11). The simulator and `gfx.h` follow it; the
+numbers are `VIDEO_*` in `config.py` and `GFX_*` in `gfx.h`.
 
 Each device compares the 8 low bits of the selected address against its own
 number with a gate decoder (the keyboard: bits 0–3 must be 0, bits 4–7 must
@@ -344,11 +373,12 @@ modules import each other by plain name, so run them as scripts
 | `isa.py` | opcode tables, `decode(word) -> Instr`, `disassemble(word, operand)`. `Instr.takes_operand` says whether a literal word follows |
 | `alu.py` | `int_op(name, a, b)` and `float_op(name, a, b)`, each returning `(R0 value, flag nibble)`; float32 ↔ bits helpers |
 | `memory.py` | `Memory` with two 64K banks, `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
-| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes), `Keyboard` (a deque; empty reads 0), `DeviceBus` (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
+| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes), `Keyboard` (a deque; empty reads 0), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `DeviceBus` (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()`, `reset()`, `resume()` |
 | `gui.py` | the Tk window |
+| `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 13 checks on the core |
+| `selftest.py` | 18 checks on the core |
 
 ### 3.2 Execution model
 
@@ -368,7 +398,7 @@ ALU instructions call `alu.int_op` or `alu.float_op` with `a = R[RA]` and
 ### 3.3 Running it
 
 ```
-python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--trace] [--keys TEXT]
+python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--trace] [--keys TEXT] [--screen FILE.png]
 ```
 
 * without `--headless`: opens the window with the ROM loaded
@@ -376,6 +406,8 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
   prints the state, the registers and the display
 * `--trace`: prints every executed instruction (headless only)
 * `--keys`: preloads the keyboard buffer (use `$'...\n'` in bash for Enter)
+* `--screen FILE.png`: saves the RGB screen at the end (headless only; drawn
+  at twice the size)
 
 **The window:**
 
@@ -384,15 +416,25 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
   registers, IAR, ESP, EBP, the flags as checkboxes, and a status block (bank,
   selected devices, instruction count, measured rate, run state)
 * middle: ROM and RAM tabs, 256 words per page, with optional disassembly and
-  "follow IAR"
-* right: the display (`0x5C`), the keyboard field (`0xF0`), and the last
-  executed instructions
+  "follow IAR"; and a C source tab (below)
+* right: the display (`0x5C`) and the RGB screen (`0x6C`, a tab that comes
+  forward when a program first draws), the hex display, the keyboard field
+  (`0xF0`), and the last executed instructions
 
 Editing: type into any register/IAR/ESP/EBP box and press Enter, click the
 flags, or double-click a memory word. Values accept `0x1F`, `31`, `-5`,
 `0b1010`, and `1.5` / `1.5f` (stored as float32 bits). Right-click a memory
 word to toggle a breakpoint; a running CPU stops *before* executing that
 address. `clear bp` removes them all.
+
+C source: when a `.map` with source lines sits next to the ROM (`cc build`
+always writes one), the C source tab shows the file of the line being run
+with that line highlighted, and the state box shows the function and line.
+Right-click a source line for a breakpoint on all of its code. The "C line"
+buttons run to the next line: *into* follows calls, *over* runs calls to
+the end (lines in a deeper frame, EBP above the current one, don't count),
+*out* runs until the function returns. The line table is read by
+`debuginfo.py`.
 
 The keyboard field is read-only: every key goes straight into the buffer
 (Enter as `0x0A`, Backspace as `0x08`, other printable ASCII as itself).
@@ -411,7 +453,7 @@ skipped when more than 200 instructions run in one tick.
 | `SHR_ARITHMETIC` | `False`: `SHR` is logical, the top bit fills with 0 | confirmed |
 | `DIV_TRUNCATE` | `True`: `DIV` truncates toward zero, `MOD` keeps the dividend's sign (`-7 MOD 3 = -1`) | confirmed |
 | `STOP_ON_STACK_WRAP` | `False`: ESP/EBP wrap at 14 bits | wrapping confirmed; `True` stops the simulated CPU instead, to catch a runaway stack while debugging |
-| `FLOAT_NOP_RESULT` | `0`: written to `R0` by float `SHL/SHR/++/--` and the undefined float opcodes | still a guess |
+| `FLOAT_NOP_RESULT` | `0`: written to `R0` by float `SHR/++/--` and the undefined float opcodes | confirmed for the undefined opcodes (`diag16.asm`); on the circuit float `SHR/++/--` read back as `0xFFFFFFFF` with N and Z both on (an undriven bus?), which the simulator doesn't copy |
 
 ---
 
@@ -425,14 +467,18 @@ explains how the tools work.
 
 ```
 python compiler/src/asm assemble prog.asm            [-o prog.obj]
-python compiler/src/asm link     prog.obj lib.obj    [-o prog.rom] [--map]
-python compiler/src/asm build    prog.asm lib.asm    [-o prog.rom] [--map]
+python compiler/src/asm link     prog.obj lib.obj    [-o prog.rom] [--map] [--lib lib.obj]
+python compiler/src/asm build    prog.asm lib.asm    [-o prog.rom] [--map] [--lib lib.asm]
 ```
+
+`--lib FILE` (repeatable) links FILE as a library: only the parts the
+program needs (4.6). Libraries are placed after the other inputs.
 
 `build` accepts `.asm` and `.obj` files mixed; `link` takes only `.obj` (and
 suggests `build` when given something else). The default output name is the
 first input with `.rom`. `--map` also writes a `.map` file with every label's
-final address:
+final address, and (when the code has `.loc` lines, as C code does) a
+"source lines" section: the address where each source line's code starts.
 
 ```
 # labels in t.rom
@@ -459,7 +505,7 @@ problems of all files (bad source, unreadable file, broken `.obj`), as
 | `objfile.py` | `ObjectFile` and `Reloc`, saved as readable JSON |
 | `linker.py` | object files → one ROM image, plus `format_raw` and `format_map` |
 | `errors.py` | `AsmError` (one message with file and line) and `AsmErrors` (a batch) |
-| `selftest.py` | 18 checks for the assembler and linker |
+| `selftest.py` | 19 checks for the assembler and linker |
 | `asm_grammar.py` | writes railroad diagrams of the grammar to `asm_grammar.html` (needs `pip install railroad-diagrams`) |
 
 ### 4.3 Assembling (two passes)
@@ -475,6 +521,8 @@ current section (`.rom` or `.ram`), records `.equ` constants and the
 | `.word a, b, …` | one per value |
 | `.string "…"` | one per character + a 0 |
 | `.space n` | n (zeros in ROM; only reserves room in RAM) |
+| `.part` | 0 (starts a new part) |
+| `.loc "file", line` | 0 (records where a source line's code starts) |
 | `CALL t` / `CALL t, n` | 7 / 9 + n |
 | `RET` | 6 |
 | `SAVE r…` | 2 per register |
@@ -492,10 +540,16 @@ value that contains a label becomes a 0 word plus a relocation:
 * `abs`: the word must hold a label's final address (from `DATA`, `.word`,
   immediates, `CALL`). A `CALL` target is also marked `rom_only`, so the
   linker rejects calling a RAM label from another file
-* `rel`: a jump offset to a label in **another** file
+* `rel`: a jump offset to a label in **another** file, or in another part
+  of this file (`section: rom`, the target's offset in `addend`)
 
-Jumps to labels in the same file are resolved immediately, since the distance
-does not change when the file moves.
+**Parts.** After pass 1 the file's ROM is cut into parts: one starts at
+offset 0, at every `.global` ROM label and at every `.part` directive. Each
+part records whether it can fall through into the next one (its last
+statement is not `RJMP`, `JMRB`, `RET`, `.word`, `.string` or `.space`).
+Jumps to labels in the same part are resolved immediately, since the
+distance does not change when the file moves; a jump into another part
+becomes a `rel` relocation, because a library link may move or drop parts.
 
 Checks include: unknown names, labels used as constants, more than one label
 in an expression, subtracting a label, values that don't fit in 32 bits,
@@ -530,6 +584,10 @@ SAVE Ra, Rb                     RESTORE Ra, Rb
 None of them touch the flags.
 
 ### 4.5 Object files (`.obj`)
+
+(Since 2026-10-11 an object file also has `"parts": [[start, falls_through], ...]`,
+the parts of its ROM; an older file without it is one part.)
+
 
 JSON, written by hand so it stays readable. Here is
 `compiler/examples/two_files/main.asm` assembled on its own (words the linker
@@ -573,6 +631,13 @@ RAM  0x10000   stack (never touched by the linker)
      0x14000   each file's RAM part, in command-line order
 ```
 
+0. For a library (`--lib`), choose the parts to keep: starting from every
+   part of the other files (and `start`), follow the relocations of each
+   kept part (a section-relative target, or a `.global` defined in a
+   library) to the part it points into, and keep the next part when a kept
+   part falls through. A library none of whose labels is referred to is
+   dropped, RAM and all. The kept parts are joined up and every offset
+   (labels, relocation positions and targets) is renumbered.
 1. Give each file a base in ROM and RAM, and check that the sizes fit.
 2. Compute every label's final address and build the table of `.global`s
    (the same global in two files is an error).
@@ -582,7 +647,8 @@ RAM  0x10000   stack (never touched by the linker)
    `rel`: `target − address of the offset word`). Jumping to or calling a
    RAM label is an error; taking a RAM label's address is fine.
 5. Check that every `.extern` is exported by some file, even when it is
-   never used (a missing file or a typo).
+   never used (a missing file or a typo). Labels of dropped library parts
+   still count as exported.
 
 The output is a v2.0 raw image (section 6).
 
@@ -631,7 +697,11 @@ uses with `.extern`:
 
 ```
 python compiler/src/asm build prog.asm compiler/examples/stdlib/stdlib.asm -o prog.rom
+python compiler/src/asm build prog.asm --lib compiler/examples/stdlib/stdlib.asm   # only what prog uses
 ```
+
+With `--lib`, only the functions the program calls (and the ones they call)
+are linked: `programs/guess.asm` takes 556 words instead of 1669.
 
 | group | functions |
 | --- | --- |
@@ -639,7 +709,7 @@ python compiler/src/asm build prog.asm compiler/examples/stdlib/stdlib.asm -o pr
 | input | `read_char()` (waits for a key, **no echo**), `read_line(buf, max)` (echoes, handles backspace, keeps max−1 chars, returns the length), `read_int()`, `read_float()` |
 | strings | `str_len(addr)`, `str_copy(dst, src)` (returns the length), `str_eq(a, b)` (1/0) |
 | memory | `mem_copy(dst, src, n)`, `mem_set(dst, value, n)` |
-| int math | `abs(n)`, `min(a, b)`, `max(a, b)`, `pow(base, exp)` (exp < 0 gives 0) |
+| int math | `abs(n)`, `min(a, b)`, `max(a, b)`, `ipow(base, exp)` (exp < 0 gives 0; it was called `pow` until 2026-10-11) |
 | float math | `fabs(f)`, `fmin(a, b)`, `fmax(a, b)` |
 | conversion | `int_to_str(n, buf)` (buf: 12 words, returns the length), `str_to_int(addr)` |
 
@@ -668,12 +738,27 @@ line is empty (so it can't erase the prompt).
 | `programs/untested.asm` | `show_hex` and `try_read_char`, the two stdlib functions not yet run on the circuit (needs typing) |
 | `two_files/main.asm`, `lib.asm` | two files, `.extern`/`.global`, `CALL` inside a call, a RAM variable |
 | `tests/io_test.asm` | minimal keyboard → display loop for probing the circuit |
+| `c/hello.c` | C: `printf("hello, world\n")` |
+| `c/primes.c` | C: a sieve, `printf` with a width, the hex display (`cpu.h`) |
+| `c/gfx_demo.c` | C: the RGB screen with `gfx.h`: gradient, text, shapes, a sine wave (`--screen` saves the picture) |
+| `c/structs.c` | C: an array of structs, `qsort`, `malloc`, `printf("%.2f")` |
+| `c/guess.c` | C: guess the number with `scanf`; seeded by how long the first key takes (`key_pressed`); the header has a transcript |
+| `c/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, `~` on registers, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
 | `tests/diag10.asm` | `INT` on floats below 1 (diagnostic, resolved: they give 0) |
 | `tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x14000`; they are also printed in hex |
+| `tests/diag12.asm` | what the C compiler relies on: reading and setting `ESP`/`EBP` with `STK CALL`/`STK RET`, stack slot `i` being RAM `0x10000 + i`, the carry flag after `CMP`/`SUB`/`ADD`, the `A` flag after `FCMP` (a float compare), `MULT`'s low 32 bits, `DIV` by `0x80000000`. Link it first; 30 results from `0x14000`, also printed |
+| `tests/diag13.asm` | the carry flag (and A N Z) after `SUB`, `--`, `++`, `NEG`, `SHL`, `SHR`, `MULT`, `ADD`, `AND`, `TEST`: on the circuit `SUB` sets C on a borrow and `CMP`/`--`/`NEG`/`MULT` never set it. Link it first; 24 results from `0x14000`, also printed |
+| `tests/diag14.asm` | float special cases: division by ±0, NaN, infinity, `INT` out of range, overflow, subnormals. Link it first; 22 results from `0x14000`, also printed |
+| `tests/diag15.asm` | more of the same after diag14: `INT` of -infinity and of large values, the remaining divisions by zero. Link it first; 15 results from `0x14000`, also printed |
+| `tests/diag16.asm` | where `STK SET/GET` put `EBP + RB` (it wraps at 16 bits, across all of RAM), R0 and flags after `DIV`, `MOD` and `NOT` (`MOD` by 0 gives 0; `NOT` inverts RA), the float opcodes with no defined result, float rounding (to nearest, ties to even). Link it first; 52 results from `0x14000`, also printed |
+| `tests/diag17.asm` | follow-up to diag16: `NOT` encoded with RA and RB both set (it inverts RA, not RB), `DIV`/`MOD` by 0 and `0x80000000` by -1, float opcodes 4, 5, B, C with other inputs (4 doubles RB). Link it first; 30 results from `0x14000`, also printed |
+| `tests/diag18.asm` | the flags after `OR` and `XOR`, and `NOT` as the assembler writes it now (register in both fields: `~Rx`, `A` = 0); all as the simulator. Link it first; 16 results from `0x14000`, also printed |
 
-All of these build and run correctly in the simulator. Built images go in
-`compiler/ROM/`, which git ignores. Rebuild them after changing a source
-or the stdlib; an image there can be older than its source.
+All of these build and run correctly in the simulator. The `c/` programs
+are C: build them with `python compiler/src/cc build <file>` (or `run`,
+section 10.1), which links the C library instead of `stdlib.asm`. Built
+images go in `compiler/ROM/`, which git ignores. Rebuild them after changing
+a source or the stdlib; an image there can be older than its source.
 
 ---
 
@@ -704,14 +789,15 @@ lets you pick files from the project (it skips `.git`, `.venv`,
 
 | command | does |
 | --- | --- |
-| `python run.py asm <files…> [-o out.rom]` | `compiler/src/asm build …` |
+| `python run.py asm <files…> [-o out.rom]` | `compiler/src/asm build …`, or `compiler/src/cc build …` when a `.c` file is among them |
 | `python run.py sim [rom]` | `cpu_sim/src/main.py [rom]` (the window) |
-| `python run.py build <files…> -o out.rom` | assembles, then opens the result in the simulator |
-| `python run.py test` | runs both self-checks, then `check_docs.py` |
+| `python run.py build <files…> -o out.rom` | the same build, then opens the result in the simulator |
+| `python run.py test` | runs the three self-check suites, then `check_docs.py` |
 
 It checks for `tkinter` before opening the window and prints install hints
 when it is missing. In the menu, the output of `asm`/`build` is the first
-source file with `.rom`.
+source file with `.rom`; the menu offers `.asm` and `.c` files (not the C
+library's own).
 
 ### 7.2 `logisim/run_rom.py`
 
@@ -744,16 +830,23 @@ repo.
 ### 7.3 Self-checks
 
 ```
-python compiler/src/asm/selftest.py   # 18 checks: encodings, values, strings, jumps,
+python compiler/src/asm/selftest.py   # 19 checks: encodings, values, strings, jumps,
                                       # CALL/RET, SAVE/RESTORE, linking, link errors
                                       # (RAM calls, unexported externs), warnings,
-                                      # raw output, .obj round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 13 checks: immediates, flags, DIV by 0, RAM,
-                                      # ROM writes, stack, frames, floats, FCMP flags,
-                                      # keyboard, backspace, ADDR/JMRB
+                                      # library parts (--lib), raw output, .obj
+                                      # round trip, CLI, examples
+python cpu_sim/src/selftest.py        # 18 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+                                      # ROM writes, stack, STK SET/GET across RAM, frames,
+                                      # floats, FCMP flags, keyboard, backspace, ADDR/JMRB,
+                                      # float specials, float SHL
+python compiler/src/cc/selftest.py    # 14 checks: preprocessor, error messages (several per run), warnings,
+                                      # type sizes, exit/atexit, keyboard input, globals
+                                      # after a reset, library override, reserved names,
+                                      # mixing C and assembly, CLI, C line stepping, and every test program
+                                      # in compiler/src/cc/tests/ against gcc's output
 python check_docs.py                  # 3 checks on the docs: every repo path they name
-                                      # exists, every example is listed in 5.3, every
-                                      # TWEAKS switch is in 3.4
+                                      # exists, every example (.asm, .c) is listed in
+                                      # 5.3, every TWEAKS switch is in 3.4
 ```
 
 `check_docs.py` checks only mechanical facts. It skips build output under
@@ -771,11 +864,16 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | --- | --- | --- |
 | `A` signed, `SHR` logical, `DIV`/`MOD` truncate, stack wraps | as in 3.4 | confirmed (2026-10-02) |
 | `INT` (float → int) | truncates toward zero | confirmed: truncates (`diag10.asm`, `diag11.asm`) |
-| `STK SET/GET` with a negative index at `EBP = 0` | wraps at 14 bits, to the top of the stack area (`0x13FFF`) | **differs**: wraps across the entire RAM, to the last word (`0x1FFFF`), measured with `diag11.asm` |
+| `STK SET/GET`: where `EBP + RB` lands | wraps at 16 bits, across all of RAM | confirmed (`diag11.asm`, `diag16.asm`, 2026-10-13). The simulator used to wrap it at 14 bits, inside the stack area; it now matches the circuit |
 | does `STK GET` also write `RB`? | no | no: fixed in the circuit (STK GET/SET/PUSH no longer misuse RB) |
-| float `SHL/SHR/++/--`, undefined float opcodes | write 0 (`FLOAT_NOP_RESULT`) | a guess |
-| `SUB` carry (set when there is no borrow), `MULT` overflow carry, float divide by zero | as in 1.5 | not verified |
+| float opcodes 4, 5, B, C (`SHL/SHR/++/--`) and the undefined ones | 4 writes `RB × 2`; the others write 0 (`FLOAT_NOP_RESULT`) | measured (`diag16.asm`, `diag17.asm`, 2026-10-13): 4 doubles RB (normal numbers tried), 8/9/A/E write 0, **5, B and C differ**: `0xFFFFFFFF` with N and Z both on, which looks like an undriven bus |
+| `NOT` | inverts `RB`, as designed | **differs**: inverts `RA` (`diag16.asm`, `diag17.asm`, 2026-10-13). The assembler writes `NOT Rx` with `x` in both fields, so code is right on both; whether to rewire the circuit is open |
+| `DIV`/`MOD` by 0, `0x80000000` by -1 | `DIV` gives the dividend, `MOD` gives 0; `0x80000000`, 0 | confirmed (`diag16.asm`, `diag17.asm`, 2026-10-13). The simulator used to give the dividend for `MOD` by 0 too |
+| float rounding | to nearest, ties to even (Python's float32 packing) | confirmed (`diag16.asm`, 2026-10-13): ties to even, not truncated or rounded up |
+| carry flag | as in 1.5 | confirmed (`diag12.asm`, `diag13.asm`, 2026-10-10). The simulator used to set C on `SUB`/`CMP` when there was *no* borrow, and on `MULT` overflow; it now matches the circuit |
+| float division by zero, NaN, `INT` out of range | as in 1.5 | confirmed (`diag14.asm`, `diag15.asm`, 2026-10-10). The simulator used to give `0.0/0.0 = +inf`, `1.0/-0.0 = +inf` and `INT(inf) = 0`; it now matches the circuit |
 | number display `0x3C` | shows the last word sent (window and headless output) | 8 hex digits in `PC` |
+| RGB screen `0x6C`/`0x6D` | 128×128 RGB565, the "RGB screen" tab, `--screen` | RGB Video in `PC`, not wired yet |
 | timing | one instruction per step | several clock cycles per instruction (stepper) |
 
 ---
@@ -804,3 +902,199 @@ are still in the git history.
 | --- | --- |
 | subcircuits `ROM`, `program_loader`, `sign_controller`, `teste` | not used anywhere. `ROM` is an older memory block (the program now lives in the ROM inside `RAM`); `teste` is the FPU prototype, with π and e as test constants |
 | comparator against `0x287` in `RAM` | a debugging watch on one address, not part of the design |
+
+---
+
+## 10. The C compiler (`compiler/src/cc/`) and the C library (`compiler/libc/`)
+
+The language as a user sees it (what C is accepted, type sizes, the
+library, mixing with assembly) is in
+[`compiler/c_language.md`](compiler/c_language.md). The choices made while
+building it, and what is still a guess, are in
+[`compiler/c_decisions.md`](compiler/c_decisions.md). This section explains
+how the compiler works.
+
+### 10.1 Command line
+
+```
+python compiler/src/cc compile prog.c [-o prog.asm]                 # C -> assembly
+python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map] [--no-libc] [--lib x.asm]
+python compiler/src/cc run   prog.c [...] [--keys TEXT] [--steps N] [--stats] [--trace] [--screen FILE.png]
+        common options: -I dir, -D NAME[=value], -w (no warnings)
+```
+
+Output paths follow the assembler's rule (4.1): `compiler/ROM/<first
+input>.rom`, `-o name` inside `compiler/ROM/`, an `-o` with a folder as
+written. `build` and `run` also write `<name>.asm` for each `.c` next to the
+`.rom`; `build` always writes the `.map` too (with the C source lines, for
+the simulator window's C view; `.loc` directives carry them). `run` builds, runs the image in the simulator without a window and
+prints the display; it exits with 2 if the program doesn't halt within
+`--steps` (default 50 million).
+
+### 10.2 Modules
+
+| file | role |
+| --- | --- |
+| `__main__.py` | the command line above |
+| `cerror.py` | `CError` (`file:line:col: error: ...`), `CErrors` (several), `error_at(token, message)` |
+| `lexer.py` | text -> preprocessing tokens (line splicing, comments, pp-numbers, literals with prefixes), and `parse_number` / `decode_literal` for after preprocessing |
+| `preprocessor.py` | `#include`, `#define`, `#if`..., macro expansion with hide sets (Prosser's algorithm), predefined macros, `#if` arithmetic; then keywords, numbers and string joining |
+| `typesys.py` | `Type` (sizes in words, all alignment 1), integer promotion, usual arithmetic conversions, compatibility, `type_name` for messages |
+| `nodes.py` | `Node` (one expression or statement; the kinds are listed in the file) and `Obj` (a variable or function) |
+| `cparser.py` | recursive-descent parser that type-checks as it builds (in the style of chibicc): declarations, initializers, constant folding, constant evaluation for static data, implicit conversions as `cast` nodes |
+| `regalloc.py` | which locals live in registers, and which of them each call must keep |
+| `codegen.py` | syntax tree -> assembly text, one function at a time |
+| `peephole.py` | clean-ups on each function's instructions |
+| `driver.py` | compiles files, caches and selects the C library, writes crt0, links (with `compiler/src/asm`'s assembler and linker), runs the simulator |
+| `selftest.py` | the self-checks (7.3) |
+| `tests/` | the test programs, their gcc outputs (`.expected`) and `difftest.py` |
+
+Like the assembler, the modules import each other by plain name; the
+driver puts `compiler/src/asm/` on `sys.path` to use `assembler`, `linker`
+and `objfile` (the module names don't overlap).
+
+### 10.3 Code generation
+
+**Registers.** R0 takes every ALU result. R1-R12 hold expression
+temporaries and register variables (the temporaries get the low numbers,
+at least five of them). R13 is scratch for frame indexes and addresses.
+R14 and R15 are left to the `CALL`/`RET`/`RESTORE` pseudo-instructions and
+the runtime helpers.
+
+**Values.** Each expression evaluates to a `Val`: a constant (used directly
+as `#imm` or `DATA`), a temporary register, a variable's register (read but
+not changed), R0 (moved out before anything else uses the ALU), or the
+address of an aggregate. An lvalue is an `Addr`: a frame slot
+(`EBP + offset`, maybe plus a register), a memory address (label + offset,
+maybe plus a register), or a register variable. Loads and stores pick the
+cheapest instruction: `STK GET/SET` for frame slots, `LD`/`ST` for a known
+address, `ALD`/`AST` for base + index (array elements). A local's address is
+needed only when it escapes (`&x`, an array passed to a function): then the
+function computes `FP = 0x10000 + EBP` once in its prologue (`STK CALL`,
+`STK GET 0`, `STK RET` read EBP) and keeps it in a frame slot.
+
+**Evaluation order.** Of two operands, the one that needs no code goes
+last, the one with a call goes first (fewer registers to keep across the
+call), otherwise the deeper one first.
+
+**Comparisons and jumps.** Conditions compile straight to jumps (`&&`,
+`||`, `!` without making 0/1 values). Signed: `CMP` and the A flag
+(`a < c` is "not A after `CMP a, #c-1`"). Unsigned: `SUB` and C, which is a
+borrow. Floats: `FCMP` and N/Z only, so a NaN compares false (`a <= b` is
+"N or Z after `FCMP a, b`"). Pointers compare as signed (addresses are below
+2^17).
+
+**Arithmetic.** `x << k` is `MULT x, #2^k`; logical `x >> k` is `SHR x` then
+`DIV R0, #2^(k-1)`; arithmetic `>>` of a negative number is
+`NOT(NOT x >> k)`. By a variable count, `2^n` comes from the `_pow2` table.
+Unsigned `/` and `%` by a power of two are shifts and masks, otherwise a call
+to `_udiv`/`_umod`. Conversions: `FLOAT`/`INT` (truncation, as C wants),
+with corrections for unsigned values of 2^31 and above.
+
+**Calls.** Arguments are pushed with `STK PUSH` (structs word by word); the
+call is the `CALL` pseudo-instruction's sequence written out, with `RJMP f`
+for a direct call (or `JMRB` through a function pointer) in place of
+`DATA R0, f` + `JMRB R0`. Afterwards the arguments are popped and the saved
+registers put back in one sequence, keeping R0 (in R15) only when the result
+is used. A `void` function returns with `STK RET`, `STK POP`, `JMRB R0`
+instead of the 6-word `RET`. Live temporaries and the register variables still
+needed after the call are kept with `SAVE`/`RESTORE`; a register variable
+that the arguments themselves change is written to its stack slot before
+the call and read back after. Variadic calls push the variadic arguments,
+then the fixed ones, then the variadic word count; `va_start` computes
+`FP - (fixed words + 2) - count`.
+
+**Frames.** Parameters are at negative offsets from EBP, locals (and
+struct-result buffers, and the slots of register variables a call keeps in
+memory) at EBP+1 up. The prologue
+reserves the frame with `STK PUSH`es, or above 15 words sets ESP directly
+(two `STK RET`s, as `setjmp.asm` explains), then loads the register
+parameters. Every return jumps to one `RET`.
+
+**Register variables** (`regalloc.py`): scalar locals and parameters whose
+address is never taken. Uses count 8 times more per enclosing loop; a
+variable gets a register if 2 instructions per use outweigh 4 for every call
+where it must be kept (and 3 to load a parameter). A call keeps a variable
+if it is used later in the function, in the same statement, or anywhere in
+a loop around the call; with labels and `goto` in the function, at every
+call.
+
+**Other statements.** A `switch` with 5 or more cases spread over at most 3
+slots per case becomes a jump table (`ALD` + `JMRB` through a `.word` list);
+others a chain of `CMP`/`RJF`. Struct copies up to 8 words are unrolled,
+longer ones a loop. Bit-fields are read and written with `MULT`, the shift
+sequences and `AND`/`OR` on their word.
+
+**Peephole pass** (`peephole.py`): drops a `DATA` or `CPY` that would
+reload a value a register already has (within straight-line code), a `TEST`
+whose flags the previous integer ALU instruction already set (before a jump
+on Z/N), jumps to the next instruction and jump chains, and code no label
+leads to after an unconditional jump.
+
+### 10.4 Data and start-up
+
+* Functions, string literals, `const` data, jump tables and the starting
+  values of initialised variables go in `.rom`. Variables go in `.ram`
+  (`.space`): the initialised ones together, then the zeroed ones.
+* Each C file gets an `_init_<file>` routine (only when it has RAM data): it
+  copies its starting values from the `_T_<file>` template in ROM, and
+  clears the rest. `driver.crt0_source` writes the start-up code for each
+  build: `start` calls every linked `_init_` routine, then
+  `main(0, {NULL})`, then `exit` with main's result. The build links, in
+  order: crt0, the given files, the library files they need, and a last
+  object whose `.ram` label `_end` marks the end of all variables (where
+  malloc's heap starts).
+* Labels: C names as they are (or `_X` + name, 5 in `c_language.md`);
+  compiler labels `_K<n>` (code), `_L<n>` (statements), `_S<n>` (strings),
+  `_F<n>` (`__func__`), `_V<n>_<name>` (static locals), `_C<n>`, `_G<n>`.
+
+### 10.5 The C library
+
+`compiler/libc/` holds the headers (`include/`), the library in C (one file
+per group of functions: `printf.c`, `format.c`, `fdigits.c`, `scanf.c`,
+`string.c`, `malloc.c`, `math.c`, `gfx.c` and `gfx_text.c` for the RGB
+screen, ...), `local.h` (shared by the library
+files only) and two assembly files: `runtime.asm` (`_pow2`, `_udiv`,
+`_umod`, `_Exit`) and `setjmp.asm`.
+
+* The driver compiles each library file the first time it is needed and
+  keeps the `.obj` (and the `.asm`, for reading) in `compiler/ROM/libc/`,
+  with a key made from the file, the compiler's sources and the headers: a
+  change to any of them rebuilds it.
+* `driver.select_library` links a library file only when it defines a name
+  that is still missing, repeating until nothing is: like a static library,
+  so a program's own `puts` wins. The chosen files are then linked as
+  libraries (4.6): the compiler starts a `.part` at every function and data
+  object, so only the functions and data actually used go in.
+* `runtime.asm`'s helpers are called with `DATA R14, back` / `RJMP _udiv`
+  and return with `JMRB R14`; they change only R0, R13, R14, R15.
+* `format.c` prints floats exactly: `fdigits.c` turns the float's exact
+  value into decimal digits (base-10000 pieces for big integer parts, a
+  160-bit binary fraction for the rest) and rounds ties to even.
+
+### 10.6 Checking it
+
+* `compiler/src/cc/selftest.py` (part of `python run.py test`, 7.3).
+* `compiler/src/cc/tests/*.c`: programs whose output must match gcc's,
+  stored in `<name>.expected`. `python compiler/src/cc/tests/difftest.py`
+  builds each one with gcc and with this compiler and compares;
+  `--update` rewrites the `.expected` files from gcc. A test reading input
+  would have a `<name>.keys` file and a hand-written `.expected` (the echo
+  of typed keys makes gcc's output differ).
+* `python compiler/src/cc/tests/fuzz.py [--count N] [--seed S]` writes
+  random programs free of undefined behaviour and of unspecified evaluation
+  order (unsigned arithmetic, masked shift counts, divisors that can't be 0;
+  loops, switches, arrays, struct members, a local array whose address is
+  taken, a global pointer, structs by value, calls between functions; floats
+  kept in range and printed as bits), builds each with gcc and with this
+  compiler and compares their output; programs gcc's sanitizer objects to
+  are skipped, one that differs is saved in `compiler/ROM/fuzz/`. 246
+  programs with floats and pointers agreed on 2026-10-11.
+* `compiler/examples/c/circuit_test.c` runs the compiler's tricky code
+  paths on the circuit (all lines `ok` on 2026-10-10, again on 2026-10-11
+  after the call changes, and on 2026-10-13 with the new "bitwise not of a
+  register" line, which says FAIL on the circuit when `NOT` is encoded the
+  old way, with RA = 0). On 2026-10-11 eight test programs (`c99`,
+  `jumps`, `preproc`, `arrays`, `features`, `globals`, `structs`,
+  `control`) also ran on the circuit and printed exactly their
+  `.expected` (gcc's) output.

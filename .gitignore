@@ -12,3 +12,4 @@ __pycache__/
 compiler/ROM/
 *.rom
 *__patched.circ
+project_files/

@@ -2,7 +2,9 @@
 
 Every ALU instruction writes its result to R0 and rewrites all four flags.
 
-    C  unsigned carry out of the adder
+    C  ADD, ++: carry out.  SUB: borrow (RA < RB unsigned).  SHL/SHR: the
+       bit shifted out.  Everything else (CMP, --, NEG, MULT ...): 0.
+       Measured on the circuit with diag12.asm / diag13.asm (2026-10-10).
     A  RA > RB (the two ALU inputs)
     N  result < 0
     Z  result == 0
@@ -72,16 +74,13 @@ def int_op(name: str, a: int, b: int) -> tuple[int, int]:
         total = a + b
         carry, result = total > MASK, total & MASK
     elif name == "SUB":
-        total = a + (~b & MASK) + 1              # carry out = no borrow
-        carry, result = total > MASK, total & MASK
+        carry, result = a < b, (a - b) & MASK    # C = borrow, as on the circuit
     elif name == "MULT":
-        product = sa * sb
-        carry = not (-(1 << 31) <= product <= (1 << 31) - 1)
-        result = product & MASK
-    elif name == "DIV":
+        result = (sa * sb) & MASK                # no carry on overflow (circuit)
+    elif name == "DIV":                          # x DIV 0 = x (circuit)
         result = a if sb == 0 else _divide(sa, sb)[0] & MASK
-    elif name == "MOD":
-        result = a if sb == 0 else _divide(sa, sb)[1] & MASK
+    elif name == "MOD":                          # x MOD 0 = 0 (circuit, diag16/17)
+        result = 0 if sb == 0 else _divide(sa, sb)[1] & MASK
     elif name == "SHL":
         carry, result = bool(b & SIGN), (b << 1) & MASK
     elif name == "SHR":
@@ -99,17 +98,14 @@ def int_op(name: str, a: int, b: int) -> tuple[int, int]:
         total = b + 1
         carry, result = total > MASK, total & MASK
     elif name == "DEC":
-        total = b + MASK                         # b + (-1)
-        carry, result = total > MASK, total & MASK
+        result = (b - 1) & MASK                  # C stays 0 (circuit)
     elif name == "NEG":
-        total = (~b & MASK) + 1
-        carry, result = total > MASK, total & MASK
+        result = -b & MASK                       # C stays 0 (circuit)
     elif name == "TEST":
         result = b
     elif name == "CMP":
-        total = a + (~b & MASK) + 1              # flags from RA - RB ...
-        carry, flag_value = total > MASK, total & MASK
-        result = 0                               # ... but R0 gets 0
+        flag_value = (a - b) & MASK              # A N Z from RA - RB, C stays 0 ...
+        result = 0                               # ... and R0 gets 0
     else:
         result = 0
 
@@ -128,6 +124,31 @@ def _divide(sa: int, sb: int) -> tuple[int, int]:
 
 
 # ----------------------------------------------------------------- float op
+def _float_divide(fa: float, fb: float) -> float:
+    """IEEE-754 division, as measured on the circuit (diag14, diag15):
+    x/0 is infinity with the sign of x XOR the zero's sign, 0/0 is NaN."""
+    if fb == 0:
+        if fa == 0 or math.isnan(fa):
+            return math.nan
+        return math.copysign(math.inf, math.copysign(1.0, fa) * math.copysign(1.0, fb))
+    return fa / fb
+
+
+def _float_to_int(fb: float) -> int:
+    """INT, as measured on the circuit (diag14, diag15): like Java's (long)
+    cast, then the low 32 bits. NaN gives 0; values at or beyond 2^63 (and
+    infinity) give the largest long, so FFFFFFFF; at or below -2^63 (and
+    -infinity) the smallest, so 0; everything else is truncated toward zero
+    and wraps at 32 bits (3e9 gives B2D05E00)."""
+    if math.isnan(fb):
+        return 0
+    if fb >= 9.223372036854775807e18:
+        return ((1 << 63) - 1) & MASK
+    if fb <= -9.223372036854775808e18:
+        return 0
+    return int(fb) & MASK
+
+
 def float_op(name: str, a: int, b: int) -> tuple[int, int]:
     """Float group.  a = RA bits, b = RB/immediate bits."""
     a &= MASK
@@ -142,7 +163,7 @@ def float_op(name: str, a: int, b: int) -> tuple[int, int]:
         elif name == "MULT":
             value = fa * fb
         else:
-            value = math.copysign(math.inf, fa) if fb == 0 else fa / fb
+            value = _float_divide(fa, fb)
         bits = float_to_bits(value)
         return bits, _float_flags(fa, fb, bits_to_float(bits))
 
@@ -151,21 +172,21 @@ def float_op(name: str, a: int, b: int) -> tuple[int, int]:
         return bits, _float_flags(fa, fb, bits_to_float(bits))
 
     if name == "INT":                            # float -> int
-        if math.isnan(fb) or math.isinf(fb):
-            value = 0
-        else:
-            value = int(fb)
-        bits = value & MASK
+        bits = _float_to_int(fb)
         return bits, pack_flags(False, fa > fb, bits & SIGN, bits == 0)
 
     if name == "NEG":
         bits = float_to_bits(-fb)
         return bits, _float_flags(fa, fb, bits_to_float(bits))
 
+    if name == "SHL":                            # RB x 2, as measured on the circuit
+        bits = float_to_bits(fb * 2)             # (diag16/17, normal numbers only)
+        return bits, _float_flags(fa, fb, bits_to_float(bits))
+
     if name == "CMP":                            # flags from RA - RB, R0 = 0
         diff = bits_to_float(float_to_bits(fa - fb))
         return 0, _float_flags(fa, fb, diff)
 
-    # SHL, SHR, ++, -- and the undefined opcodes: do nothing
+    # SHR, ++, -- and the undefined opcodes: do nothing (config.FLOAT_NOP_RESULT)
     value = config.FLOAT_NOP_RESULT & MASK
     return value, pack_flags(False, fa > fb, value & SIGN, value == 0)

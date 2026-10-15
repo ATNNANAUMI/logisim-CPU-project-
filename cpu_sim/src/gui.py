@@ -1,5 +1,7 @@
-"""Tkinter front end: registers, ROM/RAM views, display, keyboard, controls."""
+"""Tkinter front end: registers, ROM/RAM views, C source, display, keyboard,
+controls."""
 
+import os
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
@@ -7,6 +9,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 import alu as alu
 import config as config
 from cpu import CPU
+from debuginfo import DebugInfo, step_line, step_out
 from isa import decode, disassemble
 from memory import load_image
 
@@ -228,11 +231,140 @@ class MemoryPane(ttk.Frame):
         return chr(char) if 32 <= char < 127 else "."
 
 
+class SourcePane(ttk.Frame):
+    """The C source of the line being run (from the .map next to the ROM).
+
+    The current line is highlighted; right-click a line to put a breakpoint
+    on every piece of code it compiled to.
+    """
+
+    def __init__(self, master, cpu: CPU):
+        super().__init__(master)
+        self.cpu = cpu
+        self.info = None
+        self.shown = None                      # path in the text box
+        self.texts = {}                        # path -> lines (cached)
+        self.file_var = tk.StringVar(value="")
+        self.follow = tk.BooleanVar(value=True)
+
+        bar = ttk.Frame(self)
+        bar.pack(fill="x", padx=4, pady=4)
+        self.files = ttk.Combobox(bar, textvariable=self.file_var, state="readonly", width=40)
+        self.files.pack(side="left")
+        self.files.bind("<<ComboboxSelected>>", self._pick_file)
+        ttk.Checkbutton(bar, text="follow", variable=self.follow).pack(side="left", padx=8)
+        ttk.Label(bar, text="right-click sets a breakpoint").pack(side="left")
+
+        self.text = tk.Text(self, font=MONO, wrap="none", height=24, width=52)
+        self.text.bind("<Button-3>", self.toggle_breakpoint)
+        scroll = ttk.Scrollbar(self, command=self.text.yview)
+        self.text.configure(yscrollcommand=scroll.set, state="disabled")
+        self.text.tag_configure("current", background="#ffe08a")
+        self.text.tag_configure("breakpoint", background="#ffbcbc")
+        self.text.tag_configure("code", foreground="#000000")
+        self.text.tag_configure("nocode", foreground="#808080")
+        self.text.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=(0, 4))
+        scroll.pack(side="right", fill="y", pady=(0, 4))
+        self.set_info(None)
+
+    def set_info(self, info) -> None:
+        self.info = info
+        self.shown = None
+        self.texts = {}
+        names = info.files if info else []
+        self.files.configure(values=[self._short(f) for f in names])
+        self.file_var.set("")
+        if not info:
+            self._show_message("no C line information: build the ROM with\n"
+                               "  python compiler/src/cc build prog.c\n"
+                               "(it writes prog.map next to prog.rom)")
+
+    @staticmethod
+    def _short(path: str) -> str:
+        try:
+            return os.path.relpath(path)
+        except ValueError:
+            return path
+
+    def _pick_file(self, _event=None) -> None:
+        self.follow.set(False)
+        index = self.files.current()
+        if index >= 0:
+            self.show(self.info.files[index])
+
+    def _show_message(self, text: str) -> None:
+        self.text.configure(state="normal")
+        self.text.delete("1.0", "end")
+        self.text.insert("1.0", text)
+        self.text.configure(state="disabled")
+
+    def _lines(self, path: str):
+        if path not in self.texts:
+            try:
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    self.texts[path] = f.read().splitlines()
+            except OSError:
+                self.texts[path] = None
+        return self.texts[path]
+
+    def show(self, path: str) -> None:
+        lines = self._lines(path)
+        self.shown = path
+        self.file_var.set(self._short(path))
+        if lines is None:
+            self._show_message(f"cannot read {path}")
+            return
+        with_code = set(self.info.lines_in(path))
+        self.text.configure(state="normal")
+        self.text.delete("1.0", "end")
+        for n, line in enumerate(lines, 1):
+            tag = "code" if n in with_code else "nocode"
+            self.text.insert("end", f"{n:5d}  {line}\n", tag)
+        self.text.configure(state="disabled")
+        self.render()
+
+    def toggle_breakpoint(self, event) -> None:
+        if not self.info or not self.shown:
+            return
+        line = int(self.text.index(f"@{event.x},{event.y}").split(".")[0])
+        addresses = self.info.addresses_of(self.shown, line)
+        if not addresses:
+            return                              # a line with no code
+        marks = self.cpu.breakpoints
+        if any(a in marks for a in addresses):
+            marks.difference_update(addresses)
+        else:
+            marks.update(addresses)
+        self.render()
+
+    def render(self) -> None:
+        """Highlight the current line and the lines with breakpoints."""
+        if not self.info:
+            return
+        here = self.info.line_at(self.cpu.iar)
+        if here and self.follow.get() and here[0] != self.shown:
+            self.show(here[0])                  # calls render again
+            return
+        if not self.shown or self._lines(self.shown) is None:
+            return
+        self.text.tag_remove("current", "1.0", "end")
+        self.text.tag_remove("breakpoint", "1.0", "end")
+        for address in self.cpu.breakpoints:
+            at = self.info.line_at(address)
+            if at and at[0] == self.shown:
+                self.text.tag_add("breakpoint", f"{at[1]}.0", f"{at[1]}.end")
+        if here and here[0] == self.shown:
+            self.text.tag_add("current", f"{here[1]}.0", f"{here[1]}.end")
+            if self.follow.get():
+                self.text.see(f"{here[1]}.0")
+
+
 class SimulatorWindow(tk.Tk):
     def __init__(self, cpu: CPU, rom_path: str | None = None):
         super().__init__()
         self.cpu = cpu
         self.rom_path = rom_path
+        self.info = DebugInfo.for_rom(rom_path)
         self.running = False
         self._ticks = 0
         self._moved = False             # has anything run since the last start
@@ -261,8 +393,13 @@ class SimulatorWindow(tk.Tk):
         middle.pack(side="left", fill="both", expand=True, pady=6)
         self.rom_pane = MemoryPane(middle, self.cpu, "rom")
         self.ram_pane = MemoryPane(middle, self.cpu, "ram")
+        self.source_pane = SourcePane(middle, self.cpu)
         middle.add(self.rom_pane, text="ROM")
         middle.add(self.ram_pane, text="RAM")
+        middle.add(self.source_pane, text="C source")
+        self.source_pane.set_info(self.info)
+        if self.info and self.info.lines:
+            middle.select(self.source_pane)
 
         right = ttk.Frame(self)
         right.pack(side="left", fill="both", expand=True, padx=6, pady=6)
@@ -285,6 +422,16 @@ class SimulatorWindow(tk.Tk):
         self.run_button = ttk.Button(row2, text="run", command=self.toggle_run)
         self.run_button.pack(side="left", padx=2)
         ttk.Button(row2, text="resume", command=self.resume).pack(side="left")
+
+        row2b = ttk.Frame(box)
+        row2b.pack(fill="x", padx=4, pady=2)
+        ttk.Label(row2b, text="C line:").pack(side="left")
+        ttk.Button(row2b, text="into", width=5,
+                   command=lambda: self.step_c("into")).pack(side="left", padx=2)
+        ttk.Button(row2b, text="over", width=5,
+                   command=lambda: self.step_c("over")).pack(side="left")
+        ttk.Button(row2b, text="out", width=5,
+                   command=lambda: self.step_c("out")).pack(side="left", padx=2)
 
         row3 = ttk.Frame(box)
         row3.pack(fill="x", padx=4, pady=2)
@@ -372,8 +519,22 @@ class SimulatorWindow(tk.Tk):
         entry.insert(0, f"0x{value:0{width}X}")
 
     def _build_display(self, parent) -> None:
-        box = ttk.LabelFrame(parent, text=f"display (0x{config.DISPLAY_ADDR:02X})")
-        box.pack(fill="both", expand=True)
+        # the text display and the RGB screen share a notebook; the screen
+        # tab comes forward the first time a program draws
+        self.outputs = ttk.Notebook(parent)
+        self.outputs.pack(fill="both", expand=True)
+        box = ttk.Frame(self.outputs)
+        self.outputs.add(box, text=f"display (0x{config.DISPLAY_ADDR:02X})")
+        video = self.cpu.bus.video
+        screen_box = ttk.Frame(self.outputs)
+        self.outputs.add(screen_box, text=f"RGB screen (0x{config.VIDEO_ADDR:02X})")
+        self.screen_tab = screen_box
+        self.screen_zoom = max(1, 384 // max(video.width, video.height))
+        self.screen_image = tk.PhotoImage(width=video.width, height=video.height)
+        self.screen_big = self.screen_image.zoom(self.screen_zoom)
+        self.screen_label = tk.Label(screen_box, image=self.screen_big, background="#101010")
+        self.screen_label.pack(expand=True, padx=4, pady=4)
+        self._screen_shown = False
         self.display = tk.Text(box, font=MONO, height=16, wrap="char",
                                background="#101010", foreground="#c8ffc8",
                                insertbackground="#c8ffc8")
@@ -412,8 +573,10 @@ class SimulatorWindow(tk.Tk):
     def load_rom(self) -> None:
         path = filedialog.askopenfilename(title="ROM image")
         if path:
-            self._load(path, self.cpu.mem.load_rom)
             self.rom_path = path
+            self.info = DebugInfo.for_rom(path)
+            self.source_pane.set_info(self.info)
+            self._load(path, self.cpu.mem.load_rom)
 
     def load_ram(self) -> None:
         path = filedialog.askopenfilename(title="RAM image")
@@ -441,6 +604,38 @@ class SimulatorWindow(tk.Tk):
         self.set_running(False)
         self._execute(1)
         self.refresh()
+
+    def step_c(self, how: str) -> None:
+        """Run to the next C line: into calls, over them, or out of the
+        current function."""
+        self.set_running(False)
+        if not self.info or not self.info.lines:
+            self._log("no C line information for this ROM (see the C source tab)")
+            return
+        before = self.cpu.instructions
+        if how == "out":
+            why = step_out(self.cpu, self.info)
+        else:
+            why = step_line(self.cpu, self.info, over=(how == "over"))
+        ran = self.cpu.instructions - before
+        where = self._where()
+        if why == "limit":
+            self._log(f"no new C line after {ran} instructions (waiting for a key?)")
+        elif why == "breakpoint":
+            self._log(f"breakpoint at 0x{self.cpu.iar:05X}  {where}")
+        elif why == "halted":
+            self._log(f"halted after {ran} instructions")
+        else:
+            self._log(f"{where}  ({ran} instructions)")
+        self.refresh()
+
+    def _where(self) -> str:
+        """function and C line of the IAR, e.g. "main  hello.c:13"."""
+        if not self.info:
+            return ""
+        name = self.info.function_at(self.cpu.iar) or "?"
+        here = self.info.line_at(self.cpu.iar)
+        return f"{name}  {os.path.basename(here[0])}:{here[1]}" if here else name
 
     def toggle_run(self) -> None:
         self.set_running(not self.running)
@@ -551,6 +746,7 @@ class SimulatorWindow(tk.Tk):
         self.state_label.configure(text=(
             f"bank  {'RAM' if self.cpu.iar & config.RAM_BIT else 'ROM'}\n"
             f"out   0x{self.cpu.bus.out_addr:X}   in 0x{self.cpu.bus.in_addr:X}\n"
+            f"in    {self._where()}\n"
             f"count {self.cpu.instructions}\n"
             f"rate  {self._measured_rate()}\n"
             f"{status}"))
@@ -562,6 +758,7 @@ class SimulatorWindow(tk.Tk):
         self.display.configure(state="disabled")
         hv = self.cpu.bus.hex_value
         self.hex_label.configure(text="--------" if hv is None else f"{hv:08X}")
+        self._draw_screen()
         self.buffer_label.configure(text=f"buffer {len(self.cpu.bus.keyboard.buffer)}")
         self.key_waiting.set(buffer_text(self.cpu.bus.keyboard.buffer))
 
@@ -569,6 +766,29 @@ class SimulatorWindow(tk.Tk):
             for pane in (self.rom_pane, self.ram_pane):
                 pane.follow_iar()
                 pane.render()
+            self.source_pane.render()
+
+    def _draw_screen(self) -> None:
+        video = self.cpu.bus.video
+        if not (video.dirty or video.cleared):
+            return
+        if video.cleared or len(video.dirty) > 1000:
+            # the whole image in one put: one {row} of colours per line
+            names = ["#%02x%02x%02x" % video.rgb(c) for c in video.pixels]
+            w = video.width
+            self.screen_image.put(" ".join("{" + " ".join(names[y * w:(y + 1) * w]) + "}"
+                                           for y in range(video.height)))
+        else:
+            for i in video.dirty:
+                self.screen_image.put("#%02x%02x%02x" % video.rgb(video.pixels[i]),
+                                      to=(i % video.width, i // video.width))
+        video.dirty = set()
+        video.cleared = False
+        self.screen_big = self.screen_image.zoom(self.screen_zoom)
+        self.screen_label.configure(image=self.screen_big)
+        if video.used and not self._screen_shown:
+            self._screen_shown = True
+            self.outputs.select(self.screen_tab)
 
     def _measured_rate(self) -> str:
         """Instructions actually executed per second, averaged over ~0.5 s."""

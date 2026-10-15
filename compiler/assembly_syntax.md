@@ -132,7 +132,8 @@ Two-operand, with a register or an immediate:
 | `CMP RA, RB` | `CMP RA, #v` | flags from `RA - RB`, R0 = 0 | `0x1Fab` / `0x5Fa0`, v |
 
 `#` marks an immediate: the value goes in the next word and the instruction
-is 2 words long instead of 1.
+is 2 words long instead of 1. `DIV` by 0 gives `RA`, `MOD` by 0 gives 0
+(measured on the circuit).
 
 One-operand (register only):
 
@@ -140,11 +141,16 @@ One-operand (register only):
 | --- | --- | --- | --- |
 | `SHL RB` | | `RB << 1` | `0x140b` |
 | `SHR RB` | | `RB >> 1` | `0x150b` |
-| `NOT RB` | | `~RB` | `0x160b` |
+| `NOT RB` | | `~RB` | `0x16bb` |
 | `++ RB` | `INC RB` | `RB + 1` | `0x1B0b` |
 | `-- RB` | `DEC RB` | `RB - 1` | `0x1C0b` |
 | `NEG RB` | | `-RB` | `0x1D0b` |
 | `TEST RB` | | `R0 = RB`, sets N and Z | `0x1E0b` |
+
+`NOT` is the one that puts its register in both fields: the circuit's NOT
+inverts RA, not RB (measured with `diag16.asm`/`diag17.asm`), and the
+simulator inverts RB, so `0x16bb` gives `~RB` on both. The `A` flag after it
+is then always 0.
 
 ### Float ALU (result in R0, all flags rewritten)
 
@@ -161,7 +167,8 @@ Float mnemonics start with `F`, except the two conversions.
 | `FLOAT RB` | | int to float | `0x360b` |
 | `INT RB` | | float to int | `0x370b` |
 
-The float opcodes the ISA marks "nothing" or "undefined" have no mnemonic.
+The float opcodes the ISA marks "nothing" or "undefined" have no mnemonic
+(on the circuit, opcode 4 turns out to double `RB`: TECHNICAL §1.5).
 
 A float literal always becomes float32 bits, so `FADD R1, #1.5` is right. The
 assembler warns about the two easy mix-ups:
@@ -183,6 +190,8 @@ assembler warns about the two easy mix-ups:
 | `.word v, ...` | one word per value (ROM only) |
 | `.string "text"` | one character per word, then a 0 word (ROM only) |
 | `.space n` | n words: zeros in ROM, reserved space in RAM |
+| `.part` | starts a new *part* here (ROM only; see section 6). Takes no space |
+| `.loc "file", line` | the code from here on comes from that source line (ROM only). Takes no space; the C compiler writes it, the linker lists it in the `.map` for the simulator's C view |
 
 A constant used by `.equ` or `.space` must be defined above that line.
 
@@ -207,6 +216,18 @@ RAM  0x10000 - 0x13FFF   stack (never touched by the linker)
 ```
 
 Exactly one file must define `.global start`. That's where the program begins.
+
+**Libraries.** A file given with `--lib` (section 10) is a library: only the
+functions the program uses go in. The assembler cuts each file into
+*parts*: a new part starts at every `.global` label and at every `.part`
+directive. Of a library, the linker keeps the parts the other files refer
+to (by `CALL`, a jump, `DATA label`, `.word label`...), the parts those
+refer to, and so on, plus the next part when a kept part's last instruction
+can run on into it (anything but `RJMP`, `JMRB`, `RET` or data). A private
+helper right after its function is in that function's part, so it comes
+along; put `.part` before a helper or a table that should stand alone. A
+library nobody refers to is left out entirely, RAM included. Files given
+the normal way are always linked whole.
 
 
 ## 7. Pseudo-instructions
@@ -391,6 +412,13 @@ python compiler/src/asm link compiler/ROM/main.obj compiler/ROM/lib.obj -o progr
 python compiler/src/asm build main.asm compiler/ROM/lib.obj   # build takes .asm and .obj
 ```
 
+Link only the functions you use from a library with `--lib` (repeatable;
+libraries go after the other files):
+
+```
+python compiler/src/asm build prog.asm --lib compiler/examples/stdlib/stdlib.asm
+```
+
 Add `--map` to `build` or `link` to also write a `.map` file (next to the `.rom`) listing every
 label's final address, which helps when stepping through the simulator.
 
@@ -409,3 +437,10 @@ Check the tools themselves with:
 ```
 python compiler/src/asm/selftest.py
 ```
+
+C files are built by the C compiler, which also takes `.asm` and `.obj`
+files and links them with the C library:
+`python compiler/src/cc build prog.c helper.asm` (see
+[`c_language.md`](c_language.md) section 1). Assembly functions called from C
+follow the calling convention of section 7; a C function is called from
+assembly with `CALL name, N` like any other.

@@ -30,10 +30,26 @@ def test_sub_negative_sets_n():
     assert cpu.flag("N") and not cpu.flag("A")
 
 
-def test_div_by_zero_returns_dividend():
-    # DATA R1,7 ; DATA R2,0 ; DIV R1,R2 ; MOD R1,R2
-    cpu = run([0x0301, 7, 0x0302, 0, 0x1312, 0x1A12, 0x0F00])
-    assert cpu.regs[0] == 7
+def test_carry_flag_matches_circuit():
+    # Measured with diag12/diag13: SUB sets C on a borrow, CMP never sets it
+    # DATA R1,3 ; DATA R2,5 ; SUB R1,R2   -> 3 < 5 unsigned: borrow, C on
+    assert run([0x0301, 3, 0x0302, 5, 0x1112, 0x0F00]).flag("C")
+    # DATA R1,5 ; DATA R2,3 ; SUB R1,R2   -> no borrow, C off
+    assert not run([0x0301, 5, 0x0302, 3, 0x1112, 0x0F00]).flag("C")
+    # DATA R1,3 ; DATA R2,5 ; CMP R1,R2   -> C off (A N Z still from 3 - 5)
+    cpu = run([0x0301, 3, 0x0302, 5, 0x1F12, 0x0F00])
+    assert not cpu.flag("C") and cpu.flag("N")
+    # DATA R1,0xFFFFFFFF ; ++ R1          -> carry out, C on
+    assert run([0x0301, 0xFFFFFFFF, 0x1B01, 0x0F00]).flag("C")
+
+
+def test_div_and_mod_by_zero_match_circuit():
+    # Measured with diag16/diag17: DIV by 0 gives the dividend, MOD by 0 gives 0
+    # DATA R1,7 ; DATA R2,0 ; DIV R1,R2
+    assert run([0x0301, 7, 0x0302, 0, 0x1312, 0x0F00]).regs[0] == 7
+    # DATA R1,7 ; DATA R2,0 ; MOD R1,R2
+    cpu = run([0x0301, 7, 0x0302, 0, 0x1A12, 0x0F00])
+    assert cpu.regs[0] == 0 and cpu.flag("Z")
 
 
 def test_ram_and_array():
@@ -58,6 +74,19 @@ def test_stack_push_pop_set_get():
     assert cpu.mem.ram[0] == 0x11 and cpu.mem.ram[1] == 0x22
     assert cpu.esp == 1
     assert cpu.regs[0] == 0x11          # GET index 0, counted from the bottom
+
+
+def test_stk_set_get_wrap_across_ram():
+    # Measured with diag11/diag16: EBP + RB wraps at 16 bits, across all of RAM
+    # DATA R0,0xA1 ; DATA R1,-1 ; STK SET,R1       (EBP = 0: the last RAM word)
+    # DATA R0,0xA2 ; DATA R1,0x8000 ; STK SET,R1   (RAM 0x18000, past the stack)
+    # DATA R0,0 ; STK GET,R1
+    cpu = run([0x0300, 0xA1, 0x0301, 0xFFFFFFFF, 0x0B41,
+               0x0300, 0xA2, 0x0301, 0x8000, 0x0B41,
+               0x0300, 0, 0x0B51, 0x0F00])
+    assert cpu.mem.ram[0xFFFF] == 0xA1 and cpu.mem.ram[0x3FFF] == 0
+    assert cpu.mem.ram[0x8000] == 0xA2 and cpu.mem.ram[0] == 0
+    assert cpu.regs[0] == 0xA2
 
 
 def test_call_frame_and_return():
@@ -87,6 +116,25 @@ def test_float_div_by_zero_is_inf():
     assert cpu.regs[0] == 0x7F800000
 
 
+def test_float_special_cases_match_circuit():
+    # Measured with diag14/diag15. FDIV R1,R2 with R1 = 0.0, R2 = 0.0 -> NaN
+    cpu = run([0x0301, 0, 0x0302, 0, 0x3312, 0x0F00])
+    assert cpu.regs[0] == 0x7FC00000
+    # 1.0 / -0.0 -> -infinity
+    cpu = run([0x0301, 0x3F800000, 0x0302, 0x80000000, 0x3312, 0x0F00])
+    assert cpu.regs[0] == 0xFF800000
+    # INT of +infinity -> FFFFFFFF, of -infinity -> 0, of 3e9 -> low 32 bits
+    assert run([0x0301, 0x7F800000, 0x3701, 0x0F00]).regs[0] == 0xFFFFFFFF
+    assert run([0x0301, 0xFF800000, 0x3701, 0x0F00]).regs[0] == 0
+    assert run([0x0301, 0x4F32D05E, 0x3701, 0x0F00]).regs[0] == 0xB2D05E00
+
+
+def test_float_shl_doubles():
+    # Measured with diag16/diag17: float opcode 4 (SHL) writes RB x 2
+    # DATA R2,5.0 ; float SHL R2
+    assert run([0x0302, 0x40A00000, 0x3402, 0x0F00]).regs[0] == 0x41200000
+
+
 def test_keyboard_input():
     # DATA R3,0x55 ; DATA R1,0xF0 ; COMM INADDR,R1 ; COMM INDATA,R2 ; COMM INDATA,R3
     cpu = run([0x0303, 0x55, 0x0301, 0xF0, 0x0811, 0x0802, 0x0803, 0x0F00], keys="A")
@@ -99,6 +147,23 @@ def test_keyboard_backspace_is_a_key():
     # DATA R1,0xF0 ; COMM INADDR,R1 ; COMM INDATA,R2 ; COMM INDATA,R3
     cpu = run([0x0301, 0xF0, 0x0811, 0x0802, 0x0803, 0x0F00], keys="7\b")
     assert (cpu.regs[2], cpu.regs[3]) == (ord("7"), 0x08)
+
+
+def test_rgb_video():
+    # DATA R1,0x6C ; COMM OUTADDR,R1 ; DATA R2,pixel ; COMM OUTDATA,R2 ; DATA R2,pixel ; COMM OUTDATA,R2
+    # x = 3, y = 5, red; then x = 0x83 (only 7 bits wired: x = 3), y = 6, white
+    cpu = run([0x0301, 0x6C, 0x0831, 0x0302, 0x0305F800, 0x0822,
+               0x0302, 0x8306FFFF, 0x0822, 0x0F00])
+    video = cpu.bus.video
+    assert video.pixels[5 * video.width + 3] == 0xF800
+    assert video.pixels[6 * video.width + 3] == 0xFFFF
+    assert video.rgb(0xF800) == (255, 0, 0)
+    # DATA R1,0x6D ; COMM OUTADDR,R1 ; COMM OUTDATA,R1  clears it
+    cpu.halted = False
+    cpu.mem.load_rom([0x0301, 0x6D, 0x0831, 0x0821, 0x0F00])
+    cpu.iar = 0
+    cpu.run(10)
+    assert not any(video.pixels)
 
 
 def test_addr_and_jmrb():

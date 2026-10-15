@@ -6,9 +6,17 @@ label lands. Pass 2 builds the words.
 Addresses depend on where the linker puts this file, so a word that holds a
 label's address is left as 0 plus a relocation, and the linker fills it in.
 Jumps to labels in the same file are finished here: the distance between
-two places in one file doesn't change when the file moves.
+two places in one file doesn't change when the file moves - unless the jump
+goes from one part of the file to another (see below).
+
+Parts: the file's ROM is cut into parts at every .global label and at every
+.part directive. When the file is linked as a library (--lib), the linker
+keeps only the parts the program needs, so a jump between two parts is left
+as a relocation too. Each part records whether its last instruction can fall
+through into the next part (then the next part is kept with it).
 """
 
+import bisect
 from dataclasses import dataclass
 
 import encoding as enc
@@ -56,6 +64,9 @@ class Assembler:
         self.globals = {}      # name -> line of its .global
         self.externs = {}      # name -> line of its .extern
         self.statements = []
+        self.part_marks = []   # ROM offsets of .part directives
+        self.locs = []         # [ROM offset, source file, line] from .loc
+        self.part_starts = [0]
         self.rom = []
         self.relocs = []
         self.errors = []
@@ -64,6 +75,7 @@ class Assembler:
     def run(self):
         self.pass1()
         self.check_symbols()
+        self.find_parts()
         self.pass2()
         if self.sizes["rom"] > ROM_SIZE:
             self.errors.append(AsmError(
@@ -80,6 +92,8 @@ class Assembler:
             globals=sorted(self.globals),
             externs=sorted(self.externs),
             relocs=self.relocs,
+            parts=self.part_list(),
+            lines=self.locs,
         )
         return obj, self.warnings
 
@@ -225,6 +239,23 @@ class Assembler:
             codes = parse_string(args[0]) + [0]
             self.add_statement(line, name, rest, len(codes), codes)
 
+        elif name == ".loc":
+            args = split_operands(rest)
+            if len(args) != 2:
+                raise AsmError('expected .loc "file", line')
+            path = "".join(chr(c) for c in parse_string(args[0]))
+            line_no, is_float = self.constant(args[1])
+            if is_float or line_no < 0:
+                raise AsmError(".loc needs a line number")
+            if self.section == "rom":
+                self.locs.append([self.sizes["rom"], path, line_no])
+
+        elif name == ".part":
+            if rest:
+                raise AsmError(".part takes no operands")
+            self.rom_only(name)
+            self.part_marks.append(self.sizes["rom"])
+
         elif name == ".space":
             args = split_operands(rest)
             if len(args) != 1:
@@ -321,6 +352,35 @@ class Assembler:
             relocs.append(Reloc(at, "abs", label, None, number, line, rom_only))
         return number, label, is_float
 
+    # ------------------------------------------------------------ parts
+    def find_parts(self):
+        """Where the parts start: offset 0, every .global ROM label, every .part."""
+        size = self.sizes["rom"]
+        starts = {0}
+        for name, lab in self.labels.items():
+            if name in self.globals and lab.section == "rom":
+                starts.add(lab.offset)
+        starts.update(self.part_marks)
+        self.part_starts = sorted(s for s in starts if s <= size)
+
+    def part_of(self, offset):
+        return bisect.bisect_right(self.part_starts, offset) - 1
+
+    def part_list(self):
+        """[start, falls_through] for each part. A part falls through unless
+        it ends with RJMP, JMRB, RET or data."""
+        ends = []
+        for i, start in enumerate(self.part_starts):
+            end = self.part_starts[i + 1] if i + 1 < len(self.part_starts) else self.sizes["rom"]
+            last = None
+            for stmt in self.statements:
+                if start <= stmt.offset < end and stmt.size > 0:
+                    last = stmt
+            falls = last is None or last.op not in ("RJMP", "JMRB", "RET", ".word",
+                                                    ".string", ".space")
+            ends.append([start, falls])
+        return ends
+
     def put_jump(self, text, words, relocs, stmt):
         """Append a relative jump offset (counted from the offset word)."""
         number, label, _ = self.evaluate(text)
@@ -331,7 +391,13 @@ class Assembler:
             lab = self.labels[label]
             if lab.section != "rom":
                 raise AsmError(f"can't jump to '{label}': it is a RAM label")
-            words.append(enc.jump_offset(lab.offset + number, stmt.offset + at))
+            target = lab.offset + number
+            if self.part_of(target) != self.part_of(stmt.offset + at):
+                # into another part: the linker may move (or drop) it
+                words.append(0)
+                relocs.append(Reloc(at, "rel", None, "rom", target, stmt.line))
+                return
+            words.append(enc.jump_offset(target, stmt.offset + at))
         else:
             words.append(0)
             relocs.append(Reloc(at, "rel", label, None, number, stmt.line))
@@ -522,7 +588,11 @@ class Assembler:
             if len(args) == 1 and args[0].startswith("#"):
                 raise AsmError(f"{op} takes a register, not an immediate")
             self.expect(op, shape, args, 1)
-            words.append(enc.word(prefix, opcode, 0, parse_register(args[0])))
+            rb = parse_register(args[0])
+            # The circuit's NOT inverts RA, not RB (diag16/diag17), so NOT
+            # names its register in both fields and works either way.
+            ra = rb if op == "NOT" else 0
+            words.append(enc.word(prefix, opcode, ra, rb))
             return words, relocs
 
         self.expect(op, shape, args, 2)
