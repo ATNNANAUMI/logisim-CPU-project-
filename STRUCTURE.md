@@ -86,11 +86,11 @@ logisim-CPU-project-/
     │   ├── alu.py            int_op(), float_op() → (R0 value, flags)
     │   ├── memory.py         ROM/RAM banks, v2.0 raw loader
     │   ├── devices.py        Display (0x5C), Keyboard (0xF0, empty reads 0), Video (RGB 0x6C, clear 0x6D), DeviceBus (+ hex display value, 0x3C)
-    │   ├── cpu.py            CPU: step(), run(), reset(), stack ops, COMM
+    │   ├── cpu.py            CPU: step() (traced), run() (fast loop), reset(), stack ops, COMM
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png]`
-    │   └── selftest.py       18 checks
+    │   └── selftest.py       20 checks
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)

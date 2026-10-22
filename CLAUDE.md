@@ -9,10 +9,10 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # three self-check suites (assembler 19, simulator 18, C compiler 14), then check_docs.py
+python run.py test                                   # three self-check suites (assembler 19, simulator 20, C compiler 14), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
-python compiler/src/cc/selftest.py                   # C compiler only (~40 s: runs every test program)
+python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
 python compiler/src/cc/tests/difftest.py [names] [--update]   # C test programs against gcc (--update rewrites .expected)
 python compiler/src/cc/tests/fuzz.py [--count N] [--seed S]   # random C programs, gcc against tiny C
 
@@ -62,7 +62,7 @@ Most facts are written in more than one doc. When you change one of these, updat
 
 | when this changes | update |
 | --- | --- |
-| an instruction (encoding or behaviour) | `encoding.py` + `isa.py` + `alu.py`/`cpu.py`; TECHNICAL §1, `compiler/assembly_syntax.md` §4, STRUCTURE "ISA cheat sheet", README if it's the one-paragraph summary |
+| an instruction (encoding or behaviour) | `encoding.py` + `isa.py` + `alu.py`/`cpu.py` (both `_execute()` and the fast `run()` loop); TECHNICAL §1, `compiler/assembly_syntax.md` §4, STRUCTURE "ISA cheat sheet", README if it's the one-paragraph summary |
 | assembler syntax, directives, pseudo-ops | `compiler/assembly_syntax.md`; TECHNICAL §4, STRUCTURE "Assembler conventions" |
 | a command, flag or output path | TECHNICAL §3.3 / §4.1 / §7; README "Quick start", STRUCTURE "Common commands", `assembly_syntax.md` §10, this file's Commands |
 | a stdlib function or the calling convention | the header of `stdlib.asm`; TECHNICAL §5.1–5.2, STRUCTURE "Assembler conventions" |

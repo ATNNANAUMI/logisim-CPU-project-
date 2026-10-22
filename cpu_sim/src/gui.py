@@ -15,7 +15,8 @@ from memory import load_image
 
 PAGE_WORDS = 256
 MONO = "TkFixedFont"
-MAX_PER_TICK = 50_000          # keeps the window responsive at high speeds
+MAX_PER_TICK = 100_000         # keeps the window responsive at high speeds
+MAX_SLICE = 0.05               # seconds of running per window tick at "max"
 
 # label -> instructions per second (0 = as fast as the host manages)
 SPEEDS = [
@@ -679,8 +680,10 @@ class SimulatorWindow(tk.Tk):
         if self.running:
             hz = self.hz
             now = time.perf_counter()
-            if hz == 0:
-                count = MAX_PER_TICK
+            if hz == 0:                     # "max": run for MAX_SLICE seconds
+                count = 0
+                while self.running and time.perf_counter() - now < MAX_SLICE:
+                    self._execute(10_000)
                 self._last_time = now
             else:
                 self._budget += hz * (now - self._last_time)
@@ -706,6 +709,20 @@ class SimulatorWindow(tk.Tk):
 
     def _execute(self, count: int) -> None:
         log = self.trace_on.get() and count <= 200      # no logging at full speed
+        if not log:
+            if self._moved and self.cpu.iar in self.cpu.breakpoints:
+                self.set_running(False)                 # stop BEFORE this word
+                self._log(f"breakpoint at 0x{self.cpu.iar:05X}")
+                return
+            done = self.cpu.run(count, stop_at=self.cpu.breakpoints)
+            if done:
+                self._moved = True
+            if self.cpu.halted or self.cpu.stopped:
+                self.set_running(False)
+            elif done < count:                          # stopped at a breakpoint
+                self.set_running(False)
+                self._log(f"breakpoint at 0x{self.cpu.iar:05X}")
+            return
         for _ in range(count):
             if self._moved and self.cpu.iar in self.cpu.breakpoints:
                 self.set_running(False)                 # stop BEFORE this word

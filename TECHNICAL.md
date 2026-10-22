@@ -378,7 +378,7 @@ modules import each other by plain name, so run them as scripts
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 18 checks on the core |
+| `selftest.py` | 20 checks on the core |
 
 ### 3.2 Execution model
 
@@ -394,6 +394,18 @@ modules import each other by plain name, so run them as scripts
 ALU instructions call `alu.int_op` or `alu.float_op` with `a = R[RA]` and
 `b = R[RB]` or the immediate, then store `R0` and the flags. `HALT` sets
 `halted`; `resume()` clears it and execution continues after the `HALT`.
+
+`CPU.run(max_steps, stop_at=())` does what calling `step()` `max_steps`
+times does, without building `Step` records or disassembling: one loop with
+the machine state in local variables, about 3 MHz against `step()`'s
+~250 kHz. It stops at `HALT`, at a stack wrap that stops the CPU, or before
+an address in `stop_at` (not checked for the first instruction, so a run can
+leave a breakpoint). It writes out the common integer ALU ops itself and
+calls `alu.py` for DIV, MOD and the float group, so an instruction change
+touches both `run()` and `_execute()`; the self-check `test_run_matches_step`
+compares them on random code. The window (when the trace is off), the
+headless runner (without `--trace`) and `python compiler/src/cc run` all use
+`run()`; single steps, the trace and C line stepping use `step()`.
 
 ### 3.3 Running it
 
@@ -835,10 +847,11 @@ python compiler/src/asm/selftest.py   # 19 checks: encodings, values, strings, j
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 18 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 20 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
                                       # floats, FCMP flags, keyboard, backspace, ADDR/JMRB,
-                                      # float specials, float SHL
+                                      # float specials, float SHL, run() against step()
+                                      # on random code, run() stopping at breakpoints
 python compiler/src/cc/selftest.py    # 14 checks: preprocessor, error messages (several per run), warnings,
                                       # type sizes, exit/atexit, keyboard input, globals
                                       # after a reset, library override, reserved names,

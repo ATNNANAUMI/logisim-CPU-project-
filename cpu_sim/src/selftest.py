@@ -172,6 +172,56 @@ def test_addr_and_jmrb():
     assert cpu.regs[1] == 1
 
 
+def test_run_matches_step():
+    # run() has its own copy of the instruction set (for speed); random code,
+    # with plenty of edge-case words, must leave it exactly where step() does
+    import random
+
+    def state(cpu):
+        return (cpu.regs, cpu.iar, cpu.flags, cpu.esp, cpu.ebp, cpu.halted,
+                cpu.stopped, cpu.instructions, cpu.mem.ram, cpu.bus.display.text,
+                cpu.bus.hex_value, cpu.bus.video.pixels, cpu.bus.out_addr,
+                cpu.bus.in_addr, list(cpu.bus.keyboard.buffer))
+
+    edges = [0, 1, 2, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF, 0xFFFFFFFE,
+             0x3F800000, 0x7F800000, RAM, RAM | 0x3FFF, 0x3FFF]
+    rng = random.Random(1)
+    saved = config.STOP_ON_STACK_WRAP
+    try:
+        for seed in range(120):
+            config.STOP_ON_STACK_WRAP = seed % 2 == 1
+            words = []
+            for _ in range(400):
+                pick = rng.random()
+                if pick < 0.5:                  # an instruction, junk in the top bits
+                    words.append(rng.randrange(0x8000) | rng.randrange(4) << 30)
+                elif pick < 0.8:
+                    words.append(rng.choice(edges))
+                else:
+                    words.append(rng.randrange(1 << 32))
+            slow, fast, chunked = (run([], steps=0, keys="ab\b") for _ in range(3))
+            for cpu in (slow, fast, chunked):
+                cpu.mem.load_rom(words)
+            for _ in range(2000):
+                if slow.step() is None:
+                    break
+            fast.run(2000)
+            while chunked.instructions < 2000 and chunked.run(min(7, 2000 - chunked.instructions)):
+                pass
+            assert state(fast) == state(slow), f"run() differs from step(), seed {seed}"
+            assert state(chunked) == state(slow), f"run() in pieces differs, seed {seed}"
+    finally:
+        config.STOP_ON_STACK_WRAP = saved
+
+
+def test_run_stops_at_breakpoints():
+    # DATA R1,1 ; ADD R1,#1 ; RJMP back to the ADD
+    cpu = run([0x0301, 1, 0x5010, 1, 0x0400, 0xFFFFFFFD], steps=0)
+    assert cpu.run(100, stop_at={2}) == 1 and cpu.iar == 2     # stops before the ADD
+    assert cpu.run(100, stop_at={2}) == 2 and cpu.iar == 2     # leaves it, comes back
+    assert cpu.regs[0] == 2 and cpu.instructions == 3
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:

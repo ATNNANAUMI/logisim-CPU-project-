@@ -85,10 +85,192 @@ class CPU:
         self.instructions += 1
         return Step(address, word, operand, disassemble(word, operand), note)
 
-    def run(self, max_steps: int = 1_000_000) -> int:
+    def run(self, max_steps: int = 1_000_000, stop_at=()) -> int:
+        """Execute up to max_steps instructions; returns how many ran.
+
+        Does what calling step() max_steps times does, about four times
+        faster: no Step records, no disassembly, machine state kept in local
+        variables. It stops early at HALT, at a stack wrap (when that stops
+        the CPU), or before an instruction whose address is in stop_at (not
+        checked for the first one, so a run can leave a breakpoint).
+
+        The common integer ALU ops are written out here for speed; DIV, MOD
+        and the float group go through alu.py. selftest.py checks that both
+        paths agree, so keep them in step when an instruction changes.
+        """
+        if self.halted or self.stopped:
+            return 0
+
+        regs = self.regs
+        rom, ram = self.mem.rom, self.mem.ram
+        bus = self.bus
+        int_op, float_op = alu.int_op, alu.float_op
+        int_names, float_names = isa.INT_OPS, isa.FLOAT_OPS
+        MASK, SIGN = config.WORD_MASK, config.SIGN_BIT
+        ADDR_MASK, STACK_MASK = config.ADDR_MASK, config.STACK_MASK
+        INDEX_MASK = config.STACK_INDEX_MASK
+        a_signed, shr_arith = config.A_FLAG_SIGNED, config.SHR_ARITHMETIC
+
+        iar, flags, esp, ebp = self.iar, self.flags, self.esp, self.ebp
         count = 0
-        while count < max_steps and self.step() is not None:
-            count += 1
+        try:
+            while count < max_steps:
+                if iar in stop_at and count:
+                    break
+                word = ram[iar & 0xFFFF] if iar & 0x10000 else rom[iar]
+                iar = (iar + 1) & ADDR_MASK
+                count += 1
+                op = (word >> 8) & 0xF
+                rb = word & 0xF
+
+                if word & 0x1000:                           # ALU
+                    a = regs[(word >> 4) & 0xF]
+                    if word & 0x4000:                       # immediate operand
+                        b = ram[iar & 0xFFFF] if iar & 0x10000 else rom[iar]
+                        iar = (iar + 1) & ADDR_MASK
+                    else:
+                        b = regs[rb]
+                    if word & 0x2000 or op == 3 or op == 0xA:   # float, DIV, MOD
+                        if word & 0x2000:
+                            regs[0], flags = float_op(float_names[op], a, b)
+                        else:
+                            regs[0], flags = int_op(int_names[op], a, b)
+                        continue
+                    carry = 0
+                    if op == 0x0:                           # ADD
+                        value = a + b
+                        if value > MASK:
+                            carry, value = 8, value & MASK
+                        result = value
+                    elif op == 0x1:                         # SUB: C = borrow
+                        if a < b:
+                            carry = 8
+                        result = value = (a - b) & MASK
+                    elif op == 0xF:                         # CMP: R0 = 0, C = 0
+                        value = (a - b) & MASK
+                        result = 0
+                    elif op == 0x7:
+                        result = value = a & b
+                    elif op == 0x8:
+                        result = value = a | b
+                    elif op == 0x9:
+                        result = value = a ^ b
+                    elif op == 0xB:                         # ++
+                        value = b + 1
+                        if value > MASK:
+                            carry, value = 8, 0
+                        result = value
+                    elif op == 0xC:                         # --
+                        result = value = (b - 1) & MASK
+                    elif op == 0xE:                         # TEST
+                        result = value = b
+                    elif op == 0x4:                         # SHL
+                        if b & SIGN:
+                            carry = 8
+                        result = value = (b << 1) & MASK
+                    elif op == 0x5:                         # SHR
+                        if b & 1:
+                            carry = 8
+                        value = b >> 1
+                        if shr_arith:
+                            value |= b & SIGN
+                        result = value
+                    elif op == 0x6:                         # NOT
+                        result = value = ~b & MASK
+                    elif op == 0xD:                         # NEG
+                        result = value = -b & MASK
+                    else:                                   # MULT (low 32 bits)
+                        result = value = (a * b) & MASK
+                    if a_signed:
+                        bigger = (a ^ SIGN) > (b ^ SIGN)
+                    else:
+                        bigger = a > b
+                    regs[0] = result
+                    flags = carry | (4 if bigger else 0) | ((value >> 30) & 2) | (value == 0)
+                    continue
+
+                if op == 0x3:                               # DATA
+                    regs[rb] = ram[iar & 0xFFFF] if iar & 0x10000 else rom[iar]
+                    iar = (iar + 1) & ADDR_MASK
+                elif op == 0xC:                             # ALD
+                    addr = (regs[(word >> 4) & 0xF] + regs[rb]) & ADDR_MASK
+                    regs[0] = ram[addr & 0xFFFF] if addr & 0x10000 else rom[addr]
+                elif op == 0xD:                             # AST
+                    addr = (regs[(word >> 4) & 0xF] + regs[rb]) & ADDR_MASK
+                    if addr & 0x10000:
+                        ram[addr & 0xFFFF] = regs[0]
+                elif op == 0x4 or op == 0x5 or op == 0x6:   # RJMP, RJF, RJNF
+                    offset = ram[iar & 0xFFFF] if iar & 0x10000 else rom[iar]
+                    if op == 0x4:
+                        take = True
+                    elif op == 0x5:
+                        take = flags & rb != 0
+                    else:
+                        take = flags & rb != rb
+                    # relative to the offset word; adding the unsigned offset
+                    # gives the same low 17 bits as adding the signed one
+                    iar = (iar + offset) & ADDR_MASK if take else (iar + 1) & ADDR_MASK
+                elif op == 0xE:                             # CPY
+                    regs[rb] = regs[(word >> 4) & 0xF]
+                elif op == 0xB:                             # STK
+                    kind = (word >> 4) & 7
+                    if kind == 0:                           # PUSH
+                        ram[esp] = regs[0]
+                        esp += 1
+                        if esp > STACK_MASK:
+                            esp = self._bump(esp - 1, +1)
+                    elif kind == 1:                         # POP
+                        esp -= 1
+                        if esp < 0:
+                            esp = self._bump(esp + 1, -1)
+                        regs[0] = ram[esp]
+                    elif kind == 2:                         # CALL (frame only)
+                        ram[esp] = ebp
+                        ebp = esp
+                        esp += 1
+                        if esp > STACK_MASK:
+                            esp = self._bump(esp - 1, +1)
+                    elif kind == 3:                         # RET
+                        esp = ebp
+                        ebp = ram[ebp] & STACK_MASK
+                    elif kind == 4:                         # SET
+                        ram[(ebp + regs[rb]) & INDEX_MASK] = regs[0]
+                    elif kind == 5:                         # GET
+                        regs[0] = ram[(ebp + regs[rb]) & INDEX_MASK]
+                    if self.stopped:
+                        break
+                elif op == 0x8:                             # COMM
+                    mode = (word >> 4) & 3
+                    if mode == 2:
+                        bus.out_data(regs[rb])
+                    elif mode == 3:
+                        bus.out_address(regs[rb])
+                    elif mode == 1:
+                        bus.in_address(regs[rb])
+                    else:
+                        value = bus.in_data()
+                        if value is not None:
+                            regs[rb] = value & MASK
+                elif op == 0x1:                             # LD
+                    addr = regs[(word >> 4) & 0xF] & ADDR_MASK
+                    regs[rb] = ram[addr & 0xFFFF] if addr & 0x10000 else rom[addr]
+                elif op == 0x2:                             # ST
+                    addr = regs[(word >> 4) & 0xF] & ADDR_MASK
+                    if addr & 0x10000:
+                        ram[addr & 0xFFFF] = regs[rb]
+                elif op == 0x9:                             # ADDR
+                    regs[rb] = iar
+                elif op == 0xA:                             # JMRB
+                    iar = regs[rb] & ADDR_MASK
+                elif op == 0x7:                             # CLF
+                    flags = 0
+                elif op == 0xF:                             # HALT
+                    self.halted = True
+                    break
+                # 0x0 NOP
+        finally:
+            self.iar, self.flags, self.esp, self.ebp = iar, flags, esp, ebp
+            self.instructions += count
         return count
 
     # ----------------------------------------------------------- execution
