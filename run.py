@@ -37,9 +37,10 @@ def find_roms():
 
 
 def find_sources():
-    """.asm and .c files to build (not the C library's own files)."""
-    libc = ROOT / "compiler" / "libc"
-    return find("*.asm") + [p for p in find("*.c") if libc not in p.parents]
+    """.asm and .c files to build: not the C library's own files, the C
+    compiler's test programs (compiler/src/) or build output (compiler/ROM/)."""
+    skip = (ROOT / "compiler" / "libc", ROOT / "compiler" / "src", ROM_DIR)
+    return [p for p in find("*.asm") + find("*.c") if not any(d in p.parents for d in skip)]
 
 
 def builder(args):

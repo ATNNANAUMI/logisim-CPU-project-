@@ -782,8 +782,9 @@ lets you pick files from the project (it skips `.git`, `.venv`,
 
 It checks for `tkinter` before opening the window and prints install hints
 when it is missing. In the menu, the output of `asm`/`build` is the first
-source file with `.rom`; the menu offers `.asm` and `.c` files (not the C
-library's own). For `img` it offers the project's `.png` files, then asks
+source file with `.rom`; the menu offers `.asm` and `.c` files, leaving
+out the C library's own, the C compiler's test programs (`compiler/src/`)
+and build output (`compiler/ROM/`). For `img` it offers the project's `.png` files, then asks
 for the converter's options (Enter for none).
 
 ### 7.2 `logisim/run_rom.py`
