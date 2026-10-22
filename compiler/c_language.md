@@ -236,6 +236,29 @@ screen, which can't be read back.
 | `gfx_char(x, y, ch, fg, bg)` | a 5×7 character in a 6×8 cell (`bg` = `GFX_NONE`: transparent); returns the next x |
 | `gfx_text(x, y, s, fg, bg)` | a string, `\n` goes to the next row under x; returns the x after it |
 | `gfx_bitmap(x, y, w, h, pixels)` | `w*h` colours row by row, `GFX_NONE` ones skipped |
+| `gfx_image(x, y, img)` | a compressed picture, top-left corner at (x, y); returns 0, or -1 if `img` isn't one. `GFX_IMAGE_WIDTH(img)`, `GFX_IMAGE_HEIGHT(img)`: its size |
+
+Pictures: `python compiler/src/img picture.png` writes `picture.h` next to
+the PNG, holding `static const unsigned int picture[]` (in ROM once
+compiled), so a program can do
+
+```c
+#include <gfx.h>
+#include "picture.h"
+...
+    gfx_image(0, 0, picture);
+```
+
+The picture is stored with a palette of up to 256 colours and runs of
+pixels copied from a neighbour: about 10–60 times smaller than one word per
+pixel (a 128×128 picture: 270–1800 words instead of 16 384), and never more
+than the bits a palette index needs (black and white: 32 pixels a word, as
+for a dithered photo, where runs don't help). Pictures with
+more colours are reduced (`--colors N` for fewer and smaller, `--dither`);
+bigger ones are shrunk to fit the screen (`--size WxH` to choose);
+transparent pixels (PNG alpha) are left out when drawing. At most 256
+pixels wide. Drawing costs 32–50 instructions a pixel. More in TECHNICAL.md
+7.4; see `compiler/examples/c/image_demo.c`.
 
 `cc run --screen out.png` saves the screen after the run; the simulator
 window shows it in its "RGB screen" tab.

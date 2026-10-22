@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 ASM = ROOT / "compiler" / "src" / "asm"
 CC = ROOT / "compiler" / "src" / "cc"
+IMG = ROOT / "compiler" / "src" / "img"
 SIM = ROOT / "cpu_sim" / "src"
 ROM_DIR = ROOT / "compiler" / "ROM"   # where the assembler writes, see compiler/src/asm/__main__.py
 SKIP = {".git", ".venv", "venv", "__pycache__", "node_modules"}
@@ -13,7 +14,7 @@ MENU = """what do you want to run?
   1) asm    assemble (or compile C) only
   2) sim    open the simulator
   3) build  assemble (or compile C), then open the simulator
-  4) test   self-checks (assembler, simulator, C compiler) + docs check
+  4) test   self-checks (assembler, simulator, C compiler, image tool) + docs check
 """
 NAMES = {"1": "asm", "2": "sim", "3": "build", "4": "test"}
 
@@ -100,6 +101,7 @@ def do(cmd, args):
         run(ASM / "selftest.py")
         run(SIM / "selftest.py")
         run(CC / "selftest.py")
+        run(IMG / "selftest.py")
         run(ROOT / "check_docs.py")
     else:
         sys.exit(f"unknown command: {cmd}")

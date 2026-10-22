@@ -38,7 +38,7 @@ Everything can be driven from `run.py` at the project root:
 
 ```
 python run.py                     # interactive menu
-python run.py test                # assembler, simulator and C compiler self-checks, docs check
+python run.py test                # assembler, simulator, C compiler and image tool self-checks, docs check
 python run.py asm   prog.asm lib.asm            # -> compiler/ROM/prog.rom
 python run.py sim   compiler/ROM/prog.rom
 python run.py build prog.asm lib.asm            # assemble, then open the simulator
@@ -68,6 +68,14 @@ python compiler/src/cc run compiler/examples/c/hello.c          # build + run in
 python compiler/src/cc build compiler/examples/c/primes.c       # -> compiler/ROM/primes.rom (+ primes.asm to read)
 python run.py build compiler/examples/c/guess.c                 # build, then open the simulator window
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/primes.rom
+```
+
+Pictures for the RGB screen are stored compressed (about 10–60 times
+smaller than one word per pixel):
+
+```
+python compiler/src/img picture.png             # -> picture.h; #include it, then gfx_image(x, y, picture)
+python compiler/src/cc run compiler/examples/c/image_demo.c --screen out.png
 ```
 
 ## A taste of the assembly
@@ -112,6 +120,7 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 | `logisim/run_rom.py` | load a ROM into the circuit and run Logisim headless |
 | `compiler/src/asm/` | assembler, linker, self-checks |
 | `compiler/src/cc/` | C compiler, self-checks, test programs compared with gcc (`tests/`) |
+| `compiler/src/img/` | image converter: PNG -> compressed picture for `gfx_image()` (`gfx.h`) |
 | `compiler/libc/` | the C library: headers (`include/`), C and assembly sources |
 | `compiler/examples/` | example programs (assembly, and C in `c/`), the standard library (`stdlib/stdlib.asm`), circuit diagnostics |
 | `compiler/ROM/` | build output for ROM images (ignored by git) |

@@ -23,6 +23,13 @@
  *                                  returns the x after the last character
  *   gfx_bitmap(x, y, w, h, pixels) w*h colours row by row; GFX_NONE ones
  *                                  are left out (transparent)
+ *   gfx_image(x, y, img)           a compressed image, made from a PNG by
+ *                                  python compiler/src/img picture.png
+ *                                  (which writes picture.h to #include);
+ *                                  its top-left corner at (x, y), clipped,
+ *                                  transparent pixels left out. Returns 0,
+ *                                  or -1 if img is not an image
+ *   GFX_IMAGE_WIDTH(img), GFX_IMAGE_HEIGHT(img)   its size
  *
  * If the screen is wired differently, change the GFX_ numbers below (and
  * VIDEO_* in cpu_sim/src/config.py for the simulator).
@@ -42,6 +49,10 @@
 
 #define GFX_RGB(r, g, b) ((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | (((b) & 0xFF) >> 3))
 #define GFX_NONE (-1)           /* "no colour": transparent */
+
+#define GFX_IMAGE_MAX_WIDTH 256 /* gfx_image keeps two rows on the stack */
+#define GFX_IMAGE_WIDTH(img) ((int)(img)[0])
+#define GFX_IMAGE_HEIGHT(img) ((int)(img)[1])
 
 #define GFX_BLACK    0x0000
 #define GFX_WHITE    0xFFFF
@@ -73,5 +84,6 @@ void gfx_fill_circle(int cx, int cy, int r, int color);
 int gfx_char(int x, int y, int c, int fg, int bg);
 int gfx_text(int x, int y, const char *s, int fg, int bg);
 void gfx_bitmap(int x, int y, int w, int h, const int *pixels);
+int gfx_image(int x, int y, const unsigned int *img);
 
 #endif
