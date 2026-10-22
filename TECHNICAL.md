@@ -806,11 +806,13 @@ lets you pick files from the project (it skips `.git`, `.venv`,
 | `python run.py sim [rom]` | `cpu_sim/src/main.py [rom]` (the window) |
 | `python run.py build <files…> -o out.rom` | the same build, then opens the result in the simulator |
 | `python run.py test` | runs the four self-check suites, then `check_docs.py` |
+| `python run.py img <picture.png> [options]` | `compiler/src/img …`: the PNG -> a compressed `picture.h` for `gfx_image()` (7.4) |
 
 It checks for `tkinter` before opening the window and prints install hints
 when it is missing. In the menu, the output of `asm`/`build` is the first
 source file with `.rom`; the menu offers `.asm` and `.c` files (not the C
-library's own).
+library's own). For `img` it offers the project's `.png` files, then asks
+for the converter's options (Enter for none).
 
 ### 7.2 `logisim/run_rom.py`
 
