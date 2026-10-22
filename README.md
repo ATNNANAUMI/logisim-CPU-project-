@@ -42,6 +42,7 @@ python run.py test                # assembler, simulator, C compiler and image t
 python run.py asm   prog.asm lib.asm            # -> compiler/ROM/prog.rom
 python run.py sim   compiler/ROM/prog.rom
 python run.py build prog.asm lib.asm            # assemble, then open the simulator
+python run.py img   picture.png                 # -> picture.h, a compressed picture for gfx_image()
 ```
 
 Or call the tools directly:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import subprocess, sys
+import os, shlex, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -15,8 +15,9 @@ MENU = """what do you want to run?
   2) sim    open the simulator
   3) build  assemble (or compile C), then open the simulator
   4) test   self-checks (assembler, simulator, C compiler, image tool) + docs check
+  5) img    convert a PNG into a compressed picture (.h) for gfx_image()
 """
-NAMES = {"1": "asm", "2": "sim", "3": "build", "4": "test"}
+NAMES = {"1": "asm", "2": "sim", "3": "build", "4": "test", "5": "img"}
 
 
 def need_tk():
@@ -103,6 +104,8 @@ def do(cmd, args):
         run(CC / "selftest.py")
         run(IMG / "selftest.py")
         run(ROOT / "check_docs.py")
+    elif cmd == "img":
+        run(IMG, *args)
     else:
         sys.exit(f"unknown command: {cmd}")
 
@@ -112,7 +115,7 @@ def ask():
     choice = input("choice: ").strip().lower()
     cmd = NAMES.get(choice, choice)
     if cmd not in NAMES.values():
-        sys.exit("pick 1-4, or asm / sim / build / test")
+        sys.exit("pick 1-5, or asm / sim / build / test / img")
 
     if cmd in ("asm", "build"):
         srcs = pick(find_sources(), "source files (order = link order)")
@@ -122,6 +125,14 @@ def ask():
     if cmd == "sim":
         rom = pick(find_roms(), "ROM", multi=False, optional=True)
         return cmd, [*map(str, rom)]
+    if cmd == "img":
+        png = pick(find("*.png"), "PNG", multi=False)
+        print("options, e.g. --colors 16 --size 64x --dither --preview p.png "
+              "(python run.py img -h lists them all)")
+        options = shlex.split(input("options (Enter = none): "))
+        if "-o" not in options and "--output" not in options:
+            print(f"output: {png[0].with_suffix('.h').relative_to(ROOT)}")
+        return cmd, [os.path.relpath(png[0]), *options]   # the .h records the command
     return cmd, []
 
 
