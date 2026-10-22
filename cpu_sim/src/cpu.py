@@ -88,7 +88,7 @@ class CPU:
     def run(self, max_steps: int = 1_000_000, stop_at=()) -> int:
         """Execute up to max_steps instructions; returns how many ran.
 
-        Does what calling step() max_steps times does, about four times
+        Does what calling step() max_steps times does, about ten times
         faster: no Step records, no disassembly, machine state kept in local
         variables. It stops early at HALT, at a stack wrap (when that stops
         the CPU), or before an instruction whose address is in stop_at (not
