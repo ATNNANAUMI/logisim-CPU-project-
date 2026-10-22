@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-import subprocess, sys
+import os, shlex, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 ASM = ROOT / "compiler" / "src" / "asm"
 CC = ROOT / "compiler" / "src" / "cc"
+IMG = ROOT / "compiler" / "src" / "img"
+VIDEO = IMG / "video.py"
+VIDEO_TYPES = ("*.mp4", "*.mkv", "*.webm", "*.mov", "*.avi", "*.gif")
 SIM = ROOT / "cpu_sim" / "src"
 ROM_DIR = ROOT / "compiler" / "ROM"   # where the assembler writes, see compiler/src/asm/__main__.py
 SKIP = {".git", ".venv", "venv", "__pycache__", "node_modules"}
@@ -13,9 +16,11 @@ MENU = """what do you want to run?
   1) asm    assemble (or compile C) only
   2) sim    open the simulator
   3) build  assemble (or compile C), then open the simulator
-  4) test   self-checks (assembler, simulator, C compiler) + docs check
+  4) test   self-checks (assembler, simulator, C compiler, image tool) + docs check
+  5) img    convert a PNG into a compressed picture (.h) for gfx_image()
+  6) video  convert a video into compressed frames (.h) for video_player.c
 """
-NAMES = {"1": "asm", "2": "sim", "3": "build", "4": "test"}
+NAMES = {"1": "asm", "2": "sim", "3": "build", "4": "test", "5": "img", "6": "video"}
 
 
 def need_tk():
@@ -35,9 +40,10 @@ def find_roms():
 
 
 def find_sources():
-    """.asm and .c files to build (not the C library's own files)."""
-    libc = ROOT / "compiler" / "libc"
-    return find("*.asm") + [p for p in find("*.c") if libc not in p.parents]
+    """.asm and .c files to build: not the C library's own files, the C
+    compiler's test programs (compiler/src/) or build output (compiler/ROM/)."""
+    skip = (ROOT / "compiler" / "libc", ROOT / "compiler" / "src", ROM_DIR)
+    return [p for p in find("*.asm") + find("*.c") if not any(d in p.parents for d in skip)]
 
 
 def builder(args):
@@ -100,7 +106,12 @@ def do(cmd, args):
         run(ASM / "selftest.py")
         run(SIM / "selftest.py")
         run(CC / "selftest.py")
+        run(IMG / "selftest.py")
         run(ROOT / "check_docs.py")
+    elif cmd == "img":
+        run(IMG, *args)
+    elif cmd == "video":
+        run(VIDEO, *args)
     else:
         sys.exit(f"unknown command: {cmd}")
 
@@ -110,7 +121,7 @@ def ask():
     choice = input("choice: ").strip().lower()
     cmd = NAMES.get(choice, choice)
     if cmd not in NAMES.values():
-        sys.exit("pick 1-4, or asm / sim / build / test")
+        sys.exit("pick 1-6, or asm / sim / build / test / img / video")
 
     if cmd in ("asm", "build"):
         srcs = pick(find_sources(), "source files (order = link order)")
@@ -120,6 +131,22 @@ def ask():
     if cmd == "sim":
         rom = pick(find_roms(), "ROM", multi=False, optional=True)
         return cmd, [*map(str, rom)]
+    if cmd == "img":
+        png = pick(find("*.png"), "PNG", multi=False)
+        print("options, e.g. --colors 16 --size 64x --dither --preview p.png "
+              "(python run.py img -h lists them all)")
+        options = shlex.split(input("options (Enter = none): "))
+        if "-o" not in options and "--output" not in options:
+            print(f"output: {png[0].with_suffix('.h').relative_to(ROOT)}")
+        return cmd, [os.path.relpath(png[0]), *options]   # the .h records the command
+    if cmd == "video":
+        clip = pick(sorted(p for kind in VIDEO_TYPES for p in find(kind)), "video", multi=False)
+        print("options, e.g. --fps 12 --colors 16 --seconds 5 --size 96x --preview frames/ "
+              "(python run.py video -h lists them all)")
+        options = shlex.split(input("options (Enter = none): "))
+        if "-o" not in options and "--output" not in options:
+            print(f"output: {clip[0].with_suffix('.h').relative_to(ROOT)}")
+        return cmd, [os.path.relpath(clip[0]), *options]
     return cmd, []
 
 

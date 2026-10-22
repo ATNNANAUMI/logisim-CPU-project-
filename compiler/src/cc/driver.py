@@ -318,7 +318,7 @@ def run_in_simulator(rom_words, keys="", max_steps=50_000_000, trace=False):
             if st is None:
                 break
             operand = "" if st.operand is None else f" 0x{st.operand:08X}"
-            print(f"0x{st.address:05X}  {st.word:08X}{operand:11s} {st.text:<20s} {st.note}")
+            print(f"0x{st.address:07X}  {st.word:08X}{operand:11s} {st.text:<20s} {st.note}")
             steps += 1
     else:
         cpu.run(max_steps)

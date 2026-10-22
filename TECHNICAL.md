@@ -23,31 +23,37 @@ file has the details.
 | item | size | notes |
 | --- | --- | --- |
 | `R0`–`R15` | 32 bits each | general purpose; every ALU result is written to `R0` |
-| `IAR` | 17 bits | instruction address register (program counter) |
+| `IAR` | 25 bits | instruction address register (program counter) |
 | `IR` | 16 bits | instruction register (low 16 bits of the fetched word) |
 | flags | 4 bits | `C A N Z` (bit 3 … bit 0) |
 | `ESP`, `EBP` | 14 bits each | stack pointer and frame pointer, indices into the stack area |
-| `MAR` | 17 bits | memory address register (inside the `RAM` subcircuit) |
+| `MAR` | 25 bits | memory address register (inside the `RAM` subcircuit) |
 | `ACC`, `TMP` | 32 bits each | internal ALU latches, not visible to programs |
 
 ### 1.2 Memory map
 
-One 17-bit address bus. Bit 16 chooses the bank:
+One 25-bit address bus. Each bank has a 24-bit address (16M words); bit 24
+chooses the bank:
 
 ```
-0x00000 ─ 0x0FFFF   ROM  64K × 32   program and constant data, read only
-0x10000 ─ 0x13FFF   RAM  stack area (16K words, indexed by ESP/EBP)
-0x14000 ─ 0x1FFFF   RAM  free; the linker puts .ram data here
+0x0000000 ─ 0x0FFFFFF   ROM  16M × 32   program and constant data, read only
+0x1000000 ─ 0x1003FFF   RAM  stack area (16K words, indexed by ESP/EBP)
+0x1004000 ─ 0x1FFFFFF   RAM  free; the linker puts .ram data here
 ```
+
+**The circuit is still the 16-bit version** (17-bit bus, bit 16 = RAM, 64K
+words per bank: ROM `0x00000–0x0FFFF`, RAM `0x10000–0x1FFFF`). The toolchain
+and the simulator use the 24-bit map above; 2.4 lists what the circuit needs
+before it can run these programs, and `logisim/run_rom.py` refuses until then.
 
 * Reads work on both banks. Writes to ROM are dropped (the circuit raises a
   "tried writing in ROM" error line; the simulator ignores the write and notes
   it in the trace).
-* The stack is the first quarter of RAM (`RAM[0x0000..0x3FFF]`). `ESP` and
-  `EBP` are 14-bit indices into it, so they wrap at 16K. `STK SET/GET`
+* The stack is the first 16K words of RAM (`RAM[0x0000..0x3FFF]`). `ESP`
+  and `EBP` are 14-bit indices into it, so they wrap at 16K. `STK SET/GET`
   addresses are not limited to the stack area: they wrap across the whole
   RAM (see 1.6).
-* The IAR is 17 bits, so the CPU *can* fetch from RAM, but the assembler never
+* The IAR is 25 bits, so the CPU *can* fetch from RAM, but the assembler never
   puts code there.
 
 ### 1.3 Instruction word
@@ -180,10 +186,12 @@ The sub-operation is in the RA field.
 
 The stack grows **upward** from RAM index 0. `SET`/`GET` are relative to
 `EBP`; negative `RB` reaches arguments below the frame. `EBP + RB` wraps at
-16 bits, across the **entire RAM**, not just the 16K stack area: with
-`EBP = 0`, index `-1` reads or writes the last word of RAM (`0x1FFFF`) and
-index `0x8000` reaches `0x18000`; bits of `RB` above 15 are dropped. Measured
-on the circuit with `diag11.asm` and `diag16.asm`; the simulator does the same.
+the RAM's address width, across the **entire RAM**, not just the 16K stack
+area: with `EBP = 0`, index `-1` reads or writes the last word of RAM
+(`0x1FFFFFF`) and index `0x8000` reaches `0x1008000`; bits of `RB` above 23
+are dropped. Measured on the 16-bit circuit with `diag11.asm` and
+`diag16.asm` (there it wraps at 16 bits: `-1` reaches `0x1FFFF`); the
+simulator wraps at 24, taking the circuit's adder to grow with the RAM.
 
 ### 1.7 I/O (`COMM`, `0x08mb`)
 
@@ -204,12 +212,20 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 | `0x5C` | text display (TTY) | prints the low 7 bits as ASCII; `0x0A` newline, `0x08` backspace |
 | `0x3C` | number display | latches the 32-bit word and shows it on 8 hex digits (the simulator shows it in the window, and as `HEX DISPLAY:` in headless output) |
 | `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08` |
-| `0x6C` | RGB screen (*planned wiring*) | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; on the 128×128 RGB Video only the low 7 bits of x and y are wired. Write-only |
-| `0x6D` | RGB screen clear (*planned*) | any word pulses the RGB Video's reset: all black |
+| `0x6C` | RGB screen | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; on the 128×128 RGB Video only the low 7 bits of x and y are wired. Write-only |
+| `0x6D` | RGB screen clear (*simulator only*) | any word pulses the RGB Video's reset: all black. Not built on the circuit yet, where it does nothing |
+| `0x7C` | timer (*planned*) | `INDATA` reads the milliseconds since reset, wrapping at 32 bits; C's `clock()` |
 
-The RGB Video component is in `PC` but not wired yet; `0x6C`/`0x6D` are the
-wiring chosen for it (2026-10-11). The simulator and `gfx.h` follow it; the
-numbers are `VIDEO_*` in `config.py` and `GFX_*` in `gfx.h`.
+`0x6C`/`0x6D` were chosen on 2026-10-11; `0x6C` was built on the circuit
+(`RGB_Display`, section 2.2) on 2026-10-22. The numbers are `VIDEO_*` in
+`config.py` and `GFX_*` in `gfx.h`.
+
+The timer (`0x7C`, 2026-10-22) isn't on the circuit at all yet. The
+simulator follows the computer's real clock, so a program that waits on it
+runs at the right speed however fast it is simulated; the window stops it
+while the simulation is paused (and while single-stepping). On the circuit
+it would be a 32-bit counter stepped every millisecond, so its input clock
+has to come from a divider matched to the CPU's clock rate.
 
 Each device compares the 8 low bits of the selected address against its own
 number with a gate decoder (the keyboard: bits 0–3 must be 0, bits 4–7 must
@@ -244,12 +260,13 @@ PC  (top level: the "computer")
 ├── display          → TTY
 ├── NUMBER_DISPLAY   → 8 × Hex Digit Display
 ├── KEYBOARD         ← Keyboard
+├── RGB_Display      → RGB Video
 └── buffer
 ```
 
 `PC` also holds the `HALT`, `RESET` and `RESUME` input pins and the Logisim
 `TTY`, `Keyboard` and `Hex Digit Display` components. It also has an
-`RGB Video` component (565 colour) that is not wired to anything yet. The
+`RGB Video` component (565 colour, fed by `RGB_Display`). The
 output pin labelled `halt` goes high when the CPU halts; headless runs use it
 to stop (section 7.2), so keep its label.
 
@@ -342,7 +359,14 @@ Logisim's `Keyboard` and drives it onto the bus (zero-extended) through a
 controlled buffer. A D flip-flop produces the read strobe that removes the key
 from the Keyboard's buffer.
 
-All three devices receive the bus, the `I_O_CLK_S`/`I_O_CLK_E` phases and the
+**RGB_Display** — address decoder for `0x6C` and the same select flip-flop
+and write strobe as `display`. Splitters take the colour from bus bits 15–0,
+y from bits 22–16 and x from bits 30–24; they and the strobe (on the clock
+input) go to the `RGB Video` in `PC`. The Video's write-enable input is tied
+to a constant 1 there: left unconnected, nothing is drawn. There is no clear
+(`0x6D`) yet.
+
+All four devices receive the bus, the `I_O_CLK_S`/`I_O_CLK_E` phases and the
 `DATA_ADDRESS` / `INPUT_OUTPUT` lines ("CLOCK S", "CLK E", "D/A", "I/O" in the
 schematics). Each device decodes the address sent by `OUTADDR`/`INADDR`,
 remembers whether it is selected (a D flip-flop), and only reacts to
@@ -354,6 +378,29 @@ remembers whether it is selected (a D flip-flop), and only reacts to
   subcircuit, right-click the ROM → Load Image → pick a `.rom` file. Start the
   clock in `PC`.
 * **Headless:** `logisim/run_rom.py` (section 7.2).
+
+### 2.4 Widening the circuit to 24-bit banks (not done yet)
+
+The toolchain and the simulator use 24-bit banks (1.2); the circuit is still
+16-bit, so programs built now can't run on it. These are the parts that carry
+an address (found by width in `CPU.circ`; the 16-bit parts of
+`CONTROL_SECTION`, `CPU_REG` and `INTRUCTION_REGISTER` are the instruction,
+not an address, and stay):
+
+| subcircuit | part | now | needed |
+| --- | --- | --- | --- |
+| `IAR` | the counter: 17 T flip-flops with their carry gates, and its two 17-bit splitters (bus in, bus out) | 17 bits | 25: eight more bit cells |
+| `RAM` | `MAR` register and the splitters that take its bank bit | 17 bits, bit 16 = RAM | 25 bits, bit 24 = RAM |
+| `RAM` | the `RAM` and `ROM` components | 16 address bits | 24 (Logisim's largest) |
+| `RAM` | the adder for `EBP + index` and `RA + RB`, and the 17-bit controlled buffers around it | 17 bits | 25 |
+| `RAM` | the 16-bit splitters and buffers that feed the memories' addresses | 16 bits | 24 |
+| `RAM` | the stack index padding (14-bit `ESP`/`EBP` + grounded bits) | 2 grounded bits | 10, so the stack stays at RAM `0x0000–0x3FFF` |
+| `RAM` | the debugging comparator against `0x287` | 17 bits | 25, or remove it (9) |
+
+`ESP`/`EBP` (14 bits) and the 32-bit data paths don't change. Once the ROM
+has 24 address bits, `run_rom.py` runs programs again (it writes the
+matching `addr/data` header itself). Relative jumps need nothing new: the
+offset is added in 32 bits and the IAR keeps its low 25.
 
 ---
 
@@ -372,20 +419,20 @@ modules import each other by plain name, so run them as scripts
 | `config.py` | sizes (`WORD_BITS`, `ADDR_BITS`, `RAM_BIT`, `BANK_WORDS`, `STACK_WORDS`), device addresses, and the **TWEAKS** switches (3.4) |
 | `isa.py` | opcode tables, `decode(word) -> Instr`, `disassemble(word, operand)`. `Instr.takes_operand` says whether a literal word follows |
 | `alu.py` | `int_op(name, a, b)` and `float_op(name, a, b)`, each returning `(R0 value, flag nibble)`; float32 ↔ bits helpers |
-| `memory.py` | `Memory` with two 64K banks, `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
-| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes), `Keyboard` (a deque; empty reads 0), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `DeviceBus` (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
+| `memory.py` | `Memory` with two 16M-word banks (Python lists, 128 MB each), `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
+| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `DeviceBus` (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()`, `reset()`, `resume()` |
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 18 checks on the core |
+| `selftest.py` | 22 checks on the core |
 
 ### 3.2 Execution model
 
 `CPU.step()`:
 
 1. If halted or stopped, return `None`.
-2. Fetch `mem[IAR]` and increment IAR (wrapping at 17 bits).
+2. Fetch `mem[IAR]` and increment IAR (wrapping at 25 bits).
 3. Decode. If the instruction takes an operand, fetch the next word too and
    remember its address (jumps are relative to it).
 4. Execute and return a `Step(address, word, operand, text, note)` for the
@@ -394,6 +441,18 @@ modules import each other by plain name, so run them as scripts
 ALU instructions call `alu.int_op` or `alu.float_op` with `a = R[RA]` and
 `b = R[RB]` or the immediate, then store `R0` and the flags. `HALT` sets
 `halted`; `resume()` clears it and execution continues after the `HALT`.
+
+`CPU.run(max_steps, stop_at=())` does what calling `step()` `max_steps`
+times does, without building `Step` records or disassembling: one loop with
+the machine state in local variables, about 3 MHz against `step()`'s
+~250 kHz. It stops at `HALT`, at a stack wrap that stops the CPU, or before
+an address in `stop_at` (not checked for the first instruction, so a run can
+leave a breakpoint). It writes out the common integer ALU ops itself and
+calls `alu.py` for DIV, MOD and the float group, so an instruction change
+touches both `run()` and `_execute()`; the self-check `test_run_matches_step`
+compares them on random code. The window (when the trace is off), the
+headless runner (without `--trace`) and `python compiler/src/cc run` all use
+`run()`; single steps, the trace and C line stepping use `step()`.
 
 ### 3.3 Running it
 
@@ -505,7 +564,7 @@ problems of all files (bad source, unreadable file, broken `.obj`), as
 | `objfile.py` | `ObjectFile` and `Reloc`, saved as readable JSON |
 | `linker.py` | object files → one ROM image, plus `format_raw` and `format_map` |
 | `errors.py` | `AsmError` (one message with file and line) and `AsmErrors` (a batch) |
-| `selftest.py` | 19 checks for the assembler and linker |
+| `selftest.py` | 20 checks for the assembler and linker |
 | `asm_grammar.py` | writes railroad diagrams of the grammar to `asm_grammar.html` (needs `pip install railroad-diagrams`) |
 
 ### 4.3 Assembling (two passes)
@@ -625,10 +684,10 @@ only when true, so older object files still load.
 ### 4.6 Linking
 
 ```
-ROM  0x00000   RJMP start           (2 words, added by the linker)
-     0x00002   each file's ROM part, in command-line order
-RAM  0x10000   stack (never touched by the linker)
-     0x14000   each file's RAM part, in command-line order
+ROM  0x0000000 RJMP start           (2 words, added by the linker)
+     0x0000002 each file's ROM part, in command-line order
+RAM  0x1000000 stack (never touched by the linker)
+     0x1004000 each file's RAM part, in command-line order
 ```
 
 0. For a library (`--lib`), choose the parts to keep: starting from every
@@ -741,18 +800,20 @@ line is empty (so it can't erase the prompt).
 | `c/hello.c` | C: `printf("hello, world\n")` |
 | `c/primes.c` | C: a sieve, `printf` with a width, the hex display (`cpu.h`) |
 | `c/gfx_demo.c` | C: the RGB screen with `gfx.h`: gradient, text, shapes, a sine wave (`--screen` saves the picture) |
+| `c/image_demo.c` | C: compressed pictures with `gfx_image` (7.4): a 128×128 Mandelbrot picture and a transparent 16×16 sprite from `c/images/` (the PNGs and the `.h` files made from them), clipped at the edges |
 | `c/structs.c` | C: an array of structs, `qsort`, `malloc`, `printf("%.2f")` |
 | `c/guess.c` | C: guess the number with `scanf`; seeded by how long the first key takes (`key_pressed`); the header has a transcript |
+| `c/video_player.c` | C: plays a video made by `compiler/src/img/video.py` (7.5) at its own speed, waiting on `clock()` (the timer); prints how many frames were late. Plays `c/videos/demo.h` (from `demo.mp4`, ffmpeg's moving test picture, 4 s); `-I . -D 'VIDEO="clip.h"'` plays `./clip.h` instead. Needs `--steps 2000000000` with `cc run` (waiting runs millions of instructions a second) |
 | `c/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, `~` on registers, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
 | `tests/diag10.asm` | `INT` on floats below 1 (diagnostic, resolved: they give 0) |
-| `tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x14000`; they are also printed in hex |
-| `tests/diag12.asm` | what the C compiler relies on: reading and setting `ESP`/`EBP` with `STK CALL`/`STK RET`, stack slot `i` being RAM `0x10000 + i`, the carry flag after `CMP`/`SUB`/`ADD`, the `A` flag after `FCMP` (a float compare), `MULT`'s low 32 bits, `DIV` by `0x80000000`. Link it first; 30 results from `0x14000`, also printed |
-| `tests/diag13.asm` | the carry flag (and A N Z) after `SUB`, `--`, `++`, `NEG`, `SHL`, `SHR`, `MULT`, `ADD`, `AND`, `TEST`: on the circuit `SUB` sets C on a borrow and `CMP`/`--`/`NEG`/`MULT` never set it. Link it first; 24 results from `0x14000`, also printed |
-| `tests/diag14.asm` | float special cases: division by ±0, NaN, infinity, `INT` out of range, overflow, subnormals. Link it first; 22 results from `0x14000`, also printed |
-| `tests/diag15.asm` | more of the same after diag14: `INT` of -infinity and of large values, the remaining divisions by zero. Link it first; 15 results from `0x14000`, also printed |
-| `tests/diag16.asm` | where `STK SET/GET` put `EBP + RB` (it wraps at 16 bits, across all of RAM), R0 and flags after `DIV`, `MOD` and `NOT` (`MOD` by 0 gives 0; `NOT` inverts RA), the float opcodes with no defined result, float rounding (to nearest, ties to even). Link it first; 52 results from `0x14000`, also printed |
-| `tests/diag17.asm` | follow-up to diag16: `NOT` encoded with RA and RB both set (it inverts RA, not RB), `DIV`/`MOD` by 0 and `0x80000000` by -1, float opcodes 4, 5, B, C with other inputs (4 doubles RB). Link it first; 30 results from `0x14000`, also printed |
-| `tests/diag18.asm` | the flags after `OR` and `XOR`, and `NOT` as the assembler writes it now (register in both fields: `~Rx`, `A` = 0); all as the simulator. Link it first; 16 results from `0x14000`, also printed |
+| `tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x1004000`; they are also printed in hex |
+| `tests/diag12.asm` | what the C compiler relies on: reading and setting `ESP`/`EBP` with `STK CALL`/`STK RET`, stack slot `i` being RAM word `i` (address `0x1000000 + i` now, `0x10000 + i` on the 16-bit circuit), the carry flag after `CMP`/`SUB`/`ADD`, the `A` flag after `FCMP` (a float compare), `MULT`'s low 32 bits, `DIV` by `0x80000000`. Link it first; 30 results from `0x1004000`, also printed |
+| `tests/diag13.asm` | the carry flag (and A N Z) after `SUB`, `--`, `++`, `NEG`, `SHL`, `SHR`, `MULT`, `ADD`, `AND`, `TEST`: on the circuit `SUB` sets C on a borrow and `CMP`/`--`/`NEG`/`MULT` never set it. Link it first; 24 results from `0x1004000`, also printed |
+| `tests/diag14.asm` | float special cases: division by ±0, NaN, infinity, `INT` out of range, overflow, subnormals. Link it first; 22 results from `0x1004000`, also printed |
+| `tests/diag15.asm` | more of the same after diag14: `INT` of -infinity and of large values, the remaining divisions by zero. Link it first; 15 results from `0x1004000`, also printed |
+| `tests/diag16.asm` | where `STK SET/GET` put `EBP + RB` (on the 16-bit circuit it wraps at 16 bits, across all of RAM), R0 and flags after `DIV`, `MOD` and `NOT` (`MOD` by 0 gives 0; `NOT` inverts RA), the float opcodes with no defined result, float rounding (to nearest, ties to even). Link it first; 52 results from `0x1004000`, also printed |
+| `tests/diag17.asm` | follow-up to diag16: `NOT` encoded with RA and RB both set (it inverts RA, not RB), `DIV`/`MOD` by 0 and `0x80000000` by -1, float opcodes 4, 5, B, C with other inputs (4 doubles RB). Link it first; 30 results from `0x1004000`, also printed |
+| `tests/diag18.asm` | the flags after `OR` and `XOR`, and `NOT` as the assembler writes it now (register in both fields: `~Rx`, `A` = 0); all as the simulator. Link it first; 16 results from `0x1004000`, also printed |
 
 All of these build and run correctly in the simulator. The `c/` programs
 are C: build them with `python compiler/src/cc build <file>` (or `run`,
@@ -792,12 +853,17 @@ lets you pick files from the project (it skips `.git`, `.venv`,
 | `python run.py asm <files…> [-o out.rom]` | `compiler/src/asm build …`, or `compiler/src/cc build …` when a `.c` file is among them |
 | `python run.py sim [rom]` | `cpu_sim/src/main.py [rom]` (the window) |
 | `python run.py build <files…> -o out.rom` | the same build, then opens the result in the simulator |
-| `python run.py test` | runs the three self-check suites, then `check_docs.py` |
+| `python run.py test` | runs the four self-check suites, then `check_docs.py` |
+| `python run.py img <picture.png> [options]` | `compiler/src/img …`: the PNG -> a compressed `picture.h` for `gfx_image()` (7.4) |
+| `python run.py video <clip> [options]` | `compiler/src/img/video.py …`: a video (or a folder of PNG frames) -> `clip.h` for `video_player.c` (7.5) |
 
 It checks for `tkinter` before opening the window and prints install hints
 when it is missing. In the menu, the output of `asm`/`build` is the first
-source file with `.rom`; the menu offers `.asm` and `.c` files (not the C
-library's own).
+source file with `.rom`; the menu offers `.asm` and `.c` files, leaving
+out the C library's own, the C compiler's test programs (`compiler/src/`)
+and build output (`compiler/ROM/`). For `img` it offers the project's `.png` files, then asks
+for the converter's options (Enter for none); `video` does the same with the
+project's video files (`.mp4`, `.mkv`, `.webm`, `.mov`, `.avi`, `.gif`).
 
 ### 7.2 `logisim/run_rom.py`
 
@@ -810,8 +876,10 @@ python logisim/run_rom.py logisim/CPU.circ --dump-rom current.rom
 ```
 
 It parses the `.circ` XML and finds the single `ROM` component inside the
-`RAM` subcircuit. It replaces that ROM's contents with the image
-(`addr/data: 16 32` header, 8 words per line) and writes
+`RAM` subcircuit. If that ROM has fewer than 24 address bits it stops with a
+message: programs are now laid out for 24-bit banks and the circuit is still
+16-bit (2.4). Otherwise it replaces the ROM's contents with the image
+(`addr/data: <the ROM's width> 32` header, 8 words per line) and writes
 `CPU__patched.circ` to the current directory (or to `--keep`). Then it runs
 `java -Djava.awt.headless=true -jar <jar> <patched> --toplevel-circuit PC -t tty,halt`
 and prints the TTY output. Without `--jar` it uses `$LOGISIM_JAR`, then
@@ -830,20 +898,33 @@ repo.
 ### 7.3 Self-checks
 
 ```
-python compiler/src/asm/selftest.py   # 19 checks: encodings, values, strings, jumps,
-                                      # CALL/RET, SAVE/RESTORE, linking, link errors
+python compiler/src/asm/selftest.py   # 20 checks: encodings, values, strings, jumps,
+                                      # CALL/RET, SAVE/RESTORE, linking, a program past
+                                      # 64K words and the size limits, link errors
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 18 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 22 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
                                       # floats, FCMP flags, keyboard, backspace, ADDR/JMRB,
-                                      # float specials, float SHL
-python compiler/src/cc/selftest.py    # 14 checks: preprocessor, error messages (several per run), warnings,
+                                      # float specials, float SHL, run() against step()
+                                      # on random code, run() stopping at breakpoints,
+                                      # the top of both 16M-word banks, the timer
+python compiler/src/cc/selftest.py    # 15 checks: preprocessor, error messages (several per run), warnings,
                                       # type sizes, exit/atexit, keyboard input, globals
                                       # after a reset, library override, reserved names,
-                                      # mixing C and assembly, CLI, C line stepping, and every test program
+                                      # mixing C and assembly, memory past 64K words (ROM
+                                      # table, RAM array, malloc, far code), CLI, C line
+                                      # stepping, and every test program
                                       # in compiler/src/cc/tests/ against gcc's output
+python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode round trips
+                                      # (both forms), the packed fallback,
+                                      # bad input, PNG reading (every filter, colour type
+                                      # and bit depth), resizing, palettes, CLI, and
+                                      # gfx_image() on the simulator against codec.decode(),
+                                      # and video.py: frames land on the screen as it says,
+                                      # PNG folder via the CLI, video_player.c on the
+                                      # simulator, a 1 s video through ffmpeg (if installed)
 python check_docs.py                  # 3 checks on the docs: every repo path they name
                                       # exists, every example (.asm, .c) is listed in
                                       # 5.3, every TWEAKS switch is in 3.4
@@ -852,6 +933,120 @@ python check_docs.py                  # 3 checks on the docs: every repo path th
 `check_docs.py` checks only mechanical facts. It skips build output under
 `compiler/ROM/`, `diagNN`-style placeholders, and paragraphs that mention
 files as removed.
+
+### 7.4 Pictures for the RGB screen (`compiler/src/img/`)
+
+```
+python compiler/src/img picture.png [-o picture.h] [--name NAME] [--size WxH] [--colors N] [--dither] [--preview FILE.png]
+```
+
+turns a PNG into a compressed image that `gfx_image(x, y, img)` (`gfx.h`,
+`compiler/libc/gfx_image.c`) draws. It writes `picture.h` next to the PNG,
+holding `static const unsigned int picture[] = {...};`, which a C program
+`#include`s (so the words end up in ROM). It won't overwrite a file it
+didn't write. The defaults: the array is named after the file; a picture
+bigger than the screen is shrunk to fit 128×128 (area average), `--size`
+picks the size (`64x` or `x48` keeps the shape); pixels with alpha below
+128 become transparent. `--preview` saves what the screen will show (2×).
+
+Colours: each pixel becomes RGB565, dropping the low bits like `GFX_RGB`
+(rounding would split the dark noise of photos into two levels and make
+them much bigger). Up to `--colors` (default 256) colours are kept exactly;
+more are reduced by median cut plus three rounds of k-means, mapped to the
+nearest colour (`--dither`: Floyd–Steinberg, which looks smoother with few
+colours but compresses worse).
+
+The format (in full at the top of `codec.py`): a header (width, height,
+number of palette colours, transparent index), the palette two colours per
+word, then a bit stream of tokens over the pixels in reading order: `0` +
+a palette index, or `1` + a kind + an Elias gamma length for a run of
+pixels copied from the previous pixel, the one above, above-left or
+above-right (outside the image counts as palette colour 0). The encoder is
+greedy. A picture with few runs (dithered, noisy) would cost more than b
+bits a pixel that way (each lone pixel is a flag bit + b), so the converter
+also writes the **packed** form, just b bits a pixel with no tokens, and
+keeps the smaller one (header word 2 then has `0x10000` added). So a picture
+is never bigger than b bits a pixel: black and white is at most 32 pixels a
+word, 512 words for 128×128. Measured on 128×128 pictures (16 384 words at
+one word per pixel):
+
+| picture | colours | words |
+| --- | --- | --- |
+| `gfx_demo.c`'s screen | 22 | 268 |
+| a logo | 194 | 516 |
+| the Mandelbrot picture of `image_demo.c` | 230 | 1734 |
+| a cartoon, reduced to 256 / 16 colours | 1096 | 1359 / 469 |
+| a logo / a cartoon, thresholded to black and white | 2 | 106 / 155 |
+| a page of text, black on white | 2 | 306 |
+| a photo, black and white, dithered (packed) | 2 | 517 (550 with runs) |
+
+The decoder keeps two rows of colours on the stack, decodes a row, then
+sends it (clipped, transparent pixels skipped) to device `0x6C`; a run can
+go on into the next row. A packed picture is read by `unpack_row` instead,
+or `unpack_bits_row` for 1 bit a pixel (the top bit picks one of two
+colours: about 32 instructions a pixel in all, against 48 through the
+general one). It is about 1500 words of code and takes 32–50 instructions a
+pixel (about 0.5–1 million for a full screen: 3–10 seconds in the
+simulator, far too slow for the circuit's 160 a second). About 15 of those
+go to sending the pixel; the rest is spread over small functions so that
+their loops keep their variables in registers (see the file's comment). `codec.decode()` is the reference: the self-check draws images
+with `gfx_image()` in the simulator and compares every pixel.
+
+### 7.5 Videos for the RGB screen (`compiler/src/img/video.py`)
+
+```
+python compiler/src/img/video.py clip.mp4 [-o clip.h] [--fps 10] [--size WxH] [--colors 32]
+                                 [--tolerance 16] [--start S] [--seconds S] [--max-frames N]
+                                 [--preview DIR]
+python compiler/src/img/video.py frames/ ...      (a folder of PNGs, in name order)
+```
+
+turns a video into a `.h` of compressed frames that
+`compiler/examples/c/video_player.c` plays at the video's speed. `ffmpeg`
+and `ffprobe` read the video (they must be installed; a folder of PNG frames
+needs neither): `--fps` frames a second (1–60), shrunk to fit 128×128 unless
+`--size` says otherwise, `--start`/`--seconds` take a part.
+
+* **One palette for every frame:** `--colors` (default 32) chosen over all
+  the frames' pixels (median cut + k-means, `palette.fit_colors`), no
+  dithering (it would flicker), so a pixel that keeps its colour keeps its
+  palette entry.
+* **Only what changed:** frame 0 is drawn whole. In every later frame a
+  pixel is transparent unless its colour is more than `--tolerance` (about
+  that much per channel, 0–255; 0 = any change) away from what the screen
+  shows there; the encoder keeps that screen as it goes. Transparent runs
+  cost a few bits.
+* **Each frame is an ordinary picture** in the 7.4 format, with its own
+  palette holding only the colours it draws (transparent first, then by
+  use), so a frame that changes little has few colours and few bits a pixel.
+  Every frame is decoded back and checked as it is written.
+* **The `.h`:** `VIDEO_FRAMES`, `VIDEO_FPS`, `VIDEO_WIDTH`, `VIDEO_HEIGHT`,
+  `video_data[]` (all frames, one after another) and `video_start[]` (where
+  each frame begins). One video per program. More than half the ROM (8M
+  words) is refused. `--preview DIR` saves every frame as the screen will
+  show it (PNG, 2×).
+
+The player clears the screen, then draws frame `i` with `gfx_image` when
+`clock()` reaches `i * 1000 / VIDEO_FPS` (the timer, 1.7), and waits out the
+last frame. A frame can't be skipped, since each one draws only what changed,
+so a player that falls behind stays behind until frames get cheaper; it
+counts the frames drawn more than one frame late.
+
+Measured on 4 s clips, 128×96 (12 288 words a frame at one word per pixel):
+
+| clip | fps | colours | words a frame | instructions a frame |
+| --- | --- | --- | --- | --- |
+| ffmpeg's `testsrc2` (moving test picture): `videos/demo.h` | 12 | 32 | 220 | 352 000 |
+| the same | 10 | 32 | 222 | 354 000 |
+| the same, `--tolerance 0` / `--colors 16` | 10 | 32 / 16 | 232 / 198 | |
+| ffmpeg's `life` (Game of Life, much of it changing) | 10 | 31 | 523 | 462 000 |
+
+Drawing costs about 28 instructions a pixel even where nothing changed
+(`gfx_image` decodes and walks every pixel), so 10 frames a second needs
+about 4 million instructions a second: `pypy3` keeps up (0 frames late on
+the demo), plain `python` (about 2.7 MHz) doesn't, and the circuit (about
+2 kHz) would take minutes a frame. Skipping transparent runs without
+walking their pixels would be the next speed-up.
 
 ---
 
@@ -873,7 +1068,7 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | carry flag | as in 1.5 | confirmed (`diag12.asm`, `diag13.asm`, 2026-10-10). The simulator used to set C on `SUB`/`CMP` when there was *no* borrow, and on `MULT` overflow; it now matches the circuit |
 | float division by zero, NaN, `INT` out of range | as in 1.5 | confirmed (`diag14.asm`, `diag15.asm`, 2026-10-10). The simulator used to give `0.0/0.0 = +inf`, `1.0/-0.0 = +inf` and `INT(inf) = 0`; it now matches the circuit |
 | number display `0x3C` | shows the last word sent (window and headless output) | 8 hex digits in `PC` |
-| RGB screen `0x6C`/`0x6D` | 128×128 RGB565, the "RGB screen" tab, `--screen` | RGB Video in `PC`, not wired yet |
+| RGB screen `0x6C`/`0x6D` | 128×128 RGB565, the "RGB screen" tab, `--screen` | `RGB_Display` → RGB Video in `PC` (2026-10-22); the `0x6D` clear isn't built |
 | timing | one instruction per step | several clock cycles per instruction (stepper) |
 
 ---
@@ -970,7 +1165,7 @@ maybe plus a register), or a register variable. Loads and stores pick the
 cheapest instruction: `STK GET/SET` for frame slots, `LD`/`ST` for a known
 address, `ALD`/`AST` for base + index (array elements). A local's address is
 needed only when it escapes (`&x`, an array passed to a function): then the
-function computes `FP = 0x10000 + EBP` once in its prologue (`STK CALL`,
+function computes `FP = 0x1000000 + EBP` (`RAM_BASE + EBP`) once in its prologue (`STK CALL`,
 `STK GET 0`, `STK RET` read EBP) and keeps it in a frame slot.
 
 **Evaluation order.** Of two operands, the one that needs no code goes
@@ -1052,7 +1247,7 @@ leads to after an unconditional jump.
 
 `compiler/libc/` holds the headers (`include/`), the library in C (one file
 per group of functions: `printf.c`, `format.c`, `fdigits.c`, `scanf.c`,
-`string.c`, `malloc.c`, `math.c`, `gfx.c` and `gfx_text.c` for the RGB
+`string.c`, `malloc.c`, `math.c`, `gfx.c`, `gfx_text.c` and `gfx_image.c` for the RGB
 screen, ...), `local.h` (shared by the library
 files only) and two assembly files: `runtime.asm` (`_pow2`, `_udiv`,
 `_umod`, `_Exit`) and `setjmp.asm`.

@@ -26,20 +26,21 @@ def run_headless(cpu: CPU, max_steps: int, trace: bool, keys: str = "",
     if keys:
         cpu.bus.keyboard.type(keys)
     steps = 0
-    while steps < max_steps:
+    while trace and steps < max_steps:
         step = cpu.step()
         if step is None:
             break
-        if trace:
-            operand = "" if step.operand is None else f" 0x{step.operand:08X}"
-            print(f"0x{step.address:05X}  {step.word:08X}{operand:11s} "
-                  f"{step.text:<20s} {step.note}")
+        operand = "" if step.operand is None else f" 0x{step.operand:08X}"
+        print(f"0x{step.address:07X}  {step.word:08X}{operand:11s} "
+              f"{step.text:<20s} {step.note}")
         steps += 1
+    if not trace:
+        cpu.run(max_steps)
 
     state = "HALTED" if cpu.halted else ("STOPPED: " + cpu.error) if cpu.stopped \
         else "step limit reached"
     print(f"\n--- {state} after {cpu.instructions} instructions ---")
-    print("IAR 0x%05X   flags %s   ESP 0x%04X   EBP 0x%04X"
+    print("IAR 0x%07X   flags %s   ESP 0x%04X   EBP 0x%04X"
           % (cpu.iar, cpu.flag_text, cpu.esp, cpu.ebp))
     for i in range(0, 16, 4):
         print("  " + "  ".join(f"R{j:<2d} 0x{cpu.regs[j]:08X}" for j in range(i, i + 4)))

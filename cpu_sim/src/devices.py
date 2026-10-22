@@ -5,6 +5,7 @@ INADDR selects the input device, INDATA consumes one word from it.
 The CPU gets no feedback: talking to a device that is not there does nothing.
 """
 
+import time
 from collections import deque
 
 import config as config
@@ -55,6 +56,37 @@ class Keyboard:
 
     def clear(self) -> None:
         self.buffer.clear()
+
+
+class Timer:
+    """Input device at 0x7C: milliseconds since the last reset, wrapping at
+    32 bits (C's clock()). It follows the computer's own clock, so a program
+    runs at the right speed however fast it is simulated; the window stops
+    it while the simulation is paused. clock: a function giving seconds."""
+
+    def __init__(self, clock=time.perf_counter):
+        self.clock = clock
+        self.frozen = None          # the clock's reading when it was paused
+        self.start = clock()
+
+    def read(self) -> int:
+        now = self.clock() if self.frozen is None else self.frozen
+        return int((now - self.start) * 1000) & config.WORD_MASK
+
+    def pause(self) -> None:
+        if self.frozen is None:
+            self.frozen = self.clock()
+
+    def resume(self) -> None:
+        if self.frozen is not None:
+            self.start += self.clock() - self.frozen
+            self.frozen = None
+
+    def reset(self) -> None:
+        """Back to 0; a paused timer stays paused."""
+        self.start = self.clock()
+        if self.frozen is not None:
+            self.frozen = self.start
 
 
 class Video:
@@ -110,6 +142,7 @@ class DeviceBus:
         self.display = Display()
         self.keyboard = Keyboard()
         self.video = Video()
+        self.timer = Timer()
         self.hex_value = None          # None = nothing sent yet (display blank)
         self.out_addr = 0
         self.in_addr = 0
@@ -136,6 +169,8 @@ class DeviceBus:
         so the register keeps its value.  The keyboard gives 0 when empty."""
         if self.in_addr == config.KEYBOARD_ADDR:
             return self.keyboard.read()
+        if self.in_addr == config.TIMER_ADDR:
+            return self.timer.read()
         return None
 
     def reset(self) -> None:
@@ -145,3 +180,4 @@ class DeviceBus:
         self.keyboard.clear()
         self.video.clear()
         self.video.used = False
+        self.timer.reset()

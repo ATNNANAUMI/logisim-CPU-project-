@@ -194,7 +194,7 @@ def enum_type():
 
 
 def pointer_to(base):
-    # Addresses fit in 17 bits, so pointers compare correctly as signed ints
+    # Addresses fit in 25 bits, so pointers compare correctly as signed ints
     # (the cheaper compare on this CPU).
     return Type("ptr", 1, False, base=base)
 

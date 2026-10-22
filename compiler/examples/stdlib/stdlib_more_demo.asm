@@ -6,7 +6,7 @@
 ;
 ; Expected output:
 ;   move:   ababcd babcdd
-;   malloc: 98305 98310 98305 98305 0
+;   malloc: 25165825 25165830 25165825 25165825 0
 ;   rand:   16838 5758 10113
 ;   string: -1 1 0 -1 6 foobar 2 -1
 ;   chars:  Q q 5 1 0 1 0
@@ -61,18 +61,18 @@ start:
         CALL print_string, 1
         CALL print_newline
 
-; ---- malloc / free: addresses as decimal (98305 = 0x18001)
+; ---- malloc / free: addresses as decimal (25165825 = 0x1800001)
         DATA R0, t_malloc
         STK PUSH
         CALL print_string, 1
-        DATA R0, 4                  ; p1 = malloc(4)  -> 0x18001
+        DATA R0, 4                  ; p1 = malloc(4)  -> 0x1800001
         STK PUSH
         CALL malloc, 1
         DATA R1, p1
         ST R1, R0
         STK PUSH
         CALL say, 1
-        DATA R0, 10                 ; p2 = malloc(10) -> 0x18006
+        DATA R0, 10                 ; p2 = malloc(10) -> 0x1800006
         STK PUSH
         CALL malloc, 1
         DATA R1, p2

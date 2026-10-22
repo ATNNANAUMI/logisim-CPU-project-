@@ -21,13 +21,13 @@ from dataclasses import dataclass
 
 import encoding as enc
 from errors import AsmError, AsmErrors
+from linker import ROM_SIZE
 from objfile import ObjectFile, Reloc
 from parser import (MASK, NAME_RE, is_register, parse_expression,
                     parse_register, parse_string, split_operands,
                     split_statement, split_sub_operation, strip_comment)
 
 INT_MIN = -(1 << 31)
-ROM_SIZE = 0x10000
 
 
 @dataclass

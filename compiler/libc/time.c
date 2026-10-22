@@ -1,4 +1,7 @@
-/* time, clock: the CPU has no clock, so both say "not available" (-1) */
+/* time, clock: clock() reads the timer, in milliseconds since reset (it
+ * wraps after about 25 days of running as a long); there is no calendar, so
+ * time() says "not available" (-1) */
+#include <cpu.h>
 #include <time.h>
 
 time_t time(time_t *t)
@@ -10,5 +13,5 @@ time_t time(time_t *t)
 
 clock_t clock(void)
 {
-    return -1;
+    return device_in(TIMER_DEVICE);
 }

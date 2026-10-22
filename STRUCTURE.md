@@ -25,11 +25,11 @@ logisim-CPU-project-/
 ├── README.md                 short overview + quick start
 ├── TECHNICAL.md              full technical reference (ISA, circuit, sim, asm, stdlib, open questions, outdated list)
 ├── STRUCTURE.md              this file
-├── run.py                    single entry point: `python run.py [asm|sim|build|test] ...` (menu if no args)
+├── run.py                    single entry point: `python run.py [asm|sim|build|test|img] ...` (menu if no args)
 ├── check_docs.py             checks the docs against the repo (paths exist, examples and TWEAKS listed); part of `run.py test`
 │
 ├── logisim/
-│   ├── CPU.circ              THE CIRCUIT. Top-level circuit = "PC" (has an unwired RGB Video placeholder)
+│   ├── CPU.circ              THE CIRCUIT. Top-level circuit = "PC" (RGB Video fed by RGB_Display)
 │   ├── run_rom.py            patches a .rom into the ROM inside subcircuit "RAM", runs Logisim headless, prints TTY
 │   └── cpu datas/            old notes: stack micro-steps, personal TODO
 │
@@ -45,7 +45,7 @@ logisim-CPU-project-/
 │   │   ├── objfile.py        ObjectFile / Reloc (abs|rel, rom_only for CALL targets), saved as JSON (.obj)
 │   │   ├── linker.py         .obj files → ROM image; --lib: only the needed parts; checks externs/RAM calls; format_raw(), format_map()
 │   │   ├── errors.py         AsmError (file:line: message), AsmErrors (batch)
-│   │   ├── selftest.py       19 checks (incl. building every compiler/examples program)
+│   │   ├── selftest.py       20 checks (incl. building every compiler/examples program)
 │   │   └── asm_grammar.py    generates railroad-diagram HTML of the grammar (needs railroad-diagrams)
 │   ├── src/cc/               C compiler (run as `python compiler/src/cc <cmd>`); imports src/asm's modules
 │   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; run: --keys --steps --stats --trace)
@@ -58,10 +58,20 @@ logisim-CPU-project-/
 │   │   ├── peephole.py       clean-ups per function
 │   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0, link, run in simulator
 │   │   ├── cerror.py         CError (file:line:col: error: ...)
-│   │   ├── selftest.py       14 checks (incl. every tests/ program against gcc's output)
+│   │   ├── selftest.py       15 checks (incl. every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
 │   │                         fuzz.py: random programs, gcc vs tiny C
-│   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, ...),
+│   ├── src/img/              PNG -> compressed image for gfx_image() (run as `python compiler/src/img pic.png`)
+│   │   ├── __main__.py       CLI: writes pic.h (static const array) next to the PNG; --size --colors --dither --preview
+│   │   ├── imagefile.py      PNG reader (every colour type and depth, not interlaced) and writer, area-average resize
+│   │   ├── palette.py        RGB565 (truncated like GFX_RGB), median cut + k-means (fit_colors), Floyd-Steinberg
+│   │   ├── video.py          a video (ffmpeg) or PNG folder -> clip.h of frames for video_player.c: one shared
+│   │   │                     palette, frame 0 whole, later frames only the changed pixels (rest transparent)
+│   │   ├── codec.py          THE FORMAT (docstring): palette + bit stream of literals and runs
+│   │   │                     (previous pixel, above, above-left, above-right; gamma lengths), or packed
+│   │   │                     indices when that is smaller (b bits a pixel); encode, decode
+│   │   └── selftest.py       10 checks (incl. gfx_image() on the simulator against codec.decode, video_player.c)
+│   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod, _Exit), setjmp.asm
 │   ├── examples/
 │   │   ├── programs/         hello, print_a-z, count_0-9, sum_1-10, abs_value, stack_reverse, echo (no stdlib); guess, untested (with stdlib)
@@ -71,6 +81,8 @@ logisim-CPU-project-/
 │   │   ├── stdlib/stdlib_more_demo.asm   the functions added 2026-10-03 (no typing, no hex display)
 │   │   ├── two_files/main.asm, lib.asm   multi-file linking example
 │   │   ├── c/                C examples: hello, primes, structs, guess (input), gfx_demo (RGB screen); circuit_test (self-checking, for the circuit)
+│   │   │                     image_demo (gfx_image) with c/images/: mandelbrot, smiley (.png + the .h made from it)
+│   │   │                     video_player (plays a video.py .h on time with clock()) with c/videos/demo (.mp4 + .h)
 │   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
 │   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag),
 │   │                         diag14, diag15 (float division by zero, NaN, INT out of range),
@@ -85,12 +97,12 @@ logisim-CPU-project-/
     │   ├── isa.py            decode(), disassemble(), opcode tables
     │   ├── alu.py            int_op(), float_op() → (R0 value, flags)
     │   ├── memory.py         ROM/RAM banks, v2.0 raw loader
-    │   ├── devices.py        Display (0x5C), Keyboard (0xF0, empty reads 0), Video (RGB 0x6C, clear 0x6D), DeviceBus (+ hex display value, 0x3C)
-    │   ├── cpu.py            CPU: step(), run(), reset(), stack ops, COMM
+    │   ├── devices.py        Display (0x5C), Keyboard (0xF0, empty reads 0), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), DeviceBus (+ hex display value, 0x3C)
+    │   ├── cpu.py            CPU: step() (traced), run() (fast loop), reset(), stack ops, COMM
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png]`
-    │   └── selftest.py       18 checks
+    │   └── selftest.py       22 checks
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -103,12 +115,13 @@ PC (top)                  has the output pin `halt` that ends headless runs at H
 │   ├── ALU → FPU         integer ops + float unit (hand-built IEEE-754 path + Logisim FP components)
 │   ├── ACC, TMP          ALU latches
 │   ├── FLAG_REG          C A N Z
-│   ├── IAR               17-bit counter (T flip-flops)
+│   ├── IAR               17-bit counter (T flip-flops); the toolchain now wants 25 (TECHNICAL 2.4)
 │   └── INTRUCTION_REGISTER  16-bit
-├── RAM                   memory system: MAR(17), ROM 64K×32 (PROGRAM LIVES HERE), RAM 64K×32, ESP/EBP (14-bit)
+├── RAM                   memory system: MAR(17), ROM 64K×32 (PROGRAM LIVES HERE), RAM 64K×32, ESP/EBP (14-bit); still 16-bit banks
 ├── display               text TTY at 0x5C
 ├── NUMBER_DISPLAY        8 hex digits at 0x3C
-└── KEYBOARD              keyboard at 0xF0
+├── KEYBOARD              keyboard at 0xF0
+└── RGB_Display           RGB Video at 0x6C (x, y, colour from one word; Video's enable tied to 1). No 0x6D clear yet
 Unused subcircuits: ROM, program_loader, sign_controller, teste
 ```
 
@@ -117,9 +130,13 @@ The design follows the "But How Do It Know?" style: a single bus,
 
 ## ISA cheat sheet
 
-* 32-bit words. 16 registers `R0`–`R15`. 17-bit addresses: bit 16 = RAM.
-  ROM `0x00000–0x0FFFF` (read-only), stack = RAM `0x10000–0x13FFF`, linker
-  data from `0x14000`.
+* 32-bit words. 16 registers `R0`–`R15`. 25-bit addresses, 16M words per
+  bank: bit 24 = RAM. ROM `0x0000000–0x0FFFFFF` (read-only), stack = RAM
+  `0x1000000–0x1003FFF`, linker data from `0x1004000`, end of RAM
+  `0x1FFFFFF`. The memory map lives in `linker.py` and `config.py` (and
+  `malloc.c`/`stdlib.asm` write down the end of RAM). **The circuit still
+  has the 16-bit map** (bit 16 = RAM, 64K words per bank) and can't run
+  these programs until it is widened (TECHNICAL 2.4); `run_rom.py` refuses.
 * Instruction: `bit14 IMM | bit13 FLOAT | bit12 ALU | 11..8 opcode | 7..4 RA | 3..0 RB`.
   Groups: `0x0` system, `0x1` int ALU, `0x3` float ALU, `0x5`/`0x7` = with an
   immediate (the next word).
@@ -147,13 +164,19 @@ The design follows the "But How Do It Know?" style: a single bus,
 * Jumps are relative to the **address of the offset word**. `RJF` = any
   listed flag on, `RJNF` = any listed flag off. Mask: C=8 A=4 N=2 Z=1.
 * Stack grows up. `STK PUSH/POP` use R0. `STK CALL/RET` only move the frame
-  (no jump). `STK SET/GET, RB` = `stack[EBP+RB]`; that sum wraps at 16 bits,
-  across the whole RAM (EBP=0, RB=-1 → last RAM word `0x1FFFF`; measured,
-  `diag11`/`diag16`, and the simulator matches).
+  (no jump). `STK SET/GET, RB` = `stack[EBP+RB]`; that sum wraps at the RAM's
+  address width, across the whole RAM (EBP=0, RB=-1 → last RAM word
+  `0x1FFFFFF`; measured at 16 bits on the circuit, `diag11`/`diag16`).
 * `COMM INDATA|INADDR|OUTDATA|OUTADDR, RB`. Display `0x5C`, number display
-  `0x3C`, keyboard `0xF0` (empty reads 0). RGB screen (planned wiring, in
-  the simulator and `gfx.h`): `0x6C` one pixel per word (x bits 31–24, y
-  23–16, RGB565 15–0), `0x6D` clears.
+  `0x3C`, keyboard `0xF0` (empty reads 0). RGB screen: `0x6C` one pixel per
+  word (x bits 31–24, y 23–16, RGB565 15–0), `0x6D` clears (simulator only:
+  not built on the circuit yet). Pictures: `compiler/src/img` compresses
+  a PNG (palette + runs, about 10–60× smaller than a word per pixel),
+  `gfx_image()` draws it (32–50 instructions a pixel). Timer (planned, in
+  the simulator and C's `clock()`): `0x7C`, `INDATA` = milliseconds since
+  reset (real time in the simulator, stopped while the window is paused).
+  Videos: `compiler/src/img/video.py` -> frames that `video_player.c` draws
+  on time (about 350k instructions a 128×96 frame: pypy3 keeps up at 12 fps).
 
 ## Assembler conventions
 
@@ -190,7 +213,7 @@ The design follows the "But How Do It Know?" style: a single bus,
   with a library name wins.
 * String literals and const globals are in ROM (writes ignored).
   Initialised globals are copied to RAM by per-file `_init_` routines that
-  crt0 calls before `main`; malloc's heap runs from `_end` to `0x1FFFF`.
+  crt0 calls before `main`; malloc's heap runs from `_end` to `0x1FFFFFF`.
 * stdin: a line at a time, echoed, backspace edits, Ctrl-D (0x04) = EOF.
 * Tests: `compiler/src/cc/tests/*.c` must print exactly gcc's output
   (`.expected`); `difftest.py` checks with gcc.
@@ -208,6 +231,9 @@ python compiler/src/cc run prog.c [--keys $'12\n'] [--stats]      # C: build + r
 python compiler/src/cc build prog.c [more.c x.asm] [-o prog.rom]   # C: -> compiler/ROM/prog.rom (+ prog.asm)
 python run.py build prog.c                                          # C or asm: build, then open the simulator
 python compiler/src/cc/tests/difftest.py [--update]                # C tests against gcc
+python compiler/src/img pic.png [--colors 16] [--size 64x]         # PNG -> pic.h for gfx_image(x, y, pic)
+python compiler/src/img/video.py clip.mp4 [--fps 10] [--seconds 5]  # video -> clip.h for video_player.c (needs ffmpeg)
+pypy3 compiler/src/cc run compiler/examples/c/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
 ```
 
 ## Open questions / gotchas

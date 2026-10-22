@@ -14,6 +14,10 @@ prints whatever the TTY component displays.
 prog.rom is the Logisim "v2.0 raw" image your linker already produces
 (count*value runs are passed through untouched).
 
+The toolchain lays programs out for 24-bit ROM and RAM addresses (RAM from
+0x1000000). A circuit whose ROM has fewer address bits can't run them, so
+this stops with a message instead (TECHNICAL.md 2.4 lists what to widen).
+
     --dump-rom out.rom    write the circuit's current ROM out as v2.0 raw
                           instead of running anything
 """
@@ -26,7 +30,7 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-HEADER = "addr/data: 16 32"
+BANK_BITS = 24          # the toolchain's bank width (compiler/src/asm/linker.py)
 SYSTEM_JAR = Path("/usr/share/java/logisim-evolution/logisim-evolution.jar")
 
 
@@ -39,7 +43,8 @@ def default_jar():
 
 
 def find_rom(tree):
-    """The ROM component that holds the program: lib 5 'ROM' inside circuit 'RAM'."""
+    """The ROM component that holds the program: lib 5 'ROM' inside circuit 'RAM'.
+    Returns its contents attribute and its address width."""
     for circuit in tree.getroot().findall("circuit"):
         if circuit.get("name") != "RAM":
             continue
@@ -47,10 +52,11 @@ def find_rom(tree):
                 if c.get("lib") == "5" and c.get("name") == "ROM"]
         if len(roms) != 1:
             sys.exit(f"expected exactly 1 ROM in the RAM subcircuit, found {len(roms)}")
-        for a in roms[0].findall("a"):
-            if a.get("name") == "contents":
-                return a
-        sys.exit("ROM component has no contents attribute")
+        attrs = {a.get("name"): a for a in roms[0].findall("a")}
+        if "contents" not in attrs:
+            sys.exit("ROM component has no contents attribute")
+        width = attrs.get("addrWidth")
+        return attrs["contents"], int(width.get("val")) if width is not None else 8
     sys.exit("no subcircuit named RAM")
 
 
@@ -60,7 +66,7 @@ def rom_to_raw(text):
     return "v2.0 raw\n" + "\n".join(body) + "\n"
 
 
-def raw_to_contents(raw):
+def raw_to_contents(raw, addr_bits):
     lines = [ln.strip() for ln in raw.strip().splitlines()]
     if lines and lines[0].lower().startswith("v2.0"):
         lines = lines[1:]
@@ -70,7 +76,7 @@ def raw_to_contents(raw):
     bad = [w for w in words if not re.fullmatch(r"(\d+\*)?[0-9a-fA-F]+", w)]
     if bad:
         sys.exit(f"not a v2.0 raw image, unexpected token: {bad[0]!r}")
-    out = [HEADER]
+    out = [f"addr/data: {addr_bits} 32"]
     for i in range(0, len(words), 8):
         out.append(" ".join(words[i:i + 8]))
     return "\n".join(out) + "\n"
@@ -88,7 +94,7 @@ def main():
     args = p.parse_args()
 
     tree = ET.parse(args.circ)
-    attr = find_rom(tree)
+    attr, addr_bits = find_rom(tree)
 
     if args.dump_rom:
         Path(args.dump_rom).write_text(rom_to_raw(attr.text))
@@ -98,7 +104,11 @@ def main():
     if not args.rom:
         p.error("need a .rom image (or --dump-rom)")
 
-    attr.text = raw_to_contents(Path(args.rom).read_text())
+    if addr_bits < BANK_BITS:
+        sys.exit(f"{args.circ}: the ROM has {addr_bits} address bits, but programs are now "
+                 f"built for {BANK_BITS} (RAM at 0x{1 << BANK_BITS:X}); widen the circuit "
+                 "first (TECHNICAL.md 2.4)")
+    attr.text = raw_to_contents(Path(args.rom).read_text(), addr_bits)
     patched = Path(args.keep or (Path(args.circ).stem + "__patched.circ"))
     tree.write(patched, encoding="UTF-8", xml_declaration=True)
 

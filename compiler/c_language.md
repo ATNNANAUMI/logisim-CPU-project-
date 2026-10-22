@@ -66,7 +66,7 @@ The CPU addresses 32-bit words, not bytes. So every scalar type is one word:
 | `unsigned short`, `unsigned`, `unsigned long` | 1 | 0 .. 4294967295 |
 | `_Bool` | 1 | 0 or 1 |
 | `float`, `double`, `long double` | 1 | IEEE-754 single precision (the CPU's float unit) |
-| pointers | 1 | a 17-bit address: ROM `0x00000`-`0x0FFFF`, RAM `0x10000`-`0x1FFFF` |
+| pointers | 1 | a 25-bit address: ROM `0x0000000`-`0x0FFFFFF`, RAM `0x1000000`-`0x1FFFFFF` |
 | `enum` | 1 | `int` |
 
 * `CHAR_BIT` is 32 and `sizeof(char) == sizeof(int) == 1`. This is allowed
@@ -140,9 +140,9 @@ GNU statement expressions `({ ... })`, `a ?: b`, `_Thread_local`, `_Atomic`.
 ROM  0x00000   RJMP start (from the linker)
                crt0, your code, the library code, string literals, const data,
                and the starting values of initialised globals
-RAM  0x10000   the stack (16K words), grows upward
-     0x14000   global and static variables
-     _end      the heap (malloc) up to 0x1FFFF
+RAM  0x1000000 the stack (16K words), grows upward
+     0x1004000 global and static variables
+     _end      the heap (malloc) up to 0x1FFFFFF
 ```
 
 * `start` (in the generated start-up code, crt0) calls each file's
@@ -210,6 +210,7 @@ power function is `ipow`, so it doesn't clash with C's `pow`.)
 | `show_hex(v)` | shows v on the 8-digit hex display (device `0x3C`) |
 | `key_pressed()` | the next key if one was typed, else 0: no waiting, no echo |
 | `wait_key()` | waits for one key and returns it, no echo |
+| `wait_ms(ms)` | does nothing for `ms` milliseconds (the timer, device `0x7C`) |
 | `device_out(d, v)` / `device_in(d)` | raw `COMM` to any device (`__builtin_out`, `__builtin_in`) |
 | `halt()` | stops the CPU (`__builtin_trap()`) |
 
@@ -236,6 +237,29 @@ screen, which can't be read back.
 | `gfx_char(x, y, ch, fg, bg)` | a 5×7 character in a 6×8 cell (`bg` = `GFX_NONE`: transparent); returns the next x |
 | `gfx_text(x, y, s, fg, bg)` | a string, `\n` goes to the next row under x; returns the x after it |
 | `gfx_bitmap(x, y, w, h, pixels)` | `w*h` colours row by row, `GFX_NONE` ones skipped |
+| `gfx_image(x, y, img)` | a compressed picture, top-left corner at (x, y); returns 0, or -1 if `img` isn't one. `GFX_IMAGE_WIDTH(img)`, `GFX_IMAGE_HEIGHT(img)`: its size |
+
+Pictures: `python compiler/src/img picture.png` writes `picture.h` next to
+the PNG, holding `static const unsigned int picture[]` (in ROM once
+compiled), so a program can do
+
+```c
+#include <gfx.h>
+#include "picture.h"
+...
+    gfx_image(0, 0, picture);
+```
+
+The picture is stored with a palette of up to 256 colours and runs of
+pixels copied from a neighbour: about 10–60 times smaller than one word per
+pixel (a 128×128 picture: 270–1800 words instead of 16 384), and never more
+than the bits a palette index needs (black and white: 32 pixels a word, as
+for a dithered photo, where runs don't help). Pictures with
+more colours are reduced (`--colors N` for fewer and smaller, `--dither`);
+bigger ones are shrunk to fit the screen (`--size WxH` to choose);
+transparent pixels (PNG alpha) are left out when drawing. At most 256
+pixels wide. Drawing costs 32–50 instructions a pixel. More in TECHNICAL.md
+7.4; see `compiler/examples/c/image_demo.c`.
 
 `cc run --screen out.png` saves the screen after the run; the simulator
 window shows it in its "RGB screen" tab.
@@ -301,8 +325,9 @@ integer exponent and a few units off otherwise.
 
 **Others:** `assert` (prints the failed condition and aborts), `errno`,
 `setjmp`/`longjmp`, `signal`/`raise` (a handler runs only for `raise`),
-`setlocale` (the "C" locale), `time` and `clock` (return -1: the CPU has
-no clock).
+`setlocale` (the "C" locale), `clock()` (milliseconds since reset, from
+the timer at device `0x7C`; `CLOCKS_PER_SEC` is 1000) and `time` (returns
+-1: there is no calendar).
 
 
 ## 8. Speed

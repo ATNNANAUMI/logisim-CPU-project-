@@ -267,6 +267,36 @@ def check_mixed_with_assembly():
     assert out == "41\n", out
 
 
+def check_big_memory():
+    """24-bit banks: a ROM table, a RAM array and a malloc block each larger
+    than the old 64K-word banks, and a call to code placed above them."""
+    with tempfile.TemporaryDirectory() as tmp:
+        main = Path(tmp) / "main.c"
+        far = Path(tmp) / "far.c"              # linked after main's table
+        main.write_text(r"""
+            #include <stdio.h>
+            #include <stdlib.h>
+            static const int table[70000] = {7, 8};
+            int big[70000];
+            int twice(int x);
+            int main(void)
+            {
+                int *p = malloc(100000 * sizeof(int));
+                big[69999] = 5;
+                p[99999] = 6;
+                printf("%d %d %d %d %d\n", table[1], table[69999], big[69999],
+                       p[99999], twice(21));
+                printf("%d %d %d %d\n", (unsigned)&table[69999] > 0xFFFF,
+                       (unsigned)twice > 0xFFFF, (unsigned)&big[69999] > 0x1FFFF,
+                       (unsigned)p >= 0x1000000);
+                return 0;
+            }""")
+        far.write_text("int twice(int x) { return x * 2; }\n")
+        program, _ = driver.build([str(main), str(far)])
+    cpu, out = driver.run_in_simulator(program.rom)
+    assert out == "8 0 5 6 42\n1 1 1 1\n", out
+
+
 def check_command_line():
     with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
         tmp = Path(tmp)
@@ -337,6 +367,7 @@ CHECKS = [
     check_library_override,
     check_names_the_assembler_reserves,
     check_mixed_with_assembly,
+    check_big_memory,
     check_command_line,
     check_line_info,
     check_programs,
