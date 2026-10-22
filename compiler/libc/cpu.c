@@ -1,4 +1,4 @@
-/* cpu.h: the hex display and direct keyboard access */
+/* cpu.h: the hex display, direct keyboard access and waiting */
 #include <cpu.h>
 
 void show_hex(unsigned int value)
@@ -18,4 +18,11 @@ int wait_key(void)
         c = __builtin_in(KEYBOARD_DEVICE);
     while (c == 0);
     return c;
+}
+
+void wait_ms(unsigned int ms)
+{
+    unsigned int start = __builtin_in(TIMER_DEVICE);
+    while ((unsigned int)__builtin_in(TIMER_DEVICE) - start < ms)
+        ;
 }

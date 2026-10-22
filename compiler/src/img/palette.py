@@ -80,6 +80,15 @@ def kmeans(counts, centers, rounds):
     return centers
 
 
+def fit_colors(counts, n, rounds=3):
+    """At most n RGB565 colours that stand for counts (a Counter of RGB565
+    colours): median cut, then a few rounds of k-means."""
+    if len(counts) <= n:
+        return sorted(counts)
+    centers = kmeans(counts, median_cut(counts, n), rounds)
+    return sorted({to565(*(round(v) for v in c)) for c in centers})
+
+
 def make_palette(pixels, width, max_colors=256, dither=False, rounds=3):
     """Fit pixels ((r, g, b, a) tuples, rows of width; alpha below 128 is
     transparent) into
@@ -101,8 +110,7 @@ def make_palette(pixels, width, max_colors=256, dither=False, rounds=3):
         chosen = list(counts)
         mapped = colors
     else:
-        centers = kmeans(counts, median_cut(counts, slots), rounds)
-        chosen = sorted({to565(*(round(v) for v in c)) for c in centers})
+        chosen = fit_colors(counts, slots, rounds)
         if dither:
             mapped = _dither(pixels, width, colors, chosen)
         else:

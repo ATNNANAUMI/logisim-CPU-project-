@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # four self-check suites (assembler 20, simulator 21, C compiler 15, image tool 9), then check_docs.py
+python run.py test                                   # four self-check suites (assembler 20, simulator 22, C compiler 15, image tool 10), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
@@ -33,6 +33,8 @@ python compiler/src/cc build prog.c [more.c x.asm] [-o name.rom] [--map] [--lib 
 python compiler/src/cc compile prog.c [-o prog.asm]                   # C -> assembly only
 
 python compiler/src/img pic.png [-o pic.h] [--size WxH] [--colors N] [--dither] [--preview p.png]   # PNG -> compressed pic.h for gfx_image()
+python compiler/src/img/video.py clip.mp4 [-o clip.h] [--fps N] [--seconds S] [--colors N] [--tolerance T] [--preview dir/]   # video (ffmpeg) or PNG folder -> frames for video_player.c
+pypy3 compiler/src/cc run compiler/examples/c/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000   # play ./clip.h on time (waiting burns instructions: big --steps)
 ```
 
 `run_rom.py` finds the jar via `$LOGISIM_JAR` or the Arch package path. A circuit run stops at `HALT` (printing `--- halted at HALT ---`) because Logisim's headless mode watches the output pin labelled `halt` in the top-level `PC` circuit; keep that pin and its label if the circuit is reworked. The `circuit-check` skill (`.claude/skills/`) covers comparing the simulator with the circuit.
@@ -47,7 +49,7 @@ The ISA is encoded in two independent places that must stay in sync: `compiler/s
 
 C: `compiler/src/cc/` (preprocessor → parser/type checker → `codegen.py` + `regalloc.py` + `peephole.py`) writes assembly text, which `driver.py` feeds to `compiler/src/asm`'s assembler and links with a generated crt0 and the C library (`compiler/libc/`, compiled once and cached in `compiler/ROM/libc/`; only the files a program needs are linked). Every program in `compiler/src/cc/tests/` must print exactly what gcc's build prints (`.expected` files come from gcc); keep test programs free of undefined behaviour and of type sizes. `compiler/examples/c/circuit_test.c` checks the compiler's tricky code paths on the circuit.
 
-Pictures: `compiler/src/img/` turns a PNG into a `.h` holding a compressed image (palette + a bit stream of literals and runs, format in `codec.py`'s docstring); `gfx_image()` in `compiler/libc/gfx_image.c` decodes it onto the RGB screen. The two decoders (`codec.decode`, the reference, and the C one) must stay in sync; the img self-check compares them pixel by pixel.
+Pictures: `compiler/src/img/` turns a PNG into a `.h` holding a compressed image (palette + a bit stream of literals and runs, format in `codec.py`'s docstring); `gfx_image()` in `compiler/libc/gfx_image.c` decodes it onto the RGB screen. The two decoders (`codec.decode`, the reference, and the C one) must stay in sync; the img self-check compares them pixel by pixel. Videos: `compiler/src/img/video.py` makes every frame an ordinary picture (one palette shared by all frames, frame 0 whole, later frames only the pixels that changed, the rest transparent) and `compiler/examples/c/video_player.c` draws frame i when `clock()` reaches i × 1000 / fps. `clock()` reads the timer device `0x7C` (milliseconds since reset; planned wiring, not on the circuit), which the simulator takes from the computer's real clock and the window stops while paused.
 
 `compiler/src/asm/`, `compiler/src/cc/`, `compiler/src/img/` and `cpu_sim/src/` import their sibling modules by plain name, so run files as scripts (or put the directory on `sys.path`), not as packages. The assembler, the C compiler and the image converter are invoked as directories (`python compiler/src/asm <cmd>`, `python compiler/src/cc <cmd>`, `python compiler/src/img pic.png`, via `__main__.py`).
 

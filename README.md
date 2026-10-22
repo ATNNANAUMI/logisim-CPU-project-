@@ -22,8 +22,8 @@ words each (the circuit itself still has the 16-bit version), four flags
 (`C A N Z`), a hardware stack in the first 16K words of RAM, integer and
 IEEE-754 float ALUs, and I/O through a single `COMM` instruction: a text
 display at `0x5C`, a hex number display at `0x3C` and a keyboard at `0xF0`
-(plus a 128×128 RGB screen at `0x6C`, wiring planned; the simulator and C's
-`gfx.h` already use it).
+(plus a 128×128 RGB screen at `0x6C` and a millisecond timer at `0x7C`,
+wiring planned; the simulator and C's `gfx.h` and `clock()` already use them).
 Every ALU result goes to **R0**.
 
 ## Requirements
@@ -44,6 +44,7 @@ python run.py asm   prog.asm lib.asm            # -> compiler/ROM/prog.rom
 python run.py sim   compiler/ROM/prog.rom
 python run.py build prog.asm lib.asm            # assemble, then open the simulator
 python run.py img   picture.png                 # -> picture.h, a compressed picture for gfx_image()
+python run.py video clip.mp4 --fps 10           # -> clip.h, frames for video_player.c (needs ffmpeg)
 ```
 
 Or call the tools directly:
@@ -77,6 +78,8 @@ smaller than one word per pixel):
 
 ```
 python compiler/src/img picture.png             # -> picture.h; #include it, then gfx_image(x, y, picture)
+python compiler/src/img/video.py clip.mp4           # -> clip.h next to it (needs ffmpeg)
+pypy3 compiler/src/cc run compiler/examples/c/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
 python compiler/src/cc run compiler/examples/c/image_demo.c --screen out.png
 ```
 
@@ -122,7 +125,7 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 | `logisim/run_rom.py` | load a ROM into the circuit and run Logisim headless |
 | `compiler/src/asm/` | assembler, linker, self-checks |
 | `compiler/src/cc/` | C compiler, self-checks, test programs compared with gcc (`tests/`) |
-| `compiler/src/img/` | image converter: PNG -> compressed picture for `gfx_image()` (`gfx.h`) |
+| `compiler/src/img/` | image converter: PNG -> compressed picture for `gfx_image()` (`gfx.h`); `video.py`: a video -> frames for `video_player.c` |
 | `compiler/libc/` | the C library: headers (`include/`), C and assembly sources |
 | `compiler/examples/` | example programs (assembly, and C in `c/`), the standard library (`stdlib/stdlib.asm`), circuit diagnostics |
 | `compiler/ROM/` | build output for ROM images (ignored by git) |

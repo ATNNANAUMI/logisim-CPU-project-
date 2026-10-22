@@ -64,11 +64,13 @@ logisim-CPU-project-/
 │   ├── src/img/              PNG -> compressed image for gfx_image() (run as `python compiler/src/img pic.png`)
 │   │   ├── __main__.py       CLI: writes pic.h (static const array) next to the PNG; --size --colors --dither --preview
 │   │   ├── imagefile.py      PNG reader (every colour type and depth, not interlaced) and writer, area-average resize
-│   │   ├── palette.py        RGB565 (truncated like GFX_RGB), median cut + k-means, Floyd-Steinberg
+│   │   ├── palette.py        RGB565 (truncated like GFX_RGB), median cut + k-means (fit_colors), Floyd-Steinberg
+│   │   ├── video.py          a video (ffmpeg) or PNG folder -> clip.h of frames for video_player.c: one shared
+│   │   │                     palette, frame 0 whole, later frames only the changed pixels (rest transparent)
 │   │   ├── codec.py          THE FORMAT (docstring): palette + bit stream of literals and runs
 │   │   │                     (previous pixel, above, above-left, above-right; gamma lengths), or packed
 │   │   │                     indices when that is smaller (b bits a pixel); encode, decode
-│   │   └── selftest.py       9 checks (incl. gfx_image() on the simulator against codec.decode)
+│   │   └── selftest.py       10 checks (incl. gfx_image() on the simulator against codec.decode, video_player.c)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod, _Exit), setjmp.asm
 │   ├── examples/
@@ -80,6 +82,7 @@ logisim-CPU-project-/
 │   │   ├── two_files/main.asm, lib.asm   multi-file linking example
 │   │   ├── c/                C examples: hello, primes, structs, guess (input), gfx_demo (RGB screen); circuit_test (self-checking, for the circuit)
 │   │   │                     image_demo (gfx_image) with c/images/: mandelbrot, smiley (.png + the .h made from it)
+│   │   │                     video_player (plays a video.py .h on time with clock()) with c/videos/demo (.mp4 + .h)
 │   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
 │   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag),
 │   │                         diag14, diag15 (float division by zero, NaN, INT out of range),
@@ -94,12 +97,12 @@ logisim-CPU-project-/
     │   ├── isa.py            decode(), disassemble(), opcode tables
     │   ├── alu.py            int_op(), float_op() → (R0 value, flags)
     │   ├── memory.py         ROM/RAM banks, v2.0 raw loader
-    │   ├── devices.py        Display (0x5C), Keyboard (0xF0, empty reads 0), Video (RGB 0x6C, clear 0x6D), DeviceBus (+ hex display value, 0x3C)
+    │   ├── devices.py        Display (0x5C), Keyboard (0xF0, empty reads 0), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), DeviceBus (+ hex display value, 0x3C)
     │   ├── cpu.py            CPU: step() (traced), run() (fast loop), reset(), stack ops, COMM
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png]`
-    │   └── selftest.py       21 checks
+    │   └── selftest.py       22 checks
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -168,7 +171,11 @@ The design follows the "But How Do It Know?" style: a single bus,
   the simulator and `gfx.h`): `0x6C` one pixel per word (x bits 31–24, y
   23–16, RGB565 15–0), `0x6D` clears. Pictures: `compiler/src/img` compresses
   a PNG (palette + runs, about 10–60× smaller than a word per pixel),
-  `gfx_image()` draws it (32–50 instructions a pixel).
+  `gfx_image()` draws it (32–50 instructions a pixel). Timer (planned, in
+  the simulator and C's `clock()`): `0x7C`, `INDATA` = milliseconds since
+  reset (real time in the simulator, stopped while the window is paused).
+  Videos: `compiler/src/img/video.py` -> frames that `video_player.c` draws
+  on time (about 350k instructions a 128×96 frame: pypy3 keeps up at 10 fps).
 
 ## Assembler conventions
 
@@ -224,6 +231,8 @@ python compiler/src/cc build prog.c [more.c x.asm] [-o prog.rom]   # C: -> compi
 python run.py build prog.c                                          # C or asm: build, then open the simulator
 python compiler/src/cc/tests/difftest.py [--update]                # C tests against gcc
 python compiler/src/img pic.png [--colors 16] [--size 64x]         # PNG -> pic.h for gfx_image(x, y, pic)
+python compiler/src/img/video.py clip.mp4 [--fps 10] [--seconds 5]  # video -> clip.h for video_player.c (needs ffmpeg)
+pypy3 compiler/src/cc run compiler/examples/c/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
 ```
 
 ## Open questions / gotchas

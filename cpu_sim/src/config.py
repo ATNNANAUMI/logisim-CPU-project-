@@ -43,6 +43,11 @@ VIDEO_CLEAR_ADDR = 0x6D
 VIDEO_WIDTH = 128              # powers of two (the extra x/y bits are not wired)
 VIDEO_HEIGHT = 128
 
+# Timer (planned wiring, not on the circuit yet): INDATA from TIMER_ADDR
+# reads milliseconds since reset, wrapping at 32 bits (C's clock()). The
+# simulator follows the computer's real clock and stops it while paused.
+TIMER_ADDR = 0x7C
+
 # ------------------------------------------------------------------ TWEAKS
 # A flag = "RA > RB".  Signed compare (True) or unsigned magnitude (False)?
 # Confirmed: signed.

@@ -214,10 +214,18 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 | `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08` |
 | `0x6C` | RGB screen (*planned wiring*) | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; on the 128×128 RGB Video only the low 7 bits of x and y are wired. Write-only |
 | `0x6D` | RGB screen clear (*planned*) | any word pulses the RGB Video's reset: all black |
+| `0x7C` | timer (*planned*) | `INDATA` reads the milliseconds since reset, wrapping at 32 bits; C's `clock()` |
 
 The RGB Video component is in `PC` but not wired yet; `0x6C`/`0x6D` are the
 wiring chosen for it (2026-10-11). The simulator and `gfx.h` follow it; the
 numbers are `VIDEO_*` in `config.py` and `GFX_*` in `gfx.h`.
+
+The timer (`0x7C`, 2026-10-22) isn't on the circuit at all yet. The
+simulator follows the computer's real clock, so a program that waits on it
+runs at the right speed however fast it is simulated; the window stops it
+while the simulation is paused (and while single-stepping). On the circuit
+it would be a 32-bit counter stepped every millisecond, so its input clock
+has to come from a divider matched to the CPU's clock rate.
 
 Each device compares the 8 low bits of the selected address against its own
 number with a gate decoder (the keyboard: bits 0–3 must be 0, bits 4–7 must
@@ -404,12 +412,12 @@ modules import each other by plain name, so run them as scripts
 | `isa.py` | opcode tables, `decode(word) -> Instr`, `disassemble(word, operand)`. `Instr.takes_operand` says whether a literal word follows |
 | `alu.py` | `int_op(name, a, b)` and `float_op(name, a, b)`, each returning `(R0 value, flag nibble)`; float32 ↔ bits helpers |
 | `memory.py` | `Memory` with two 16M-word banks (Python lists, 128 MB each), `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
-| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes), `Keyboard` (a deque; empty reads 0), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `DeviceBus` (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
+| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `DeviceBus` (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()`, `reset()`, `resume()` |
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 21 checks on the core |
+| `selftest.py` | 22 checks on the core |
 
 ### 3.2 Execution model
 
@@ -787,6 +795,7 @@ line is empty (so it can't erase the prompt).
 | `c/image_demo.c` | C: compressed pictures with `gfx_image` (7.4): a 128×128 Mandelbrot picture and a transparent 16×16 sprite from `c/images/` (the PNGs and the `.h` files made from them), clipped at the edges |
 | `c/structs.c` | C: an array of structs, `qsort`, `malloc`, `printf("%.2f")` |
 | `c/guess.c` | C: guess the number with `scanf`; seeded by how long the first key takes (`key_pressed`); the header has a transcript |
+| `c/video_player.c` | C: plays a video made by `compiler/src/img/video.py` (7.5) at its own speed, waiting on `clock()` (the timer); prints how many frames were late. Plays `c/videos/demo.h` (from `demo.mp4`, ffmpeg's moving test picture, 4 s); `-I . -D 'VIDEO="clip.h"'` plays `./clip.h` instead. Needs `--steps 2000000000` with `cc run` (waiting runs millions of instructions a second) |
 | `c/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, `~` on registers, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
 | `tests/diag10.asm` | `INT` on floats below 1 (diagnostic, resolved: they give 0) |
 | `tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x1004000`; they are also printed in hex |
@@ -838,13 +847,15 @@ lets you pick files from the project (it skips `.git`, `.venv`,
 | `python run.py build <files…> -o out.rom` | the same build, then opens the result in the simulator |
 | `python run.py test` | runs the four self-check suites, then `check_docs.py` |
 | `python run.py img <picture.png> [options]` | `compiler/src/img …`: the PNG -> a compressed `picture.h` for `gfx_image()` (7.4) |
+| `python run.py video <clip> [options]` | `compiler/src/img/video.py …`: a video (or a folder of PNG frames) -> `clip.h` for `video_player.c` (7.5) |
 
 It checks for `tkinter` before opening the window and prints install hints
 when it is missing. In the menu, the output of `asm`/`build` is the first
 source file with `.rom`; the menu offers `.asm` and `.c` files, leaving
 out the C library's own, the C compiler's test programs (`compiler/src/`)
 and build output (`compiler/ROM/`). For `img` it offers the project's `.png` files, then asks
-for the converter's options (Enter for none).
+for the converter's options (Enter for none); `video` does the same with the
+project's video files (`.mp4`, `.mkv`, `.webm`, `.mov`, `.avi`, `.gif`).
 
 ### 7.2 `logisim/run_rom.py`
 
@@ -885,12 +896,12 @@ python compiler/src/asm/selftest.py   # 20 checks: encodings, values, strings, j
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 21 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 22 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
                                       # floats, FCMP flags, keyboard, backspace, ADDR/JMRB,
                                       # float specials, float SHL, run() against step()
                                       # on random code, run() stopping at breakpoints,
-                                      # the top of both 16M-word banks
+                                      # the top of both 16M-word banks, the timer
 python compiler/src/cc/selftest.py    # 15 checks: preprocessor, error messages (several per run), warnings,
                                       # type sizes, exit/atexit, keyboard input, globals
                                       # after a reset, library override, reserved names,
@@ -898,11 +909,14 @@ python compiler/src/cc/selftest.py    # 15 checks: preprocessor, error messages 
                                       # table, RAM array, malloc, far code), CLI, C line
                                       # stepping, and every test program
                                       # in compiler/src/cc/tests/ against gcc's output
-python compiler/src/img/selftest.py   # 9 checks: gamma codes, encode/decode round trips
+python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode round trips
                                       # (both forms), the packed fallback,
                                       # bad input, PNG reading (every filter, colour type
                                       # and bit depth), resizing, palettes, CLI, and
-                                      # gfx_image() on the simulator against codec.decode()
+                                      # gfx_image() on the simulator against codec.decode(),
+                                      # and video.py: frames land on the screen as it says,
+                                      # PNG folder via the CLI, video_player.c on the
+                                      # simulator, a 1 s video through ffmpeg (if installed)
 python check_docs.py                  # 3 checks on the docs: every repo path they name
                                       # exists, every example (.asm, .c) is listed in
                                       # 5.3, every TWEAKS switch is in 3.4
@@ -969,6 +983,61 @@ simulator, far too slow for the circuit's 160 a second). About 15 of those
 go to sending the pixel; the rest is spread over small functions so that
 their loops keep their variables in registers (see the file's comment). `codec.decode()` is the reference: the self-check draws images
 with `gfx_image()` in the simulator and compares every pixel.
+
+### 7.5 Videos for the RGB screen (`compiler/src/img/video.py`)
+
+```
+python compiler/src/img/video.py clip.mp4 [-o clip.h] [--fps 10] [--size WxH] [--colors 32]
+                                 [--tolerance 16] [--start S] [--seconds S] [--max-frames N]
+                                 [--preview DIR]
+python compiler/src/img/video.py frames/ ...      (a folder of PNGs, in name order)
+```
+
+turns a video into a `.h` of compressed frames that
+`compiler/examples/c/video_player.c` plays at the video's speed. `ffmpeg`
+and `ffprobe` read the video (they must be installed; a folder of PNG frames
+needs neither): `--fps` frames a second (1–60), shrunk to fit 128×128 unless
+`--size` says otherwise, `--start`/`--seconds` take a part.
+
+* **One palette for every frame:** `--colors` (default 32) chosen over all
+  the frames' pixels (median cut + k-means, `palette.fit_colors`), no
+  dithering (it would flicker), so a pixel that keeps its colour keeps its
+  palette entry.
+* **Only what changed:** frame 0 is drawn whole. In every later frame a
+  pixel is transparent unless its colour is more than `--tolerance` (about
+  that much per channel, 0–255; 0 = any change) away from what the screen
+  shows there; the encoder keeps that screen as it goes. Transparent runs
+  cost a few bits.
+* **Each frame is an ordinary picture** in the 7.4 format, with its own
+  palette holding only the colours it draws (transparent first, then by
+  use), so a frame that changes little has few colours and few bits a pixel.
+  Every frame is decoded back and checked as it is written.
+* **The `.h`:** `VIDEO_FRAMES`, `VIDEO_FPS`, `VIDEO_WIDTH`, `VIDEO_HEIGHT`,
+  `video_data[]` (all frames, one after another) and `video_start[]` (where
+  each frame begins). One video per program. More than half the ROM (8M
+  words) is refused. `--preview DIR` saves every frame as the screen will
+  show it (PNG, 2×).
+
+The player clears the screen, then draws frame `i` with `gfx_image` when
+`clock()` reaches `i * 1000 / VIDEO_FPS` (the timer, 1.7), and waits out the
+last frame. A frame can't be skipped, since each one draws only what changed,
+so a player that falls behind stays behind until frames get cheaper; it
+counts the frames drawn more than one frame late.
+
+Measured, 4 s at 10 fps, 128×96 (12 288 words a frame at one word per pixel):
+
+| clip | colours | words a frame | instructions a frame |
+| --- | --- | --- | --- |
+| ffmpeg's `testsrc2` (moving test picture, `videos/demo.h`) | 32 | 222 | 354 000 |
+| the same, `--tolerance 0` / `--colors 16` | 32 / 16 | 232 / 198 | |
+| ffmpeg's `life` (Game of Life, much of it changing) | 31 | 523 | 462 000 |
+
+Drawing costs about 28 instructions a pixel even where nothing changed
+(`gfx_image` decodes and walks every pixel), so 10 frames a second needs
+about 4 million instructions a second: `pypy3` keeps up (0 frames late on
+the demo), plain `python` (about 2.7 MHz) doesn't, and the circuit (about
+2 kHz) would take minutes a frame. Skipping transparent runs without
+walking their pixels would be the next speed-up.
 
 ---
 

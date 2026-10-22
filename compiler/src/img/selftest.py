@@ -11,6 +11,7 @@ import io
 import random
 import re
 import struct
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -322,6 +323,71 @@ def check_c_decoder():
     return f"{cpu.instructions} instructions"
 
 
+def check_video():
+    """video.py: each frame lands on the screen as the tool says (frame 0
+    whole, the others only what changed); a folder of PNGs goes through the
+    command line; video_player.c on the simulator ends on the last frame;
+    and a real video through ffmpeg, when it is installed."""
+    import driver                       # compiler/src/cc
+    import video
+    from palette import nearest
+
+    w, h, n = 24, 16, 12
+
+    def frame(t):                       # a gradient, and a yellow box moving down-right
+        return [to565(255, 255, 0) if t <= x < t + 5 and t // 2 <= y < t // 2 + 4
+                else to565(x * 10, y * 15, 80) for y in range(h) for x in range(w)]
+
+    frames = [frame(t) for t in range(n)]
+    words, starts, palette, screens = video.encode_video(frames, w, h, colors=8, tolerance=0)
+    assert words[starts[0] + 3] == 0xFFFFFFFF          # frame 0: no transparent colour
+    ends = starts[1:] + [len(words)]
+    screen = [None] * (w * h)
+    for i in range(n):
+        assert codec.decode(words[starts[i]:ends[i]])[:2] == (w, h)
+        for p, c in enumerate(codec.decode(words[starts[i]:ends[i]])[2]):
+            if c is not None:
+                screen[p] = c
+        assert screen == screens[i], f"frame {i}"
+        if i:
+            assert ends[i] - starts[i] < ends[0] - starts[0], f"frame {i} isn't smaller"
+    shades = [to888(c) for c in palette]
+    assert screens[-1] == [palette[nearest(shades, to888(c))] for c in frames[-1]]
+
+    player = HERE.parent.parent / "examples" / "c" / "video_player.c"
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        (tmp / "frames").mkdir()
+        for i, f in enumerate(frames):
+            imagefile.write_png(tmp / "frames" / f"f{i:02d}.png", w, h, [to888(c) for c in f])
+        out = tmp / "clip.h"
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert video.main([str(tmp / "frames"), "-o", str(out), "--colors", "8",
+                               "--tolerance", "0", "--fps", "50"]) == 0
+        text = out.read_text()
+        assert text.startswith(f"/* clip.h - {video.MARK}") and "#define VIDEO_FRAMES 12\n" in text
+        program, _ = driver.build([str(player)], defines=[f'VIDEO="{out}"'])
+        note = "ffmpeg not installed: no video file read"
+        if video.shutil.which("ffmpeg"):
+            clip = tmp / "test.mp4"
+            subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+                            "testsrc2=duration=1:size=160x120:rate=25", str(clip)], check=True)
+            with contextlib.redirect_stdout(io.StringIO()):
+                assert video.main([str(clip), "--fps", "5", "--size", "40x"]) == 0
+            text = clip.with_suffix(".h").read_text()
+            assert "#define VIDEO_FRAMES 5\n" in text and "#define VIDEO_HEIGHT 30\n" in text
+            note = "and a 1 s video through ffmpeg"
+    cpu, out = driver.run_in_simulator(program.rom, "", 1_000_000_000)
+    assert cpu.halted and out.startswith("12 frames, ") and "(the video is 0.2 s)" in out, out
+    x0, y0 = (128 - w) // 2, (128 - h) // 2
+    expect = [0] * (128 * 128)
+    for p, c in enumerate(screens[-1]):
+        expect[(y0 + p // w) * 128 + x0 + p % w] = c
+    wrong = [i for i in range(128 * 128) if cpu.bus.video.pixels[i] != expect[i]]
+    assert not wrong, f"{len(wrong)} pixels differ, the first at {wrong[0] % 128},{wrong[0] // 128}"
+    return note
+
+
 CHECKS = [
     check_gamma,
     check_round_trip,
@@ -332,6 +398,7 @@ CHECKS = [
     check_palette,
     check_command_line,
     check_c_decoder,
+    check_video,
 ]
 
 

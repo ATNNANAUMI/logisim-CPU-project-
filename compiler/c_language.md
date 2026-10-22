@@ -210,6 +210,7 @@ power function is `ipow`, so it doesn't clash with C's `pow`.)
 | `show_hex(v)` | shows v on the 8-digit hex display (device `0x3C`) |
 | `key_pressed()` | the next key if one was typed, else 0: no waiting, no echo |
 | `wait_key()` | waits for one key and returns it, no echo |
+| `wait_ms(ms)` | does nothing for `ms` milliseconds (the timer, device `0x7C`) |
 | `device_out(d, v)` / `device_in(d)` | raw `COMM` to any device (`__builtin_out`, `__builtin_in`) |
 | `halt()` | stops the CPU (`__builtin_trap()`) |
 
@@ -324,8 +325,9 @@ integer exponent and a few units off otherwise.
 
 **Others:** `assert` (prints the failed condition and aborts), `errno`,
 `setjmp`/`longjmp`, `signal`/`raise` (a handler runs only for `raise`),
-`setlocale` (the "C" locale), `time` and `clock` (return -1: the CPU has
-no clock).
+`setlocale` (the "C" locale), `clock()` (milliseconds since reset, from
+the timer at device `0x7C`; `CLOCKS_PER_SEC` is 1000) and `time` (returns
+-1: there is no calendar).
 
 
 ## 8. Speed

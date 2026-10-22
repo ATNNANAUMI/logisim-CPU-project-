@@ -367,6 +367,7 @@ class SimulatorWindow(tk.Tk):
         self.rom_path = rom_path
         self.info = DebugInfo.for_rom(rom_path)
         self.running = False
+        self.cpu.bus.timer.pause()      # the timer only runs while the program does
         self._ticks = 0
         self._moved = False             # has anything run since the last start
         self._budget = 0.0              # fractional instructions carried over
@@ -644,6 +645,10 @@ class SimulatorWindow(tk.Tk):
     def set_running(self, value: bool) -> None:
         """Single place that changes the run state, so the button always matches."""
         self.running = value
+        if value:
+            self.cpu.bus.timer.resume()
+        else:
+            self.cpu.bus.timer.pause()
         self._moved = False                 # never re-trigger the breakpoint we sit on
         self.run_button.configure(text="pause" if value else "run")
         self._restart_clock()

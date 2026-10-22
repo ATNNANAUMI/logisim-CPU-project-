@@ -190,6 +190,40 @@ def test_rgb_video():
     assert not any(video.pixels)
 
 
+def test_timer():
+    # DATA R1,0x7C ; COMM INADDR,R1 ; COMM INDATA,R2 ; COMM INDATA,R3 ; HALT
+    # with a clock (in seconds) that the test moves on by hand
+    from devices import Timer
+    now = [0.0]
+    words = [0x0301, 0x7C, 0x0811, 0x0802, 0x0803, 0x0F00]
+    for fast in (False, True):
+        now[0] = 100.0
+        cpu = CPU()
+        cpu.mem.load_rom(words)
+        cpu.bus.timer = Timer(clock=lambda: now[0])
+        now[0] = 100.25                         # 250 ms after the start
+        if fast:
+            cpu.run(3)
+        else:
+            for _ in range(3):
+                cpu.step()
+        now[0] = 100.2505 + (1 << 32) / 1000    # wraps at 32 bits
+        cpu.run(10) if fast else [cpu.step() for _ in range(10)]
+        assert (cpu.regs[2], cpu.regs[3]) == (250, 250), (cpu.regs[2], cpu.regs[3])
+    timer = Timer(clock=lambda: now[0])
+    now[0] = 5.0
+    timer.reset()
+    now[0] = 5.125
+    timer.pause()                               # stopped at 125 ms ...
+    now[0] = 9.0
+    assert timer.read() == 125
+    timer.reset()                               # ... a reset while paused stays paused
+    assert timer.read() == 0
+    timer.resume()
+    now[0] = 9.0625
+    assert timer.read() == 62
+
+
 def test_addr_and_jmrb():
     # ADDR R1 ; JMRB R1 lands on the instruction after ADDR
     cpu = run([0x0901, 0x0A01, 0x0F00], steps=5)
@@ -216,6 +250,9 @@ def test_run_matches_step():
     # three end every program equal, so they start the next one equal too.
     slow, fast, chunked = CPU(), CPU(), CPU()
     rom = slow.mem.rom
+    from devices import Timer
+    for cpu in (slow, fast, chunked):           # the same time for all three
+        cpu.bus.timer = Timer(clock=lambda: 0.0)
     saved = config.STOP_ON_STACK_WRAP
     try:
         for seed in range(80):

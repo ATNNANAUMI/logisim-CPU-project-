@@ -6,6 +6,8 @@
  *   wait_key()         wait for one key and return it, no echo
  *   device_out(d, v)   send v to output device d (COMM OUTADDR/OUTDATA)
  *   device_in(d)       read one word from input device d (0 if it has none)
+ *   wait_ms(ms)        do nothing for ms milliseconds (the timer, device 0x7C;
+ *                      clock() in time.h reads it too)
  *   halt()             stop the CPU (RESUME continues after it)
  */
 #ifndef _CPU_H
@@ -14,6 +16,7 @@
 #define DISPLAY_DEVICE 0x5C
 #define HEX_DEVICE 0x3C
 #define KEYBOARD_DEVICE 0xF0
+#define TIMER_DEVICE 0x7C
 
 #define device_out(d, v) __builtin_out((d), (v))
 #define device_in(d) __builtin_in(d)
@@ -22,5 +25,6 @@
 void show_hex(unsigned int value);
 int key_pressed(void);
 int wait_key(void);
+void wait_ms(unsigned int ms);
 
 #endif
