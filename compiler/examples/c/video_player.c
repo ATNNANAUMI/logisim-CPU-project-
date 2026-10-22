@@ -11,7 +11,8 @@
  * (a program that waits on the clock runs through millions of instructions
  * a second while it waits, hence the big --steps for a run in the terminal)
  *
- * It plays videos/demo.h (ffmpeg's moving test picture, 4 s). Your own, from
+ * It plays videos/demo.h (ffmpeg's moving test picture, 4 s at 12 frames a
+ * second). Your own, from
  * the folder that holds clip.mp4:
  *     python compiler/src/img/video.py clip.mp4          (writes clip.h)
  *     ... video_player.c -I . -D 'VIDEO="clip.h"'        (build or run)
@@ -19,9 +20,9 @@
  * simulator) is too slow for it. Frames can't be skipped, as each one draws
  * only what changed, so a late video catches up when frames get cheaper.
  *
- * Expected output (with pypy3; plain python is too slow for 10 frames a
+ * Expected output (with pypy3; plain python is too slow for 12 frames a
  * second, so most frames come late and it takes longer):
- *   40 frames, 0 late, 4.0 s (the video is 4.0 s)
+ *   48 frames, 0 late, 4.0 s (the video is 4.0 s)
  */
 #include <gfx.h>
 #include <stdio.h>

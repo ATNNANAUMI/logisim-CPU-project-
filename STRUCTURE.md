@@ -29,7 +29,7 @@ logisim-CPU-project-/
 ├── check_docs.py             checks the docs against the repo (paths exist, examples and TWEAKS listed); part of `run.py test`
 │
 ├── logisim/
-│   ├── CPU.circ              THE CIRCUIT. Top-level circuit = "PC" (has an unwired RGB Video placeholder)
+│   ├── CPU.circ              THE CIRCUIT. Top-level circuit = "PC" (RGB Video fed by RGB_Display)
 │   ├── run_rom.py            patches a .rom into the ROM inside subcircuit "RAM", runs Logisim headless, prints TTY
 │   └── cpu datas/            old notes: stack micro-steps, personal TODO
 │
@@ -120,7 +120,8 @@ PC (top)                  has the output pin `halt` that ends headless runs at H
 ├── RAM                   memory system: MAR(17), ROM 64K×32 (PROGRAM LIVES HERE), RAM 64K×32, ESP/EBP (14-bit); still 16-bit banks
 ├── display               text TTY at 0x5C
 ├── NUMBER_DISPLAY        8 hex digits at 0x3C
-└── KEYBOARD              keyboard at 0xF0
+├── KEYBOARD              keyboard at 0xF0
+└── RGB_Display           RGB Video at 0x6C (x, y, colour from one word; Video's enable tied to 1). No 0x6D clear yet
 Unused subcircuits: ROM, program_loader, sign_controller, teste
 ```
 
@@ -167,15 +168,15 @@ The design follows the "But How Do It Know?" style: a single bus,
   address width, across the whole RAM (EBP=0, RB=-1 → last RAM word
   `0x1FFFFFF`; measured at 16 bits on the circuit, `diag11`/`diag16`).
 * `COMM INDATA|INADDR|OUTDATA|OUTADDR, RB`. Display `0x5C`, number display
-  `0x3C`, keyboard `0xF0` (empty reads 0). RGB screen (planned wiring, in
-  the simulator and `gfx.h`): `0x6C` one pixel per word (x bits 31–24, y
-  23–16, RGB565 15–0), `0x6D` clears. Pictures: `compiler/src/img` compresses
+  `0x3C`, keyboard `0xF0` (empty reads 0). RGB screen: `0x6C` one pixel per
+  word (x bits 31–24, y 23–16, RGB565 15–0), `0x6D` clears (simulator only:
+  not built on the circuit yet). Pictures: `compiler/src/img` compresses
   a PNG (palette + runs, about 10–60× smaller than a word per pixel),
   `gfx_image()` draws it (32–50 instructions a pixel). Timer (planned, in
   the simulator and C's `clock()`): `0x7C`, `INDATA` = milliseconds since
   reset (real time in the simulator, stopped while the window is paused).
   Videos: `compiler/src/img/video.py` -> frames that `video_player.c` draws
-  on time (about 350k instructions a 128×96 frame: pypy3 keeps up at 10 fps).
+  on time (about 350k instructions a 128×96 frame: pypy3 keeps up at 12 fps).
 
 ## Assembler conventions
 

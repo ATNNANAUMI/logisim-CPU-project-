@@ -3,7 +3,9 @@
  * The screen is Logisim's RGB Video component, 128 x 128 pixels of RGB565
  * colour. Each word sent to device 0x6C sets one pixel: x in bits 31-24,
  * y in bits 23-16, the colour in bits 15-0. Any word sent to 0x6D clears the
- * screen to black. The screen can't be read back. Everything is clipped:
+ * screen to black (simulator only: the circuit has no clear yet, so there
+ * gfx_clear() and gfx_fill(GFX_BLACK) do nothing; gfx_fill_rect(0, 0,
+ * GFX_WIDTH, GFX_HEIGHT, GFX_BLACK) works on both). The screen can't be read back. Everything is clipped:
  * drawing off the screen does nothing.
  *
  *   GFX_RGB(r, g, b)               a colour from 0-255 components

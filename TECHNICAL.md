@@ -212,13 +212,13 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 | `0x5C` | text display (TTY) | prints the low 7 bits as ASCII; `0x0A` newline, `0x08` backspace |
 | `0x3C` | number display | latches the 32-bit word and shows it on 8 hex digits (the simulator shows it in the window, and as `HEX DISPLAY:` in headless output) |
 | `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08` |
-| `0x6C` | RGB screen (*planned wiring*) | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; on the 128×128 RGB Video only the low 7 bits of x and y are wired. Write-only |
-| `0x6D` | RGB screen clear (*planned*) | any word pulses the RGB Video's reset: all black |
+| `0x6C` | RGB screen | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; on the 128×128 RGB Video only the low 7 bits of x and y are wired. Write-only |
+| `0x6D` | RGB screen clear (*simulator only*) | any word pulses the RGB Video's reset: all black. Not built on the circuit yet, where it does nothing |
 | `0x7C` | timer (*planned*) | `INDATA` reads the milliseconds since reset, wrapping at 32 bits; C's `clock()` |
 
-The RGB Video component is in `PC` but not wired yet; `0x6C`/`0x6D` are the
-wiring chosen for it (2026-10-11). The simulator and `gfx.h` follow it; the
-numbers are `VIDEO_*` in `config.py` and `GFX_*` in `gfx.h`.
+`0x6C`/`0x6D` were chosen on 2026-10-11; `0x6C` was built on the circuit
+(`RGB_Display`, section 2.2) on 2026-10-22. The numbers are `VIDEO_*` in
+`config.py` and `GFX_*` in `gfx.h`.
 
 The timer (`0x7C`, 2026-10-22) isn't on the circuit at all yet. The
 simulator follows the computer's real clock, so a program that waits on it
@@ -260,12 +260,13 @@ PC  (top level: the "computer")
 ├── display          → TTY
 ├── NUMBER_DISPLAY   → 8 × Hex Digit Display
 ├── KEYBOARD         ← Keyboard
+├── RGB_Display      → RGB Video
 └── buffer
 ```
 
 `PC` also holds the `HALT`, `RESET` and `RESUME` input pins and the Logisim
 `TTY`, `Keyboard` and `Hex Digit Display` components. It also has an
-`RGB Video` component (565 colour) that is not wired to anything yet. The
+`RGB Video` component (565 colour, fed by `RGB_Display`). The
 output pin labelled `halt` goes high when the CPU halts; headless runs use it
 to stop (section 7.2), so keep its label.
 
@@ -358,7 +359,14 @@ Logisim's `Keyboard` and drives it onto the bus (zero-extended) through a
 controlled buffer. A D flip-flop produces the read strobe that removes the key
 from the Keyboard's buffer.
 
-All three devices receive the bus, the `I_O_CLK_S`/`I_O_CLK_E` phases and the
+**RGB_Display** — address decoder for `0x6C` and the same select flip-flop
+and write strobe as `display`. Splitters take the colour from bus bits 15–0,
+y from bits 22–16 and x from bits 30–24; they and the strobe (on the clock
+input) go to the `RGB Video` in `PC`. The Video's write-enable input is tied
+to a constant 1 there: left unconnected, nothing is drawn. There is no clear
+(`0x6D`) yet.
+
+All four devices receive the bus, the `I_O_CLK_S`/`I_O_CLK_E` phases and the
 `DATA_ADDRESS` / `INPUT_OUTPUT` lines ("CLOCK S", "CLK E", "D/A", "I/O" in the
 schematics). Each device decodes the address sent by `OUTADDR`/`INADDR`,
 remembers whether it is selected (a D flip-flop), and only reacts to
@@ -1024,13 +1032,14 @@ last frame. A frame can't be skipped, since each one draws only what changed,
 so a player that falls behind stays behind until frames get cheaper; it
 counts the frames drawn more than one frame late.
 
-Measured, 4 s at 10 fps, 128×96 (12 288 words a frame at one word per pixel):
+Measured on 4 s clips, 128×96 (12 288 words a frame at one word per pixel):
 
-| clip | colours | words a frame | instructions a frame |
-| --- | --- | --- | --- |
-| ffmpeg's `testsrc2` (moving test picture, `videos/demo.h`) | 32 | 222 | 354 000 |
-| the same, `--tolerance 0` / `--colors 16` | 32 / 16 | 232 / 198 | |
-| ffmpeg's `life` (Game of Life, much of it changing) | 31 | 523 | 462 000 |
+| clip | fps | colours | words a frame | instructions a frame |
+| --- | --- | --- | --- | --- |
+| ffmpeg's `testsrc2` (moving test picture): `videos/demo.h` | 12 | 32 | 220 | 352 000 |
+| the same | 10 | 32 | 222 | 354 000 |
+| the same, `--tolerance 0` / `--colors 16` | 10 | 32 / 16 | 232 / 198 | |
+| ffmpeg's `life` (Game of Life, much of it changing) | 10 | 31 | 523 | 462 000 |
 
 Drawing costs about 28 instructions a pixel even where nothing changed
 (`gfx_image` decodes and walks every pixel), so 10 frames a second needs
@@ -1059,7 +1068,7 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | carry flag | as in 1.5 | confirmed (`diag12.asm`, `diag13.asm`, 2026-10-10). The simulator used to set C on `SUB`/`CMP` when there was *no* borrow, and on `MULT` overflow; it now matches the circuit |
 | float division by zero, NaN, `INT` out of range | as in 1.5 | confirmed (`diag14.asm`, `diag15.asm`, 2026-10-10). The simulator used to give `0.0/0.0 = +inf`, `1.0/-0.0 = +inf` and `INT(inf) = 0`; it now matches the circuit |
 | number display `0x3C` | shows the last word sent (window and headless output) | 8 hex digits in `PC` |
-| RGB screen `0x6C`/`0x6D` | 128×128 RGB565, the "RGB screen" tab, `--screen` | RGB Video in `PC`, not wired yet |
+| RGB screen `0x6C`/`0x6D` | 128×128 RGB565, the "RGB screen" tab, `--screen` | `RGB_Display` → RGB Video in `PC` (2026-10-22); the `0x6D` clear isn't built |
 | timing | one instruction per step | several clock cycles per instruction (stepper) |
 
 ---

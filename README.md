@@ -22,8 +22,8 @@ words each (the circuit itself still has the 16-bit version), four flags
 (`C A N Z`), a hardware stack in the first 16K words of RAM, integer and
 IEEE-754 float ALUs, and I/O through a single `COMM` instruction: a text
 display at `0x5C`, a hex number display at `0x3C` and a keyboard at `0xF0`
-(plus a 128×128 RGB screen at `0x6C` and a millisecond timer at `0x7C`,
-wiring planned; the simulator and C's `gfx.h` and `clock()` already use them).
+(plus a 128×128 RGB screen at `0x6C`, drawn on from C with `gfx.h`, and a
+millisecond timer at `0x7C`, wiring planned, which C's `clock()` reads).
 Every ALU result goes to **R0**.
 
 ## Requirements
