@@ -682,6 +682,15 @@ class SimulatorWindow(tk.Tk):
 
     # ----------------------------------------------------------- main loop
     def _tick(self) -> None:
+        try:
+            self._run_tick()
+        finally:
+            # booked even when the tick failed: an error must not stop the
+            # program for good (Tk prints it and the window carries on);
+            # booked last, so the window gets 20 ms to redraw between ticks
+            self.after(20, self._tick)
+
+    def _run_tick(self) -> None:
         if self.running:
             hz = self.hz
             now = time.perf_counter()
@@ -700,7 +709,6 @@ class SimulatorWindow(tk.Tk):
             self._ticks += 1
             slow = hz and hz <= 256
             self.refresh(memory=slow or self._ticks % 5 == 0)
-        self.after(20, self._tick)
 
     @property
     def hz(self) -> int:
@@ -744,8 +752,17 @@ class SimulatorWindow(tk.Tk):
                           f"{step.text:<18s} {step.note}")
 
     # ------------------------------------------------------------- drawing
+    def _focused(self):
+        """The widget with the keyboard focus, or None. While a combobox's
+        list is open the focus is on a widget tkinter has no name for, and
+        focus_get() raises KeyError ('popdown')."""
+        try:
+            return self.focus_get()
+        except KeyError:
+            return None
+
     def refresh(self, memory: bool = True) -> None:
-        focused = self.focus_get()
+        focused = self._focused()
         for i, entry in enumerate(self.reg_entries):
             if entry is focused:
                 continue                            # do not fight the user typing
