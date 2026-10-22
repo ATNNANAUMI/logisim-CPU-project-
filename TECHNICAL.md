@@ -753,6 +753,7 @@ line is empty (so it can't erase the prompt).
 | `c/hello.c` | C: `printf("hello, world\n")` |
 | `c/primes.c` | C: a sieve, `printf` with a width, the hex display (`cpu.h`) |
 | `c/gfx_demo.c` | C: the RGB screen with `gfx.h`: gradient, text, shapes, a sine wave (`--screen` saves the picture) |
+| `c/image_demo.c` | C: compressed pictures with `gfx_image` (7.4): a 128×128 Mandelbrot picture and a transparent 16×16 sprite from `c/images/` (the PNGs and the `.h` files made from them), clipped at the edges |
 | `c/structs.c` | C: an array of structs, `qsort`, `malloc`, `printf("%.2f")` |
 | `c/guess.c` | C: guess the number with `scanf`; seeded by how long the first key takes (`key_pressed`); the header has a transcript |
 | `c/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, `~` on registers, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
@@ -804,7 +805,7 @@ lets you pick files from the project (it skips `.git`, `.venv`,
 | `python run.py asm <files…> [-o out.rom]` | `compiler/src/asm build …`, or `compiler/src/cc build …` when a `.c` file is among them |
 | `python run.py sim [rom]` | `cpu_sim/src/main.py [rom]` (the window) |
 | `python run.py build <files…> -o out.rom` | the same build, then opens the result in the simulator |
-| `python run.py test` | runs the three self-check suites, then `check_docs.py` |
+| `python run.py test` | runs the four self-check suites, then `check_docs.py` |
 
 It checks for `tkinter` before opening the window and prints install hints
 when it is missing. In the menu, the output of `asm`/`build` is the first
@@ -857,6 +858,11 @@ python compiler/src/cc/selftest.py    # 14 checks: preprocessor, error messages 
                                       # after a reset, library override, reserved names,
                                       # mixing C and assembly, CLI, C line stepping, and every test program
                                       # in compiler/src/cc/tests/ against gcc's output
+python compiler/src/img/selftest.py   # 9 checks: gamma codes, encode/decode round trips
+                                      # (both forms), the packed fallback,
+                                      # bad input, PNG reading (every filter, colour type
+                                      # and bit depth), resizing, palettes, CLI, and
+                                      # gfx_image() on the simulator against codec.decode()
 python check_docs.py                  # 3 checks on the docs: every repo path they name
                                       # exists, every example (.asm, .c) is listed in
                                       # 5.3, every TWEAKS switch is in 3.4
@@ -865,6 +871,64 @@ python check_docs.py                  # 3 checks on the docs: every repo path th
 `check_docs.py` checks only mechanical facts. It skips build output under
 `compiler/ROM/`, `diagNN`-style placeholders, and paragraphs that mention
 files as removed.
+
+### 7.4 Pictures for the RGB screen (`compiler/src/img/`)
+
+```
+python compiler/src/img picture.png [-o picture.h] [--name NAME] [--size WxH] [--colors N] [--dither] [--preview FILE.png]
+```
+
+turns a PNG into a compressed image that `gfx_image(x, y, img)` (`gfx.h`,
+`compiler/libc/gfx_image.c`) draws. It writes `picture.h` next to the PNG,
+holding `static const unsigned int picture[] = {...};`, which a C program
+`#include`s (so the words end up in ROM). It won't overwrite a file it
+didn't write. The defaults: the array is named after the file; a picture
+bigger than the screen is shrunk to fit 128×128 (area average), `--size`
+picks the size (`64x` or `x48` keeps the shape); pixels with alpha below
+128 become transparent. `--preview` saves what the screen will show (2×).
+
+Colours: each pixel becomes RGB565, dropping the low bits like `GFX_RGB`
+(rounding would split the dark noise of photos into two levels and make
+them much bigger). Up to `--colors` (default 256) colours are kept exactly;
+more are reduced by median cut plus three rounds of k-means, mapped to the
+nearest colour (`--dither`: Floyd–Steinberg, which looks smoother with few
+colours but compresses worse).
+
+The format (in full at the top of `codec.py`): a header (width, height,
+number of palette colours, transparent index), the palette two colours per
+word, then a bit stream of tokens over the pixels in reading order: `0` +
+a palette index, or `1` + a kind + an Elias gamma length for a run of
+pixels copied from the previous pixel, the one above, above-left or
+above-right (outside the image counts as palette colour 0). The encoder is
+greedy. A picture with few runs (dithered, noisy) would cost more than b
+bits a pixel that way (each lone pixel is a flag bit + b), so the converter
+also writes the **packed** form, just b bits a pixel with no tokens, and
+keeps the smaller one (header word 2 then has `0x10000` added). So a picture
+is never bigger than b bits a pixel: black and white is at most 32 pixels a
+word, 512 words for 128×128. Measured on 128×128 pictures (16 384 words at
+one word per pixel):
+
+| picture | colours | words |
+| --- | --- | --- |
+| `gfx_demo.c`'s screen | 22 | 268 |
+| a logo | 194 | 516 |
+| the Mandelbrot picture of `image_demo.c` | 230 | 1734 |
+| a cartoon, reduced to 256 / 16 colours | 1096 | 1359 / 469 |
+| a logo / a cartoon, thresholded to black and white | 2 | 106 / 155 |
+| a page of text, black on white | 2 | 306 |
+| a photo, black and white, dithered (packed) | 2 | 517 (550 with runs) |
+
+The decoder keeps two rows of colours on the stack, decodes a row, then
+sends it (clipped, transparent pixels skipped) to device `0x6C`; a run can
+go on into the next row. A packed picture is read by `unpack_row` instead,
+or `unpack_bits_row` for 1 bit a pixel (the top bit picks one of two
+colours: about 32 instructions a pixel in all, against 48 through the
+general one). It is about 1500 words of code and takes 32–50 instructions a
+pixel (about 0.5–1 million for a full screen: 3–10 seconds in the
+simulator, far too slow for the circuit's 160 a second). About 15 of those
+go to sending the pixel; the rest is spread over small functions so that
+their loops keep their variables in registers (see the file's comment). `codec.decode()` is the reference: the self-check draws images
+with `gfx_image()` in the simulator and compares every pixel.
 
 ---
 
@@ -1065,7 +1129,7 @@ leads to after an unconditional jump.
 
 `compiler/libc/` holds the headers (`include/`), the library in C (one file
 per group of functions: `printf.c`, `format.c`, `fdigits.c`, `scanf.c`,
-`string.c`, `malloc.c`, `math.c`, `gfx.c` and `gfx_text.c` for the RGB
+`string.c`, `malloc.c`, `math.c`, `gfx.c`, `gfx_text.c` and `gfx_image.c` for the RGB
 screen, ...), `local.h` (shared by the library
 files only) and two assembly files: `runtime.asm` (`_pow2`, `_udiv`,
 `_umod`, `_Exit`) and `setjmp.asm`.

@@ -9,14 +9,15 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # three self-check suites (assembler 19, simulator 20, C compiler 14), then check_docs.py
+python run.py test                                   # four self-check suites (assembler 19, simulator 20, C compiler 14, image tool 9), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
+python compiler/src/img/selftest.py                  # image converter + gfx_image() only
 python compiler/src/cc/tests/difftest.py [names] [--update]   # C test programs against gcc (--update rewrites .expected)
 python compiler/src/cc/tests/fuzz.py [--count N] [--seed S]   # random C programs, gcc against tiny C
 
-# a single check (assembler and C compiler checks are check_*, simulator ones are test_*)
+# a single check (assembler, C compiler and image tool checks are check_*, simulator ones are test_*)
 python -c "import sys; sys.path.insert(0,'compiler/src/asm'); import selftest; selftest.check_linking()"
 python -c "import sys; sys.path.insert(0,'cpu_sim/src'); import selftest; selftest.test_keyboard_input()"
 python -c "import sys; sys.path.insert(0,'compiler/src/cc'); import selftest; selftest.check_errors()"
@@ -30,6 +31,8 @@ python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom [--seconds N]  
 python compiler/src/cc run prog.c [--keys $'text\n'] [--stats]       # C: build + run in the simulator
 python compiler/src/cc build prog.c [more.c x.asm] [-o name.rom] [--map] [--lib x.asm]   # C: links the C library itself
 python compiler/src/cc compile prog.c [-o prog.asm]                   # C -> assembly only
+
+python compiler/src/img pic.png [-o pic.h] [--size WxH] [--colors N] [--dither] [--preview p.png]   # PNG -> compressed pic.h for gfx_image()
 ```
 
 `run_rom.py` finds the jar via `$LOGISIM_JAR` or the Arch package path. A circuit run stops at `HALT` (printing `--- halted at HALT ---`) because Logisim's headless mode watches the output pin labelled `halt` in the top-level `PC` circuit; keep that pin and its label if the circuit is reworked. The `circuit-check` skill (`.claude/skills/`) covers comparing the simulator with the circuit.
@@ -44,7 +47,9 @@ The ISA is encoded in two independent places that must stay in sync: `compiler/s
 
 C: `compiler/src/cc/` (preprocessor → parser/type checker → `codegen.py` + `regalloc.py` + `peephole.py`) writes assembly text, which `driver.py` feeds to `compiler/src/asm`'s assembler and links with a generated crt0 and the C library (`compiler/libc/`, compiled once and cached in `compiler/ROM/libc/`; only the files a program needs are linked). Every program in `compiler/src/cc/tests/` must print exactly what gcc's build prints (`.expected` files come from gcc); keep test programs free of undefined behaviour and of type sizes. `compiler/examples/c/circuit_test.c` checks the compiler's tricky code paths on the circuit.
 
-`compiler/src/asm/`, `compiler/src/cc/` and `cpu_sim/src/` import their sibling modules by plain name, so run files as scripts (or put the directory on `sys.path`), not as packages. The assembler and the C compiler are invoked as directories (`python compiler/src/asm <cmd>`, `python compiler/src/cc <cmd>`, via `__main__.py`).
+Pictures: `compiler/src/img/` turns a PNG into a `.h` holding a compressed image (palette + a bit stream of literals and runs, format in `codec.py`'s docstring); `gfx_image()` in `compiler/libc/gfx_image.c` decodes it onto the RGB screen. The two decoders (`codec.decode`, the reference, and the C one) must stay in sync; the img self-check compares them pixel by pixel.
+
+`compiler/src/asm/`, `compiler/src/cc/`, `compiler/src/img/` and `cpu_sim/src/` import their sibling modules by plain name, so run files as scripts (or put the directory on `sys.path`), not as packages. The assembler, the C compiler and the image converter are invoked as directories (`python compiler/src/asm <cmd>`, `python compiler/src/cc <cmd>`, `python compiler/src/img pic.png`, via `__main__.py`).
 
 **The circuit is the ground truth.** The simulator was written from the ISA, not derived from the circuit. Behaviours not yet verified on the circuit are switches in `cpu_sim/src/config.py` (TWEAKS, each marked confirmed/guess). The circuit's `NOT` inverted RA until it was rewired to RB on 2026-10-15; the assembler still writes `NOT Rx` with x in both fields, which works either way (see TECHNICAL §8). Diagnostic programs used to measure circuit behaviour live in `compiler/examples/tests/`.
 
@@ -73,6 +78,7 @@ Most facts are written in more than one doc. When you change one of these, updat
 | the C language or the C compiler's conventions | `compiler/c_language.md`; TECHNICAL §10, STRUCTURE "C compiler conventions", `compiler/c_decisions.md` when it is a design decision or a guess |
 | a C library function or header | the header and its `compiler/libc/*.c`; `compiler/c_language.md` §7; TECHNICAL §10.5 for library structure |
 | a C test program | `compiler/src/cc/tests/<name>.c`, then `difftest.py <name> --update` (needs gcc) to write its `.expected` |
+| the compressed image format | `compiler/src/img/codec.py` (docstring, encode, decode) + `compiler/libc/gfx_image.c`; TECHNICAL §7.4, then remake the `.h` files in `compiler/examples/c/images/` |
 | a file or folder added, moved or removed | STRUCTURE tree; README "Layout"; TECHNICAL §9 if it's outdated material |
 
 ## Outdated notes
