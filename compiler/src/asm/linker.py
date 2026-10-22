@@ -2,10 +2,15 @@
 
 Memory layout it builds:
 
-    ROM  0x00000   RJMP start          (2 words, added here)
-         0x00002   each file's ROM part, in the order given
-    RAM  0x10000   stack, never touched by the linker
-         0x14000   each file's RAM part, in the order given
+    ROM  0x0000000   RJMP start          (2 words, added here)
+         0x0000002   each file's ROM part, in the order given
+    RAM  0x1000000   stack (16K words), never touched by the linker
+         0x1004000   each file's RAM part, in the order given
+
+Each bank has a 24-bit address (16M words); the address bus is one bit wider
+and its top bit selects RAM. The constants below are the whole memory map for
+the assembler and the C compiler; the simulator has the same one in
+cpu_sim/src/config.py, and malloc.c and stdlib.asm write down the end of RAM.
 
 Libraries: of a file given as a library, only the parts (see assembler.py)
 the program needs are linked: the parts other files refer to, the parts
@@ -20,9 +25,12 @@ import encoding as enc
 from errors import AsmError, AsmErrors
 
 MASK = 0xFFFFFFFF
-ROM_SIZE = 0x10000
-RAM_DATA_START = 0x14000
-RAM_END = 0x20000
+BANK_BITS = 24
+ROM_SIZE = 1 << BANK_BITS                  # words of ROM
+RAM_BASE = 1 << BANK_BITS                  # RAM word i is at address RAM_BASE + i
+STACK_WORDS = 0x4000                       # ESP and EBP are 14-bit
+RAM_DATA_START = RAM_BASE + STACK_WORDS
+RAM_END = RAM_BASE + (1 << BANK_BITS)      # one past the last RAM word
 ENTRY = "start"
 ENTRY_WORD = 0x0400        # RJMP; the next word is the offset to start
 ENTRY_SIZE = 2
@@ -288,13 +296,13 @@ def format_map(program, title):
     """A text list of every label and its final address."""
     lines = [f"# labels in {title}",
              "# address  section  label                     file",
-             f"{0:05x}      rom      (entry: RJMP start)"]
+             f"{0:07x}    rom      (entry: RJMP start)"]
     for s in program.symbols:
         mark = "  (global)" if s.is_global else ""
-        lines.append(f"{s.address:05x}      {s.section:<7}  {s.name:<25} {s.source}{mark}")
+        lines.append(f"{s.address:07x}    {s.section:<7}  {s.name:<25} {s.source}{mark}")
     if program.lines:
         lines.append("# source lines: where each line's code starts")
         lines.append("# address  line   file")
         for address, path, line in program.lines:
-            lines.append(f"{address:05x}      {line:<6} {path}")
+            lines.append(f"{address:07x}    {line:<6} {path}")
     return "\n".join(lines) + "\n"

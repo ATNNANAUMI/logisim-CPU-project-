@@ -1,6 +1,7 @@
 """ROM and RAM.
 
-One 17-bit address bus: bit16 on selects RAM, off selects ROM.
+One address bus (config.ADDR_BITS wide): the top bit (config.RAM_BIT) on
+selects RAM, off selects ROM. Each bank holds config.BANK_WORDS words.
 Reads work on both banks; writes to ROM are ignored.
 """
 
@@ -20,14 +21,14 @@ class Memory:
     def read(self, addr: int) -> int:
         addr &= config.ADDR_MASK
         bank = self.ram if self.is_ram(addr) else self.rom
-        return bank[addr & 0xFFFF]
+        return bank[addr & config.BANK_MASK]
 
     def write(self, addr: int, value: int) -> bool:
         """Returns False when the write was dropped (ROM address)."""
         addr &= config.ADDR_MASK
         if not self.is_ram(addr):
             return False
-        self.ram[addr & 0xFFFF] = value & config.WORD_MASK
+        self.ram[addr & config.BANK_MASK] = value & config.WORD_MASK
         return True
 
     # -------------------------------------------------- stack helpers
@@ -41,19 +42,22 @@ class Memory:
 
     # ------------------------------------------------------------ images
     def load_rom(self, words) -> int:
-        return self._load(self.rom, words)
+        self.rom, count = self._load(words)
+        return count
 
     def load_ram(self, words) -> int:
-        return self._load(self.ram, words)
+        self.ram, count = self._load(words)
+        return count
 
     @staticmethod
-    def _load(bank, words) -> int:
-        words = list(words)
-        if len(words) > len(bank):
-            raise ValueError(f"image is {len(words)} words, bank holds {len(bank)}")
-        for i in range(len(bank)):
-            bank[i] = words[i] & config.WORD_MASK if i < len(words) else 0
-        return len(words)
+    def _load(words):
+        """A new bank holding words, then zeros (a bank is 16M words, so it
+        is built in one go rather than word by word)."""
+        bank = [w & config.WORD_MASK for w in words]
+        if len(bank) > config.BANK_WORDS:
+            raise ValueError(f"image is {len(bank)} words, bank holds {config.BANK_WORDS}")
+        bank += [0] * (config.BANK_WORDS - len(bank))
+        return bank, len(words)
 
     def clear_ram(self) -> None:
         self.ram = [0] * config.BANK_WORDS

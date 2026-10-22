@@ -80,7 +80,7 @@ class MemoryPane(ttk.Frame):
         ttk.Button(bar, text="<", width=3, command=lambda: self.turn(-1)).pack(side="left")
         ttk.Button(bar, text=">", width=3, command=lambda: self.turn(+1)).pack(side="left")
         ttk.Label(bar, text=" address ").pack(side="left")
-        self.goto = ttk.Entry(bar, width=8)
+        self.goto = ttk.Entry(bar, width=10)
         self.goto.pack(side="left")
         self.goto.bind("<Return>", self.jump_to)
         ttk.Button(bar, text="go", width=3, command=self.jump_to).pack(side="left")
@@ -94,7 +94,7 @@ class MemoryPane(ttk.Frame):
         self.range_label = ttk.Label(bar, text="")
         self.range_label.pack(side="right")
 
-        self.text = tk.Text(self, font=MONO, wrap="none", height=24, width=52)
+        self.text = tk.Text(self, font=MONO, wrap="none", height=24, width=54)
         self.text.bind("<Double-Button-1>", self.edit_cell)
         self.text.bind("<Button-3>", self.toggle_breakpoint)
         scroll = ttk.Scrollbar(self, command=self.text.yview)
@@ -128,7 +128,7 @@ class MemoryPane(ttk.Frame):
         except ValueError:
             return
         self.follow.set(False)
-        self.page = (addr & 0xFFFF) // PAGE_WORDS
+        self.page = (addr & config.BANK_MASK) // PAGE_WORDS
         self.render()
 
     def follow_iar(self) -> None:
@@ -137,7 +137,7 @@ class MemoryPane(ttk.Frame):
         iar = self.cpu.iar
         in_this_bank = (self.bank == "ram") == bool(iar & config.RAM_BIT)
         if in_this_bank:
-            self.page = (iar & 0xFFFF) // PAGE_WORDS
+            self.page = (iar & config.BANK_MASK) // PAGE_WORDS
 
     # -------------------------------------------------------- breakpoints
     def _index_at(self, event) -> int | None:
@@ -165,7 +165,7 @@ class MemoryPane(ttk.Frame):
             return
         addr = self.base | index
         answer = simpledialog.askstring(
-            "edit memory", f"new value for 0x{addr:05X}\n(hex, decimal or 1.5f)",
+            "edit memory", f"new value for 0x{addr:07X}\n(hex, decimal or 1.5f)",
             initialvalue=f"0x{self.words[index]:08X}", parent=self)
         if answer is None:
             return
@@ -205,9 +205,9 @@ class MemoryPane(ttk.Frame):
                                                         index + 1 < len(self.words)) else None
                     skip_next = ins.takes_operand
                     text = disassemble(word, operand)
-                lines.append(f"{mark} 0x{addr:05X}  {word:08X}  {text}")
+                lines.append(f"{mark} 0x{addr:07X}  {word:08X}  {text}")
             else:
-                lines.append(f"{mark} 0x{addr:05X}  {word:08X}  "
+                lines.append(f"{mark} 0x{addr:07X}  {word:08X}  "
                              f"{self._signed(word):>12d}  {self._ascii(word)}")
 
         self.text.configure(state="normal")
@@ -220,7 +220,7 @@ class MemoryPane(ttk.Frame):
             self.text.see(f"{current}.0")
         self.text.configure(state="disabled")
         self.range_label.configure(
-            text=f"0x{self.base | start:05X} - 0x{self.base | (end - 1):05X}")
+            text=f"0x{self.base | start:07X} - 0x{self.base | (end - 1):07X}")
 
     @staticmethod
     def _signed(word: int) -> int:
@@ -514,7 +514,7 @@ class SimulatorWindow(tk.Tk):
 
     def _show_pointer(self, name: str) -> None:
         value = {"IAR": self.cpu.iar, "ESP": self.cpu.esp, "EBP": self.cpu.ebp}[name]
-        width = 5 if name == "IAR" else 4
+        width = config.ADDR_DIGITS if name == "IAR" else 4
         entry = self.pointer_entries[name]
         entry.delete(0, "end")
         entry.insert(0, f"0x{value:0{width}X}")
@@ -623,7 +623,7 @@ class SimulatorWindow(tk.Tk):
         if why == "limit":
             self._log(f"no new C line after {ran} instructions (waiting for a key?)")
         elif why == "breakpoint":
-            self._log(f"breakpoint at 0x{self.cpu.iar:05X}  {where}")
+            self._log(f"breakpoint at 0x{self.cpu.iar:07X}  {where}")
         elif why == "halted":
             self._log(f"halted after {ran} instructions")
         else:
@@ -712,7 +712,7 @@ class SimulatorWindow(tk.Tk):
         if not log:
             if self._moved and self.cpu.iar in self.cpu.breakpoints:
                 self.set_running(False)                 # stop BEFORE this word
-                self._log(f"breakpoint at 0x{self.cpu.iar:05X}")
+                self._log(f"breakpoint at 0x{self.cpu.iar:07X}")
                 return
             done = self.cpu.run(count, stop_at=self.cpu.breakpoints)
             if done:
@@ -721,12 +721,12 @@ class SimulatorWindow(tk.Tk):
                 self.set_running(False)
             elif done < count:                          # stopped at a breakpoint
                 self.set_running(False)
-                self._log(f"breakpoint at 0x{self.cpu.iar:05X}")
+                self._log(f"breakpoint at 0x{self.cpu.iar:07X}")
             return
         for _ in range(count):
             if self._moved and self.cpu.iar in self.cpu.breakpoints:
                 self.set_running(False)                 # stop BEFORE this word
-                self._log(f"breakpoint at 0x{self.cpu.iar:05X}")
+                self._log(f"breakpoint at 0x{self.cpu.iar:07X}")
                 break
             step = self.cpu.step()
             if step is None:                        # halted or stopped
@@ -735,7 +735,7 @@ class SimulatorWindow(tk.Tk):
             self._moved = True
             if log:
                 operand = "" if step.operand is None else f" 0x{step.operand:08X}"
-                self._log(f"0x{step.address:05X}  {step.word:08X}{operand:<11s} "
+                self._log(f"0x{step.address:07X}  {step.word:08X}{operand:<11s} "
                           f"{step.text:<18s} {step.note}")
 
     # ------------------------------------------------------------- drawing

@@ -48,7 +48,7 @@ The language itself is described in [`c_language.md`](c_language.md).
     because SAVE/RESTORE around the whole call would undo the change.
 11. **Locals are reached with `STK GET/SET` (EBP-relative)**, so no frame
     pointer register is needed. A function that takes the address of a
-    local computes `FP = 0x10000 + EBP` once, reading EBP with
+    local computes `FP = 0x1000000 + EBP` (`RAM_BASE + EBP`) once, reading EBP with
     `STK CALL / STK GET 0 / STK RET` (measured on the circuit, `diag12`).
 12. **Frames bigger than 15 words are reserved by setting ESP directly**
     with two `STK RET`s (also measured in `diag12`); smaller ones with
@@ -135,7 +135,7 @@ The language itself is described in [`c_language.md`](c_language.md).
   `--`, `NEG`, `MULT` never set it. The docs said otherwise; the simulator
   was changed to match.
 * `diag12`: reading and setting ESP/EBP with `STK CALL`/`STK RET` works,
-  stack slot `i` is RAM `0x10000 + i`, `FCMP`'s A flag is a float compare.
+  stack slot `i` is RAM word `i` (`0x10000 + i` on the 16-bit circuit, `0x1000000 + i` now), `FCMP`'s A flag is a float compare.
 * `diag14`/`diag15`: float special cases (division by zero, NaN, INT out of
   range); see `TECHNICAL.md` section 8.
 * `compiler/examples/c/circuit_test.c` passes on the circuit, and eight of

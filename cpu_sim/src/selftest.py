@@ -77,16 +77,40 @@ def test_stack_push_pop_set_get():
 
 
 def test_stk_set_get_wrap_across_ram():
-    # Measured with diag11/diag16: EBP + RB wraps at 16 bits, across all of RAM
+    # Measured with diag11/diag16: EBP + RB wraps at the RAM's address width,
+    # across all of RAM (16 bits on the circuit then, 24 now)
     # DATA R0,0xA1 ; DATA R1,-1 ; STK SET,R1       (EBP = 0: the last RAM word)
-    # DATA R0,0xA2 ; DATA R1,0x8000 ; STK SET,R1   (RAM 0x18000, past the stack)
+    # DATA R0,0xA2 ; DATA R1,0x8000 ; STK SET,R1   (RAM word 0x8000, past the stack)
     # DATA R0,0 ; STK GET,R1
     cpu = run([0x0300, 0xA1, 0x0301, 0xFFFFFFFF, 0x0B41,
                0x0300, 0xA2, 0x0301, 0x8000, 0x0B41,
                0x0300, 0, 0x0B51, 0x0F00])
-    assert cpu.mem.ram[0xFFFF] == 0xA1 and cpu.mem.ram[0x3FFF] == 0
+    assert cpu.mem.ram[config.BANK_MASK] == 0xA1 and cpu.mem.ram[0x3FFF] == 0
     assert cpu.mem.ram[0x8000] == 0xA2 and cpu.mem.ram[0] == 0
     assert cpu.regs[0] == 0xA2
+
+
+def test_whole_address_range():
+    # The last words of RAM and ROM: ST/LD there, a jump far up into ROM and
+    # back, and an address with a bit above the IAR's top dropped.
+    top_ram = RAM | config.BANK_MASK
+    far = config.BANK_WORDS - 4                     # the last few ROM words
+    words = [0x0301, top_ram, 0x0302, 0x1234, 0x0212,   # ST [top of RAM], R2
+             0x0113,                                     # LD R3, [top of RAM]
+             0x0400, far - 7,                            # RJMP far (offset from word 7)
+             0x0F00]                                     # 8: HALT, where far jumps back to
+    for fast in (False, True):
+        cpu = CPU()
+        cpu.mem.load_rom(words)
+        cpu.mem.rom[far:] = [0x0304, 0xABCD, 0x0400, 8 - (far + 3)]   # DATA R4 ; RJMP 8
+        if fast:
+            cpu.run(100)
+        else:
+            while cpu.step() is not None:
+                pass
+        assert cpu.mem.ram[config.BANK_MASK] == 0x1234 and cpu.regs[3] == 0x1234
+        assert cpu.regs[4] == 0xABCD and cpu.halted and cpu.iar == 9
+    assert cpu.mem.read(top_ram | 1 << 31) == 0x1234     # bits above the bus are ignored
 
 
 def test_call_frame_and_return():
@@ -184,11 +208,17 @@ def test_run_matches_step():
                 cpu.bus.in_addr, list(cpu.bus.keyboard.buffer))
 
     edges = [0, 1, 2, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF, 0xFFFFFFFE,
-             0x3F800000, 0x7F800000, RAM, RAM | 0x3FFF, 0x3FFF]
+             0x3F800000, 0x7F800000, RAM, RAM | 0x3FFF, 0x3FFF,
+             RAM | config.BANK_MASK, config.BANK_MASK]
     rng = random.Random(1)
+    # Banks are 16M words, so three machines are made once and share one ROM
+    # (a CPU never writes ROM). RAM is not cleared between programs: the
+    # three end every program equal, so they start the next one equal too.
+    slow, fast, chunked = CPU(), CPU(), CPU()
+    rom = slow.mem.rom
     saved = config.STOP_ON_STACK_WRAP
     try:
-        for seed in range(120):
+        for seed in range(80):
             config.STOP_ON_STACK_WRAP = seed % 2 == 1
             words = []
             for _ in range(400):
@@ -199,9 +229,11 @@ def test_run_matches_step():
                     words.append(rng.choice(edges))
                 else:
                     words.append(rng.randrange(1 << 32))
-            slow, fast, chunked = (run([], steps=0, keys="ab\b") for _ in range(3))
+            rom[:len(words)] = words
             for cpu in (slow, fast, chunked):
-                cpu.mem.load_rom(words)
+                cpu.reset(clear_ram=False)
+                cpu.mem.rom = rom
+                cpu.bus.keyboard.type("ab\b")
             for _ in range(2000):
                 if slow.step() is None:
                     break

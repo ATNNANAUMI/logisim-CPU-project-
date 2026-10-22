@@ -205,13 +205,13 @@ label from another file without `.extern` is an error, which catches typos.
 ## 6. How the linker lays things out
 
 ```
-ROM  0x00000   RJMP start           (2 words, added by the linker)
-     0x00002   first file's ROM part
+ROM  0x0000000 RJMP start           (2 words, added by the linker)
+     0x0000002 first file's ROM part
                second file's ROM part
                ...                  (in the order given on the command line)
 
-RAM  0x10000 - 0x13FFF   stack (never touched by the linker)
-     0x14000   first file's RAM part
+RAM  0x1000000 - 0x1003FFF   stack (never touched by the linker)
+     0x1004000 first file's RAM part
                second file's RAM part ...
 ```
 

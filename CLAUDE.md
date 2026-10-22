@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # four self-check suites (assembler 19, simulator 20, C compiler 14, image tool 9), then check_docs.py
+python run.py test                                   # four self-check suites (assembler 20, simulator 21, C compiler 15, image tool 9), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
@@ -59,6 +59,7 @@ Key ISA facts that trip people up (details in STRUCTURE.md):
 - The carry flag: `SUB` sets C on a *borrow* (`RA < RB` unsigned); `CMP`, `--`, `NEG`, `MULT` never set it (measured on the circuit).
 - `STK CALL/RET` only move the stack frame; the `CALL`/`RET` pseudo-ops do the jump and clobber R0/R14/R15.
 - The linker puts `RJMP start` at address 0. Exactly one file has `.global start`. Calling or jumping to a RAM label is a link error.
+- Memory: 16M words of ROM and of RAM (24-bit banks, 25-bit addresses, RAM from `0x1000000`; stack `0x1000000–0x1003FFF`, linker data from `0x1004000`). **The circuit still has 16-bit banks** (RAM from `0x10000`), so programs built now run only in the simulator until it is widened (TECHNICAL §2.4); `run_rom.py` refuses. A simulated CPU holds two 128 MB lists.
 - In C, every scalar is one word (`sizeof(char) == 1`, `CHAR_BIT == 32`), `double` is the 32-bit float, and there is no `long long`.
 
 ## Keeping the docs in sync
@@ -79,6 +80,7 @@ Most facts are written in more than one doc. When you change one of these, updat
 | a C library function or header | the header and its `compiler/libc/*.c`; `compiler/c_language.md` §7; TECHNICAL §10.5 for library structure |
 | a C test program | `compiler/src/cc/tests/<name>.c`, then `difftest.py <name> --update` (needs gcc) to write its `.expected` |
 | the compressed image format | `compiler/src/img/codec.py` (docstring, encode, decode) + `compiler/libc/gfx_image.c`; TECHNICAL §7.4, then remake the `.h` files in `compiler/examples/c/images/` |
+| the memory map (bank width, RAM base, stack, heap) | `compiler/src/asm/linker.py` + `cpu_sim/src/config.py` + `compiler/libc/malloc.c` (`HEAP_END`) + `stdlib.asm` (`HEAP_START`/`HEAP_END`) + `logisim/run_rom.py` (`BANK_BITS`); TECHNICAL §1.2/§2.4/§4.6, `assembly_syntax.md` §6, `c_language.md` §2 and §4, STRUCTURE "ISA cheat sheet", README one-paragraph summary, this file's key facts |
 | a file or folder added, moved or removed | STRUCTURE tree; README "Layout"; TECHNICAL §9 if it's outdated material |
 
 ## Outdated notes

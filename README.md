@@ -16,8 +16,9 @@ circuit.
 
 ## The machine in one paragraph
 
-32-bit words, 16 registers (`R0`–`R15`), a 17-bit address bus where bit 16
-picks RAM (`0x10000`–`0x1FFFF`) over ROM (`0x00000`–`0x0FFFF`), four flags
+32-bit words, 16 registers (`R0`–`R15`), a 25-bit address bus where bit 24
+picks RAM (`0x1000000`–`0x1FFFFFF`) over ROM (`0x0000000`–`0x0FFFFFF`), 16M
+words each (the circuit itself still has the 16-bit version), four flags
 (`C A N Z`), a hardware stack in the first 16K words of RAM, integer and
 IEEE-754 float ALUs, and I/O through a single `COMM` instruction: a text
 display at `0x5C`, a hex number display at `0x3C` and a keyboard at `0xF0`

@@ -246,13 +246,38 @@ def check_linking():
     """
     rom = build(main, lib).rom
     # ROM: entry jump 0-1, main 2-14, lib from 15 (helper = 15).
-    # RAM: var 0x14000-0x14001, table 0x14002.
+    # RAM: var 0x1004000-0x1004001, table 0x1004002.
     assert rom[0:2] == [0x0400, 1]                    # RJMP start: 2 - 1
-    assert rom[2:4] == [0x0301, 0x14001]              # DATA R1, var + 1
+    assert rom[2:4] == [0x0301, 0x1004001]            # DATA R1, var + 1
     assert rom[5] == 11                               # CALL's return address
     assert rom[9] == 15                               # CALL's target: helper
     assert rom[12] == 15 - 12                         # RJMP helper, from its offset word at 12
-    assert rom[13:15] == [0x0302, 0x14002]            # DATA R2, table
+    assert rom[13:15] == [0x0302, 0x1004002]          # DATA R2, table
+
+
+def check_big_program():
+    """24-bit banks: code and data far past the old 64K words, and the limits."""
+    main = """
+            .global start
+            .ram
+    buf:    .space 200000
+    after:  .space 1
+            .rom
+    start:  DATA R1, far
+            JMRB R1
+    pad:    .space 100000
+    far:    DATA R2, after
+            HALT
+    """
+    program = build(main)
+    rom = program.rom
+    far = 2 + 3 + 100000                              # entry jump, DATA + JMRB, pad
+    assert rom[2:4] == [0x0301, far] and rom[far:far + 2] == [0x0302, 0x1004000 + 200000]
+    assert program.ram_used == 200001
+    expect_link_error(["        .global start\nstart:  HALT\nbig: .space 0xFFFFFF"],
+                      "only 16777216 fit")
+    expect_link_error(["        .global start\nstart:  HALT\n        .ram\nbig: .space 0xFFC001"],
+                      "fit above the stack")
 
 
 def check_entry_when_start_is_not_first():
@@ -491,6 +516,7 @@ CHECKS = [
     check_call_and_ret,
     check_save_restore_and_call_cleanup,
     check_linking,
+    check_big_program,
     check_entry_when_start_is_not_first,
     check_errors,
     check_warnings,

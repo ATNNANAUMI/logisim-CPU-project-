@@ -2,16 +2,17 @@
  *
  * The heap is the RAM after the program's own variables: from _end (a label
  * the C compiler's build puts after all other RAM data) to the end of RAM
- * (0x1FFFF). Each block has a one-word header before it: its size in words,
- * header included, positive when free and negative when in use. malloc takes
- * the first free block that is big enough (joining free neighbours as it
- * walks) and splits off what it doesn't need.
+ * (0x1FFFFFF; linker.py's RAM_END is one past it). Each block has a one-word
+ * header before it: its size in words, header included, positive when free
+ * and negative when in use. malloc takes the first free block that is big
+ * enough (joining free neighbours as it walks) and splits off what it
+ * doesn't need.
  */
 #include <stdlib.h>
 #include <string.h>
 
 extern int _end[];
-#define HEAP_END ((int *)0x20000)
+#define HEAP_END ((int *)0x2000000)
 
 static int *heap;            /* the first block; 0 until the first malloc */
 
@@ -25,7 +26,7 @@ void *malloc(size_t n)
 {
     int *b;
     int need;
-    if (n == 0 || n >= 0x10000)
+    if (n == 0 || n >= 0x1000000)       /* more than all of RAM */
         return 0;
     if (heap == 0)
         setup();

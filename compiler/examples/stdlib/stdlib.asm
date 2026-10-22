@@ -70,9 +70,9 @@
 ;     str_to_int(addr)        [-]digits       the number
 ;
 ; HEAP
-;   malloc hands out RAM from HEAP_START (0x18000) to the end of RAM
-;   (0x1FFFF), 32K words. Program RAM (.ram, from 0x14000) must stay below
-;   HEAP_START: 16K words. Each block has one header word before it:
+;   malloc hands out RAM from HEAP_START (0x1800000) to the end of RAM
+;   (0x1FFFFFF), 8M words. Program RAM (.ram, from 0x1004000) must stay
+;   below HEAP_START: 8,372,224 words. Each block has one header word before it:
 ;   its size with the header, positive = free, negative = in use.
 ;   Neighbouring free blocks are joined the next time malloc passes them.
 ; ==================================================================
@@ -82,8 +82,8 @@
         .equ BACKSPACE, 0x08
         .equ IN_SIZE, 32            ; line buffer for read_int / read_float
         .equ HEX_DISPLAY, 0x3C
-        .equ HEAP_START, 0x18000    ; malloc's RAM: HEAP_START .. end of RAM
-        .equ HEAP_END, 0x20000      ; one past the last word of RAM
+        .equ HEAP_START, 0x1800000  ; malloc's RAM: HEAP_START .. end of RAM
+        .equ HEAP_END, 0x2000000    ; one past the last word of RAM
 
         .global print_char, print_string, print_int, print_newline
         .global print_float, print_hex, show_hex

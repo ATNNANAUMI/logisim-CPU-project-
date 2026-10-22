@@ -22,7 +22,8 @@ Calling convention (the one stdlib.asm uses, so C and assembly mix freely)
 
 Locals live in the stack frame above EBP (EBP+1, EBP+2, ...) and are read
 and written with STK GET/SET. A function that takes the address of a local
-computes FP = 0x10000 + EBP once (stack slot i is RAM word 0x10000 + i).
+computes FP = RAM_BASE + EBP once (stack slot i is RAM word i, at address
+RAM_BASE + i; RAM_BASE is 0x1000000, from the linker).
 """
 
 import os
@@ -33,6 +34,7 @@ import regalloc
 import typesys as T
 from cerror import CError, error_at
 from cparser import MASK, wrap
+from linker import RAM_BASE      # compiler/src/asm, on sys.path via driver.py
 from nodes import Node, Obj
 
 TEMPS = list(range(1, 13))
@@ -568,7 +570,7 @@ class CodeGen:
                 self.ins("STK", "PUSH")
             if self.fp_slot is not None:
                 self.read_ebp()
-                self.ins("ADD", "R0", "#0x10000")
+                self.ins("ADD", "R0", f"#0x{RAM_BASE:X}")
                 self.ins("DATA", f"R{SCRATCH}", str(self.fp_slot))
                 self.ins("STK", "SET", f"R{SCRATCH}")
             return
@@ -591,7 +593,7 @@ class CodeGen:
         self.ins("CPY", "R2", "R0")
         self.ins("STK", "SET", f"R{SCRATCH}")
         if self.fp_slot is not None:
-            self.ins("ADD", "R1", "#0x10000")
+            self.ins("ADD", "R1", f"#0x{RAM_BASE:X}")
             self.ins("DATA", f"R{SCRATCH}", str(self.fp_slot))
             self.ins("STK", "SET", f"R{SCRATCH}")
 
@@ -609,7 +611,7 @@ class CodeGen:
         return slot
 
     def load_fp(self):
-        """R0 = the frame's RAM address (0x10000 + EBP)."""
+        """R0 = the frame's RAM address (RAM_BASE + EBP)."""
         if self.fp_slot is None:
             self.fp_slot = self.alloc_slot()
         self.ins("DATA", f"R{SCRATCH}", str(self.fp_slot))

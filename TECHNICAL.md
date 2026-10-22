@@ -23,31 +23,37 @@ file has the details.
 | item | size | notes |
 | --- | --- | --- |
 | `R0`–`R15` | 32 bits each | general purpose; every ALU result is written to `R0` |
-| `IAR` | 17 bits | instruction address register (program counter) |
+| `IAR` | 25 bits | instruction address register (program counter) |
 | `IR` | 16 bits | instruction register (low 16 bits of the fetched word) |
 | flags | 4 bits | `C A N Z` (bit 3 … bit 0) |
 | `ESP`, `EBP` | 14 bits each | stack pointer and frame pointer, indices into the stack area |
-| `MAR` | 17 bits | memory address register (inside the `RAM` subcircuit) |
+| `MAR` | 25 bits | memory address register (inside the `RAM` subcircuit) |
 | `ACC`, `TMP` | 32 bits each | internal ALU latches, not visible to programs |
 
 ### 1.2 Memory map
 
-One 17-bit address bus. Bit 16 chooses the bank:
+One 25-bit address bus. Each bank has a 24-bit address (16M words); bit 24
+chooses the bank:
 
 ```
-0x00000 ─ 0x0FFFF   ROM  64K × 32   program and constant data, read only
-0x10000 ─ 0x13FFF   RAM  stack area (16K words, indexed by ESP/EBP)
-0x14000 ─ 0x1FFFF   RAM  free; the linker puts .ram data here
+0x0000000 ─ 0x0FFFFFF   ROM  16M × 32   program and constant data, read only
+0x1000000 ─ 0x1003FFF   RAM  stack area (16K words, indexed by ESP/EBP)
+0x1004000 ─ 0x1FFFFFF   RAM  free; the linker puts .ram data here
 ```
+
+**The circuit is still the 16-bit version** (17-bit bus, bit 16 = RAM, 64K
+words per bank: ROM `0x00000–0x0FFFF`, RAM `0x10000–0x1FFFF`). The toolchain
+and the simulator use the 24-bit map above; 2.4 lists what the circuit needs
+before it can run these programs, and `logisim/run_rom.py` refuses until then.
 
 * Reads work on both banks. Writes to ROM are dropped (the circuit raises a
   "tried writing in ROM" error line; the simulator ignores the write and notes
   it in the trace).
-* The stack is the first quarter of RAM (`RAM[0x0000..0x3FFF]`). `ESP` and
-  `EBP` are 14-bit indices into it, so they wrap at 16K. `STK SET/GET`
+* The stack is the first 16K words of RAM (`RAM[0x0000..0x3FFF]`). `ESP`
+  and `EBP` are 14-bit indices into it, so they wrap at 16K. `STK SET/GET`
   addresses are not limited to the stack area: they wrap across the whole
   RAM (see 1.6).
-* The IAR is 17 bits, so the CPU *can* fetch from RAM, but the assembler never
+* The IAR is 25 bits, so the CPU *can* fetch from RAM, but the assembler never
   puts code there.
 
 ### 1.3 Instruction word
@@ -180,10 +186,12 @@ The sub-operation is in the RA field.
 
 The stack grows **upward** from RAM index 0. `SET`/`GET` are relative to
 `EBP`; negative `RB` reaches arguments below the frame. `EBP + RB` wraps at
-16 bits, across the **entire RAM**, not just the 16K stack area: with
-`EBP = 0`, index `-1` reads or writes the last word of RAM (`0x1FFFF`) and
-index `0x8000` reaches `0x18000`; bits of `RB` above 15 are dropped. Measured
-on the circuit with `diag11.asm` and `diag16.asm`; the simulator does the same.
+the RAM's address width, across the **entire RAM**, not just the 16K stack
+area: with `EBP = 0`, index `-1` reads or writes the last word of RAM
+(`0x1FFFFFF`) and index `0x8000` reaches `0x1008000`; bits of `RB` above 23
+are dropped. Measured on the 16-bit circuit with `diag11.asm` and
+`diag16.asm` (there it wraps at 16 bits: `-1` reaches `0x1FFFF`); the
+simulator wraps at 24, taking the circuit's adder to grow with the RAM.
 
 ### 1.7 I/O (`COMM`, `0x08mb`)
 
@@ -355,6 +363,29 @@ remembers whether it is selected (a D flip-flop), and only reacts to
   clock in `PC`.
 * **Headless:** `logisim/run_rom.py` (section 7.2).
 
+### 2.4 Widening the circuit to 24-bit banks (not done yet)
+
+The toolchain and the simulator use 24-bit banks (1.2); the circuit is still
+16-bit, so programs built now can't run on it. These are the parts that carry
+an address (found by width in `CPU.circ`; the 16-bit parts of
+`CONTROL_SECTION`, `CPU_REG` and `INTRUCTION_REGISTER` are the instruction,
+not an address, and stay):
+
+| subcircuit | part | now | needed |
+| --- | --- | --- | --- |
+| `IAR` | the counter: 17 T flip-flops with their carry gates, and its two 17-bit splitters (bus in, bus out) | 17 bits | 25: eight more bit cells |
+| `RAM` | `MAR` register and the splitters that take its bank bit | 17 bits, bit 16 = RAM | 25 bits, bit 24 = RAM |
+| `RAM` | the `RAM` and `ROM` components | 16 address bits | 24 (Logisim's largest) |
+| `RAM` | the adder for `EBP + index` and `RA + RB`, and the 17-bit controlled buffers around it | 17 bits | 25 |
+| `RAM` | the 16-bit splitters and buffers that feed the memories' addresses | 16 bits | 24 |
+| `RAM` | the stack index padding (14-bit `ESP`/`EBP` + grounded bits) | 2 grounded bits | 10, so the stack stays at RAM `0x0000–0x3FFF` |
+| `RAM` | the debugging comparator against `0x287` | 17 bits | 25, or remove it (9) |
+
+`ESP`/`EBP` (14 bits) and the 32-bit data paths don't change. Once the ROM
+has 24 address bits, `run_rom.py` runs programs again (it writes the
+matching `addr/data` header itself). Relative jumps need nothing new: the
+offset is added in 32 bits and the IAR keeps its low 25.
+
 ---
 
 
@@ -372,20 +403,20 @@ modules import each other by plain name, so run them as scripts
 | `config.py` | sizes (`WORD_BITS`, `ADDR_BITS`, `RAM_BIT`, `BANK_WORDS`, `STACK_WORDS`), device addresses, and the **TWEAKS** switches (3.4) |
 | `isa.py` | opcode tables, `decode(word) -> Instr`, `disassemble(word, operand)`. `Instr.takes_operand` says whether a literal word follows |
 | `alu.py` | `int_op(name, a, b)` and `float_op(name, a, b)`, each returning `(R0 value, flag nibble)`; float32 ↔ bits helpers |
-| `memory.py` | `Memory` with two 64K banks, `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
+| `memory.py` | `Memory` with two 16M-word banks (Python lists, 128 MB each), `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
 | `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes), `Keyboard` (a deque; empty reads 0), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `DeviceBus` (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()`, `reset()`, `resume()` |
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 20 checks on the core |
+| `selftest.py` | 21 checks on the core |
 
 ### 3.2 Execution model
 
 `CPU.step()`:
 
 1. If halted or stopped, return `None`.
-2. Fetch `mem[IAR]` and increment IAR (wrapping at 17 bits).
+2. Fetch `mem[IAR]` and increment IAR (wrapping at 25 bits).
 3. Decode. If the instruction takes an operand, fetch the next word too and
    remember its address (jumps are relative to it).
 4. Execute and return a `Step(address, word, operand, text, note)` for the
@@ -517,7 +548,7 @@ problems of all files (bad source, unreadable file, broken `.obj`), as
 | `objfile.py` | `ObjectFile` and `Reloc`, saved as readable JSON |
 | `linker.py` | object files → one ROM image, plus `format_raw` and `format_map` |
 | `errors.py` | `AsmError` (one message with file and line) and `AsmErrors` (a batch) |
-| `selftest.py` | 19 checks for the assembler and linker |
+| `selftest.py` | 20 checks for the assembler and linker |
 | `asm_grammar.py` | writes railroad diagrams of the grammar to `asm_grammar.html` (needs `pip install railroad-diagrams`) |
 
 ### 4.3 Assembling (two passes)
@@ -637,10 +668,10 @@ only when true, so older object files still load.
 ### 4.6 Linking
 
 ```
-ROM  0x00000   RJMP start           (2 words, added by the linker)
-     0x00002   each file's ROM part, in command-line order
-RAM  0x10000   stack (never touched by the linker)
-     0x14000   each file's RAM part, in command-line order
+ROM  0x0000000 RJMP start           (2 words, added by the linker)
+     0x0000002 each file's ROM part, in command-line order
+RAM  0x1000000 stack (never touched by the linker)
+     0x1004000 each file's RAM part, in command-line order
 ```
 
 0. For a library (`--lib`), choose the parts to keep: starting from every
@@ -758,14 +789,14 @@ line is empty (so it can't erase the prompt).
 | `c/guess.c` | C: guess the number with `scanf`; seeded by how long the first key takes (`key_pressed`); the header has a transcript |
 | `c/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, `~` on registers, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
 | `tests/diag10.asm` | `INT` on floats below 1 (diagnostic, resolved: they give 0) |
-| `tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x14000`; they are also printed in hex |
-| `tests/diag12.asm` | what the C compiler relies on: reading and setting `ESP`/`EBP` with `STK CALL`/`STK RET`, stack slot `i` being RAM `0x10000 + i`, the carry flag after `CMP`/`SUB`/`ADD`, the `A` flag after `FCMP` (a float compare), `MULT`'s low 32 bits, `DIV` by `0x80000000`. Link it first; 30 results from `0x14000`, also printed |
-| `tests/diag13.asm` | the carry flag (and A N Z) after `SUB`, `--`, `++`, `NEG`, `SHL`, `SHR`, `MULT`, `ADD`, `AND`, `TEST`: on the circuit `SUB` sets C on a borrow and `CMP`/`--`/`NEG`/`MULT` never set it. Link it first; 24 results from `0x14000`, also printed |
-| `tests/diag14.asm` | float special cases: division by ±0, NaN, infinity, `INT` out of range, overflow, subnormals. Link it first; 22 results from `0x14000`, also printed |
-| `tests/diag15.asm` | more of the same after diag14: `INT` of -infinity and of large values, the remaining divisions by zero. Link it first; 15 results from `0x14000`, also printed |
-| `tests/diag16.asm` | where `STK SET/GET` put `EBP + RB` (it wraps at 16 bits, across all of RAM), R0 and flags after `DIV`, `MOD` and `NOT` (`MOD` by 0 gives 0; `NOT` inverts RA), the float opcodes with no defined result, float rounding (to nearest, ties to even). Link it first; 52 results from `0x14000`, also printed |
-| `tests/diag17.asm` | follow-up to diag16: `NOT` encoded with RA and RB both set (it inverts RA, not RB), `DIV`/`MOD` by 0 and `0x80000000` by -1, float opcodes 4, 5, B, C with other inputs (4 doubles RB). Link it first; 30 results from `0x14000`, also printed |
-| `tests/diag18.asm` | the flags after `OR` and `XOR`, and `NOT` as the assembler writes it now (register in both fields: `~Rx`, `A` = 0); all as the simulator. Link it first; 16 results from `0x14000`, also printed |
+| `tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x1004000`; they are also printed in hex |
+| `tests/diag12.asm` | what the C compiler relies on: reading and setting `ESP`/`EBP` with `STK CALL`/`STK RET`, stack slot `i` being RAM word `i` (address `0x1000000 + i` now, `0x10000 + i` on the 16-bit circuit), the carry flag after `CMP`/`SUB`/`ADD`, the `A` flag after `FCMP` (a float compare), `MULT`'s low 32 bits, `DIV` by `0x80000000`. Link it first; 30 results from `0x1004000`, also printed |
+| `tests/diag13.asm` | the carry flag (and A N Z) after `SUB`, `--`, `++`, `NEG`, `SHL`, `SHR`, `MULT`, `ADD`, `AND`, `TEST`: on the circuit `SUB` sets C on a borrow and `CMP`/`--`/`NEG`/`MULT` never set it. Link it first; 24 results from `0x1004000`, also printed |
+| `tests/diag14.asm` | float special cases: division by ±0, NaN, infinity, `INT` out of range, overflow, subnormals. Link it first; 22 results from `0x1004000`, also printed |
+| `tests/diag15.asm` | more of the same after diag14: `INT` of -infinity and of large values, the remaining divisions by zero. Link it first; 15 results from `0x1004000`, also printed |
+| `tests/diag16.asm` | where `STK SET/GET` put `EBP + RB` (on the 16-bit circuit it wraps at 16 bits, across all of RAM), R0 and flags after `DIV`, `MOD` and `NOT` (`MOD` by 0 gives 0; `NOT` inverts RA), the float opcodes with no defined result, float rounding (to nearest, ties to even). Link it first; 52 results from `0x1004000`, also printed |
+| `tests/diag17.asm` | follow-up to diag16: `NOT` encoded with RA and RB both set (it inverts RA, not RB), `DIV`/`MOD` by 0 and `0x80000000` by -1, float opcodes 4, 5, B, C with other inputs (4 doubles RB). Link it first; 30 results from `0x1004000`, also printed |
+| `tests/diag18.asm` | the flags after `OR` and `XOR`, and `NOT` as the assembler writes it now (register in both fields: `~Rx`, `A` = 0); all as the simulator. Link it first; 16 results from `0x1004000`, also printed |
 
 All of these build and run correctly in the simulator. The `c/` programs
 are C: build them with `python compiler/src/cc build <file>` (or `run`,
@@ -826,8 +857,10 @@ python logisim/run_rom.py logisim/CPU.circ --dump-rom current.rom
 ```
 
 It parses the `.circ` XML and finds the single `ROM` component inside the
-`RAM` subcircuit. It replaces that ROM's contents with the image
-(`addr/data: 16 32` header, 8 words per line) and writes
+`RAM` subcircuit. If that ROM has fewer than 24 address bits it stops with a
+message: programs are now laid out for 24-bit banks and the circuit is still
+16-bit (2.4). Otherwise it replaces the ROM's contents with the image
+(`addr/data: <the ROM's width> 32` header, 8 words per line) and writes
 `CPU__patched.circ` to the current directory (or to `--keep`). Then it runs
 `java -Djava.awt.headless=true -jar <jar> <patched> --toplevel-circuit PC -t tty,halt`
 and prints the TTY output. Without `--jar` it uses `$LOGISIM_JAR`, then
@@ -846,20 +879,24 @@ repo.
 ### 7.3 Self-checks
 
 ```
-python compiler/src/asm/selftest.py   # 19 checks: encodings, values, strings, jumps,
-                                      # CALL/RET, SAVE/RESTORE, linking, link errors
+python compiler/src/asm/selftest.py   # 20 checks: encodings, values, strings, jumps,
+                                      # CALL/RET, SAVE/RESTORE, linking, a program past
+                                      # 64K words and the size limits, link errors
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 20 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 21 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
                                       # floats, FCMP flags, keyboard, backspace, ADDR/JMRB,
                                       # float specials, float SHL, run() against step()
-                                      # on random code, run() stopping at breakpoints
-python compiler/src/cc/selftest.py    # 14 checks: preprocessor, error messages (several per run), warnings,
+                                      # on random code, run() stopping at breakpoints,
+                                      # the top of both 16M-word banks
+python compiler/src/cc/selftest.py    # 15 checks: preprocessor, error messages (several per run), warnings,
                                       # type sizes, exit/atexit, keyboard input, globals
                                       # after a reset, library override, reserved names,
-                                      # mixing C and assembly, CLI, C line stepping, and every test program
+                                      # mixing C and assembly, memory past 64K words (ROM
+                                      # table, RAM array, malloc, far code), CLI, C line
+                                      # stepping, and every test program
                                       # in compiler/src/cc/tests/ against gcc's output
 python compiler/src/img/selftest.py   # 9 checks: gamma codes, encode/decode round trips
                                       # (both forms), the packed fallback,
@@ -1050,7 +1087,7 @@ maybe plus a register), or a register variable. Loads and stores pick the
 cheapest instruction: `STK GET/SET` for frame slots, `LD`/`ST` for a known
 address, `ALD`/`AST` for base + index (array elements). A local's address is
 needed only when it escapes (`&x`, an array passed to a function): then the
-function computes `FP = 0x10000 + EBP` once in its prologue (`STK CALL`,
+function computes `FP = 0x1000000 + EBP` (`RAM_BASE + EBP`) once in its prologue (`STK CALL`,
 `STK GET 0`, `STK RET` read EBP) and keeps it in a frame slot.
 
 **Evaluation order.** Of two operands, the one that needs no code goes

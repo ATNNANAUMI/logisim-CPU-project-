@@ -10,17 +10,25 @@ WORD_BITS = 32
 WORD_MASK = 0xFFFFFFFF
 SIGN_BIT = 1 << 31
 
-ADDR_BITS = 17                 # IAR is 17 bits: bit16 selects RAM
+# Each bank (ROM and RAM) has a 24-bit address: 16M words each. The IAR is
+# one bit wider, and that top bit selects RAM. The linker has the same
+# layout (compiler/src/asm/linker.py); change both together. The circuit
+# still has 16-bit banks (TECHNICAL.md 2.4 lists what to widen).
+BANK_BITS = 24
+BANK_WORDS = 1 << BANK_BITS    # 16M words of ROM and 16M words of RAM
+BANK_MASK = BANK_WORDS - 1
+ADDR_BITS = BANK_BITS + 1      # IAR is 25 bits: bit 24 selects RAM
 ADDR_MASK = (1 << ADDR_BITS) - 1
-RAM_BIT = 1 << 16
-BANK_WORDS = 1 << 16           # 64K words of ROM and 64K words of RAM
+RAM_BIT = 1 << BANK_BITS
+ADDR_DIGITS = (ADDR_BITS + 3) // 4   # hex digits in a printed address
 
-STACK_WORDS = BANK_WORDS // 4  # bottom 25% of RAM, 14-bit index
+STACK_WORDS = 1 << 14          # the bottom 16K words of RAM, 14-bit index
 STACK_MASK = STACK_WORDS - 1
-# STK SET/GET reach the RAM word EBP + RB, and that sum wraps at 16 bits,
-# across all of RAM, not at the stack area's 14 (measured on the circuit
-# with diag11 and diag16, 2026-10-13).
-STACK_INDEX_MASK = BANK_WORDS - 1
+# STK SET/GET reach the RAM word EBP + RB, and that sum wraps at the RAM's
+# address width, across all of RAM, not at the stack area's 14 bits
+# (measured on the 16-bit circuit with diag11 and diag16, 2026-10-13; with
+# 24-bit banks it is taken to wrap at 24).
+STACK_INDEX_MASK = BANK_MASK
 
 DISPLAY_ADDR = 0x5C
 HEX_DISPLAY_ADDR = 0x3C       # 8-digit hex display: shows the last word sent

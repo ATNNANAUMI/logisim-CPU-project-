@@ -45,7 +45,7 @@ logisim-CPU-project-/
 │   │   ├── objfile.py        ObjectFile / Reloc (abs|rel, rom_only for CALL targets), saved as JSON (.obj)
 │   │   ├── linker.py         .obj files → ROM image; --lib: only the needed parts; checks externs/RAM calls; format_raw(), format_map()
 │   │   ├── errors.py         AsmError (file:line: message), AsmErrors (batch)
-│   │   ├── selftest.py       19 checks (incl. building every compiler/examples program)
+│   │   ├── selftest.py       20 checks (incl. building every compiler/examples program)
 │   │   └── asm_grammar.py    generates railroad-diagram HTML of the grammar (needs railroad-diagrams)
 │   ├── src/cc/               C compiler (run as `python compiler/src/cc <cmd>`); imports src/asm's modules
 │   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; run: --keys --steps --stats --trace)
@@ -58,7 +58,7 @@ logisim-CPU-project-/
 │   │   ├── peephole.py       clean-ups per function
 │   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0, link, run in simulator
 │   │   ├── cerror.py         CError (file:line:col: error: ...)
-│   │   ├── selftest.py       14 checks (incl. every tests/ program against gcc's output)
+│   │   ├── selftest.py       15 checks (incl. every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
 │   │                         fuzz.py: random programs, gcc vs tiny C
 │   ├── src/img/              PNG -> compressed image for gfx_image() (run as `python compiler/src/img pic.png`)
@@ -99,7 +99,7 @@ logisim-CPU-project-/
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png]`
-    │   └── selftest.py       20 checks
+    │   └── selftest.py       21 checks
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -112,9 +112,9 @@ PC (top)                  has the output pin `halt` that ends headless runs at H
 │   ├── ALU → FPU         integer ops + float unit (hand-built IEEE-754 path + Logisim FP components)
 │   ├── ACC, TMP          ALU latches
 │   ├── FLAG_REG          C A N Z
-│   ├── IAR               17-bit counter (T flip-flops)
+│   ├── IAR               17-bit counter (T flip-flops); the toolchain now wants 25 (TECHNICAL 2.4)
 │   └── INTRUCTION_REGISTER  16-bit
-├── RAM                   memory system: MAR(17), ROM 64K×32 (PROGRAM LIVES HERE), RAM 64K×32, ESP/EBP (14-bit)
+├── RAM                   memory system: MAR(17), ROM 64K×32 (PROGRAM LIVES HERE), RAM 64K×32, ESP/EBP (14-bit); still 16-bit banks
 ├── display               text TTY at 0x5C
 ├── NUMBER_DISPLAY        8 hex digits at 0x3C
 └── KEYBOARD              keyboard at 0xF0
@@ -126,9 +126,13 @@ The design follows the "But How Do It Know?" style: a single bus,
 
 ## ISA cheat sheet
 
-* 32-bit words. 16 registers `R0`–`R15`. 17-bit addresses: bit 16 = RAM.
-  ROM `0x00000–0x0FFFF` (read-only), stack = RAM `0x10000–0x13FFF`, linker
-  data from `0x14000`.
+* 32-bit words. 16 registers `R0`–`R15`. 25-bit addresses, 16M words per
+  bank: bit 24 = RAM. ROM `0x0000000–0x0FFFFFF` (read-only), stack = RAM
+  `0x1000000–0x1003FFF`, linker data from `0x1004000`, end of RAM
+  `0x1FFFFFF`. The memory map lives in `linker.py` and `config.py` (and
+  `malloc.c`/`stdlib.asm` write down the end of RAM). **The circuit still
+  has the 16-bit map** (bit 16 = RAM, 64K words per bank) and can't run
+  these programs until it is widened (TECHNICAL 2.4); `run_rom.py` refuses.
 * Instruction: `bit14 IMM | bit13 FLOAT | bit12 ALU | 11..8 opcode | 7..4 RA | 3..0 RB`.
   Groups: `0x0` system, `0x1` int ALU, `0x3` float ALU, `0x5`/`0x7` = with an
   immediate (the next word).
@@ -156,9 +160,9 @@ The design follows the "But How Do It Know?" style: a single bus,
 * Jumps are relative to the **address of the offset word**. `RJF` = any
   listed flag on, `RJNF` = any listed flag off. Mask: C=8 A=4 N=2 Z=1.
 * Stack grows up. `STK PUSH/POP` use R0. `STK CALL/RET` only move the frame
-  (no jump). `STK SET/GET, RB` = `stack[EBP+RB]`; that sum wraps at 16 bits,
-  across the whole RAM (EBP=0, RB=-1 → last RAM word `0x1FFFF`; measured,
-  `diag11`/`diag16`, and the simulator matches).
+  (no jump). `STK SET/GET, RB` = `stack[EBP+RB]`; that sum wraps at the RAM's
+  address width, across the whole RAM (EBP=0, RB=-1 → last RAM word
+  `0x1FFFFFF`; measured at 16 bits on the circuit, `diag11`/`diag16`).
 * `COMM INDATA|INADDR|OUTDATA|OUTADDR, RB`. Display `0x5C`, number display
   `0x3C`, keyboard `0xF0` (empty reads 0). RGB screen (planned wiring, in
   the simulator and `gfx.h`): `0x6C` one pixel per word (x bits 31–24, y
@@ -201,7 +205,7 @@ The design follows the "But How Do It Know?" style: a single bus,
   with a library name wins.
 * String literals and const globals are in ROM (writes ignored).
   Initialised globals are copied to RAM by per-file `_init_` routines that
-  crt0 calls before `main`; malloc's heap runs from `_end` to `0x1FFFF`.
+  crt0 calls before `main`; malloc's heap runs from `_end` to `0x1FFFFFF`.
 * stdin: a line at a time, echoed, backspace edits, Ctrl-D (0x04) = EOF.
 * Tests: `compiler/src/cc/tests/*.c` must print exactly gcc's output
   (`.expected`); `difftest.py` checks with gcc.

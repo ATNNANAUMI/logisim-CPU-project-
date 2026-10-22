@@ -1,4 +1,4 @@
-"""The CPU itself: 16 registers, 17-bit IAR, C A N Z flags, a RAM stack."""
+"""The CPU itself: 16 registers, 25-bit IAR, C A N Z flags, a RAM stack."""
 
 from dataclasses import dataclass, field
 
@@ -108,6 +108,7 @@ class CPU:
         int_names, float_names = isa.INT_OPS, isa.FLOAT_OPS
         MASK, SIGN = config.WORD_MASK, config.SIGN_BIT
         ADDR_MASK, STACK_MASK = config.ADDR_MASK, config.STACK_MASK
+        RAM_BIT, BANK_MASK = config.RAM_BIT, config.BANK_MASK
         INDEX_MASK = config.STACK_INDEX_MASK
         a_signed, shr_arith = config.A_FLAG_SIGNED, config.SHR_ARITHMETIC
 
@@ -117,7 +118,7 @@ class CPU:
             while count < max_steps:
                 if iar in stop_at and count:
                     break
-                word = ram[iar & 0xFFFF] if iar & 0x10000 else rom[iar]
+                word = ram[iar & BANK_MASK] if iar & RAM_BIT else rom[iar]
                 iar = (iar + 1) & ADDR_MASK
                 count += 1
                 op = (word >> 8) & 0xF
@@ -126,7 +127,7 @@ class CPU:
                 if word & 0x1000:                           # ALU
                     a = regs[(word >> 4) & 0xF]
                     if word & 0x4000:                       # immediate operand
-                        b = ram[iar & 0xFFFF] if iar & 0x10000 else rom[iar]
+                        b = ram[iar & BANK_MASK] if iar & RAM_BIT else rom[iar]
                         iar = (iar + 1) & ADDR_MASK
                     else:
                         b = regs[rb]
@@ -190,17 +191,17 @@ class CPU:
                     continue
 
                 if op == 0x3:                               # DATA
-                    regs[rb] = ram[iar & 0xFFFF] if iar & 0x10000 else rom[iar]
+                    regs[rb] = ram[iar & BANK_MASK] if iar & RAM_BIT else rom[iar]
                     iar = (iar + 1) & ADDR_MASK
                 elif op == 0xC:                             # ALD
                     addr = (regs[(word >> 4) & 0xF] + regs[rb]) & ADDR_MASK
-                    regs[0] = ram[addr & 0xFFFF] if addr & 0x10000 else rom[addr]
+                    regs[0] = ram[addr & BANK_MASK] if addr & RAM_BIT else rom[addr]
                 elif op == 0xD:                             # AST
                     addr = (regs[(word >> 4) & 0xF] + regs[rb]) & ADDR_MASK
-                    if addr & 0x10000:
-                        ram[addr & 0xFFFF] = regs[0]
+                    if addr & RAM_BIT:
+                        ram[addr & BANK_MASK] = regs[0]
                 elif op == 0x4 or op == 0x5 or op == 0x6:   # RJMP, RJF, RJNF
-                    offset = ram[iar & 0xFFFF] if iar & 0x10000 else rom[iar]
+                    offset = ram[iar & BANK_MASK] if iar & RAM_BIT else rom[iar]
                     if op == 0x4:
                         take = True
                     elif op == 0x5:
@@ -208,7 +209,7 @@ class CPU:
                     else:
                         take = flags & rb != rb
                     # relative to the offset word; adding the unsigned offset
-                    # gives the same low 17 bits as adding the signed one
+                    # gives the same low address bits as adding the signed one
                     iar = (iar + offset) & ADDR_MASK if take else (iar + 1) & ADDR_MASK
                 elif op == 0xE:                             # CPY
                     regs[rb] = regs[(word >> 4) & 0xF]
@@ -253,11 +254,11 @@ class CPU:
                             regs[rb] = value & MASK
                 elif op == 0x1:                             # LD
                     addr = regs[(word >> 4) & 0xF] & ADDR_MASK
-                    regs[rb] = ram[addr & 0xFFFF] if addr & 0x10000 else rom[addr]
+                    regs[rb] = ram[addr & BANK_MASK] if addr & RAM_BIT else rom[addr]
                 elif op == 0x2:                             # ST
                     addr = regs[(word >> 4) & 0xF] & ADDR_MASK
-                    if addr & 0x10000:
-                        ram[addr & 0xFFFF] = regs[rb]
+                    if addr & RAM_BIT:
+                        ram[addr & BANK_MASK] = regs[rb]
                 elif op == 0x9:                             # ADDR
                     regs[rb] = iar
                 elif op == 0xA:                             # JMRB
@@ -286,7 +287,7 @@ class CPU:
 
         if name == "LD":
             self.regs[rb] = self.mem.read(self.regs[ra])
-            return f"R{rb} <- [0x{self.regs[ra] & config.ADDR_MASK:05X}]"
+            return f"R{rb} <- [0x{self.regs[ra] & config.ADDR_MASK:0{config.ADDR_DIGITS}X}]"
 
         if name == "ST":
             ok = self.mem.write(self.regs[ra], self.regs[rb])
@@ -328,12 +329,12 @@ class CPU:
         if name == "ALD":
             addr = (self.regs[ra] + self.regs[rb]) & config.ADDR_MASK
             self.regs[0] = self.mem.read(addr)
-            return f"R0 <- [0x{addr:05X}]"
+            return f"R0 <- [0x{addr:0{config.ADDR_DIGITS}X}]"
 
         if name == "AST":
             addr = (self.regs[ra] + self.regs[rb]) & config.ADDR_MASK
             ok = self.mem.write(addr, self.regs[0])
-            return f"[0x{addr:05X}] <- R0" if ok else "write to ROM ignored"
+            return f"[0x{addr:0{config.ADDR_DIGITS}X}] <- R0" if ok else "write to ROM ignored"
 
         if name == "CPY":
             self.regs[rb] = self.regs[ra]
@@ -358,7 +359,7 @@ class CPU:
     def _jump(self, operand_addr: int, operand: int) -> str:
         target = (operand_addr + alu.to_signed(operand)) & config.ADDR_MASK
         self.iar = target
-        return f"-> 0x{target:05X}"
+        return f"-> 0x{target:0{config.ADDR_DIGITS}X}"
 
     def _comm(self, mode: int, rb: int) -> str:
         if mode == 0b11:                                   # OUTADDR
@@ -399,11 +400,11 @@ class CPU:
         if name == "SET":                       # EBP + RB, wrapping across all RAM
             index = (self.ebp + self.regs[rb]) & config.STACK_INDEX_MASK
             self.mem.stack_write(index, self.regs[0])
-            return f"stack[0x{index:04X}] <- R0"
+            return f"stack[0x{index:0{config.ADDR_DIGITS - 1}X}] <- R0"
         if name == "GET":
             index = (self.ebp + self.regs[rb]) & config.STACK_INDEX_MASK
             self.regs[0] = self.mem.stack_read(index)
-            return f"R0 <- stack[0x{index:04X}]"
+            return f"R0 <- stack[0x{index:0{config.ADDR_DIGITS - 1}X}]"
         return "undefined stack op"
 
     def _bump(self, pointer: int, delta: int) -> int:

@@ -66,7 +66,7 @@ The CPU addresses 32-bit words, not bytes. So every scalar type is one word:
 | `unsigned short`, `unsigned`, `unsigned long` | 1 | 0 .. 4294967295 |
 | `_Bool` | 1 | 0 or 1 |
 | `float`, `double`, `long double` | 1 | IEEE-754 single precision (the CPU's float unit) |
-| pointers | 1 | a 17-bit address: ROM `0x00000`-`0x0FFFF`, RAM `0x10000`-`0x1FFFF` |
+| pointers | 1 | a 25-bit address: ROM `0x0000000`-`0x0FFFFFF`, RAM `0x1000000`-`0x1FFFFFF` |
 | `enum` | 1 | `int` |
 
 * `CHAR_BIT` is 32 and `sizeof(char) == sizeof(int) == 1`. This is allowed
@@ -140,9 +140,9 @@ GNU statement expressions `({ ... })`, `a ?: b`, `_Thread_local`, `_Atomic`.
 ROM  0x00000   RJMP start (from the linker)
                crt0, your code, the library code, string literals, const data,
                and the starting values of initialised globals
-RAM  0x10000   the stack (16K words), grows upward
-     0x14000   global and static variables
-     _end      the heap (malloc) up to 0x1FFFF
+RAM  0x1000000 the stack (16K words), grows upward
+     0x1004000 global and static variables
+     _end      the heap (malloc) up to 0x1FFFFFF
 ```
 
 * `start` (in the generated start-up code, crt0) calls each file's

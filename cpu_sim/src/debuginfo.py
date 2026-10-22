@@ -11,8 +11,10 @@ import bisect
 import re
 from pathlib import Path
 
-_LABEL_RE = re.compile(r"^([0-9a-fA-F]{5})\s+(rom|ram)\s+(\S+)\s+(.*?)(\s+\(global\))?$")
-_LINE_RE = re.compile(r"^([0-9a-fA-F]{5})\s+(\d+)\s+(.+)$")
+import config as config
+
+_LABEL_RE = re.compile(r"^([0-9a-fA-F]+)\s+(rom|ram)\s+(\S+)\s+(.*?)(\s+\(global\))?$")
+_LINE_RE = re.compile(r"^([0-9a-fA-F]+)\s+(\d+)\s+(.+)$")
 # labels the C compiler makes up: not function names
 _GENERATED = re.compile(r"^_(K|L|S|F|C|G|A|T_|I_|V\d+_|crt0_|init_)")
 
@@ -20,7 +22,7 @@ _GENERATED = re.compile(r"^_(K|L|S|F|C|G|A|T_|I_|V\d+_|crt0_|init_)")
 class DebugInfo:
     def __init__(self, labels=(), lines=()):
         """labels: (address, name); lines: (address, file, line)."""
-        rom = sorted((a, n) for a, n in labels if a < 0x10000 and not _GENERATED.match(n))
+        rom = sorted((a, n) for a, n in labels if a < config.RAM_BIT and not _GENERATED.match(n))
         self.func_addrs = [a for a, _ in rom]
         self.func_names = [n for _, n in rom]
         self.lines = sorted(lines)
