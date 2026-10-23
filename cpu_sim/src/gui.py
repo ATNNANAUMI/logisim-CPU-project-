@@ -17,6 +17,7 @@ PAGE_WORDS = 256
 MONO = "TkFixedFont"
 MAX_PER_TICK = 100_000         # keeps the window responsive at high speeds
 MAX_SLICE = 0.05               # seconds of running per window tick at "max"
+STATE_CHARS = 30               # fixed width of the status block, so it never resizes the window
 
 # label -> instructions per second (0 = as fast as the host manages)
 SPEEDS = [
@@ -385,14 +386,19 @@ class SimulatorWindow(tk.Tk):
 
     # -------------------------------------------------------------- layout
     def _build(self) -> None:
-        left = ttk.Frame(self)
-        left.pack(side="left", fill="y", padx=6, pady=6)
+        # three columns with draggable sashes between them; the right column
+        # is split again between the outputs and the trace
+        columns = ttk.PanedWindow(self, orient="horizontal")
+        columns.pack(fill="both", expand=True, padx=6, pady=6)
+
+        left = ttk.Frame(columns)
+        columns.add(left, weight=0)
         self._build_controls(left)
         self._build_registers(left)
         self._build_state(left)
 
-        middle = ttk.Notebook(self)
-        middle.pack(side="left", fill="both", expand=True, pady=6)
+        middle = ttk.Notebook(columns)
+        columns.add(middle, weight=1)
         self.rom_pane = MemoryPane(middle, self.cpu, "rom")
         self.ram_pane = MemoryPane(middle, self.cpu, "ram")
         self.source_pane = SourcePane(middle, self.cpu)
@@ -403,10 +409,14 @@ class SimulatorWindow(tk.Tk):
         if self.info and self.info.lines:
             middle.select(self.source_pane)
 
-        right = ttk.Frame(self)
-        right.pack(side="left", fill="both", expand=True, padx=6, pady=6)
-        self._build_display(right)
-        self._build_trace(right)
+        right = ttk.PanedWindow(columns, orient="vertical")
+        columns.add(right, weight=1)
+        outputs = ttk.Frame(right)
+        right.add(outputs, weight=1)
+        self._build_display(outputs)
+        trace = ttk.Frame(right)
+        right.add(trace, weight=0)
+        self._build_trace(trace)
 
     def _build_controls(self, parent) -> None:
         box = ttk.LabelFrame(parent, text="control")
@@ -483,7 +493,8 @@ class SimulatorWindow(tk.Tk):
                             command=self.commit_flags).pack(side="left", padx=2)
             self.flag_vars[name] = var
 
-        self.state_label = ttk.Label(box, font=MONO, justify="left", text="")
+        self.state_label = ttk.Label(box, font=MONO, justify="left", text="",
+                                     width=STATE_CHARS, anchor="w")
         self.state_label.pack(anchor="w", padx=6, pady=4)
 
     # ------------------------------------------------------------ editing
@@ -534,8 +545,13 @@ class SimulatorWindow(tk.Tk):
         self.screen_zoom = max(1, 384 // max(video.width, video.height))
         self.screen_image = tk.PhotoImage(width=video.width, height=video.height)
         self.screen_big = self.screen_image.zoom(self.screen_zoom)
+        # placed, not packed: the picture follows the tab's size (_fit_screen)
+        # without its own size ever pushing the tab, and the window, around
         self.screen_label = tk.Label(screen_box, image=self.screen_big, background="#101010")
-        self.screen_label.pack(expand=True, padx=4, pady=4)
+        self.screen_label.place(relx=0.5, rely=0.5, anchor="center")
+        size = self.screen_zoom * max(video.width, video.height) + 8
+        screen_box.configure(width=size, height=size)
+        screen_box.bind("<Configure>", self._fit_screen)
         self._screen_shown = False
         self.display = tk.Text(box, font=MONO, height=16, wrap="char",
                                background="#101010", foreground="#c8ffc8",
@@ -561,7 +577,7 @@ class SimulatorWindow(tk.Tk):
         self.key_entry.bind("<KeyPress>", self.on_key)
         for paste in ("<<Paste>>", "<Control-v>", "<Control-V>"):
             self.key_entry.bind(paste, self.on_paste)    # more specific than <KeyPress>
-        self.buffer_label = ttk.Label(keys, text="buffer 0")
+        self.buffer_label = ttk.Label(keys, text="buffer 0", width=12)
         self.buffer_label.pack(side="left", padx=4)
 
     def _build_trace(self, parent) -> None:
@@ -782,13 +798,18 @@ class SimulatorWindow(tk.Tk):
             status = "running"
         else:
             status = "paused"
-        self.state_label.configure(text=(
-            f"bank  {'RAM' if self.cpu.iar & config.RAM_BIT else 'ROM'}\n"
-            f"out   0x{self.cpu.bus.out_addr:X}   in 0x{self.cpu.bus.in_addr:X}\n"
-            f"in    {self._where()}\n"
-            f"count {self.cpu.instructions}\n"
-            f"rate  {self._measured_rate()}\n"
-            f"{status}"))
+        lines = (
+            f"bank  {'RAM' if self.cpu.iar & config.RAM_BIT else 'ROM'}",
+            f"out   0x{self.cpu.bus.out_addr:X}   in 0x{self.cpu.bus.in_addr:X}",
+            f"in    {self._where()}",
+            f"count {self.cpu.instructions}",
+            f"rate  {self._measured_rate()}",
+            status)
+        # cut to the label's fixed width, so a long function name does not
+        # widen the column (and shake the window) every refresh
+        self.state_label.configure(text="\n".join(
+            line if len(line) <= STATE_CHARS else line[:STATE_CHARS - 1] + "…"
+            for line in lines))
 
         self.display.configure(state="normal")
         self.display.delete("1.0", "end")
@@ -806,6 +827,16 @@ class SimulatorWindow(tk.Tk):
                 pane.follow_iar()
                 pane.render()
             self.source_pane.render()
+
+    def _fit_screen(self, event) -> None:
+        """Zoom the RGB screen by the largest whole factor that fits its tab."""
+        video = self.cpu.bus.video
+        zoom = max(1, min((event.width - 8) // video.width,
+                          (event.height - 8) // video.height))
+        if zoom != self.screen_zoom:
+            self.screen_zoom = zoom
+            self.screen_big = self.screen_image.zoom(zoom)
+            self.screen_label.configure(image=self.screen_big)
 
     def _draw_screen(self) -> None:
         video = self.cpu.bus.video

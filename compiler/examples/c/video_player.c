@@ -29,7 +29,7 @@
 #include <time.h>
 
 #ifndef VIDEO
-#define VIDEO "videos/demo.h"
+#define VIDEO "videos/video.h"
 #endif
 #include VIDEO
 

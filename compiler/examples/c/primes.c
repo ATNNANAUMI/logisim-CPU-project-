@@ -10,7 +10,7 @@
 #include <stdbool.h>
 #include <cpu.h>
 
-#define N 200
+#define N 2000
 
 int main(void)
 {
@@ -23,7 +23,7 @@ int main(void)
             continue;
         for (j = i * i; j < N; j += i)
             composite[j] = true;
-        printf("%4d", i);
+        printf("%5d", i);
         if (++count % 10 == 0)
             printf("\n");
         last = i;
