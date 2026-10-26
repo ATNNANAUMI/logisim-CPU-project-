@@ -82,6 +82,7 @@ logisim-CPU-project-/
 │   │   ├── two_files/main.asm, lib.asm   multi-file linking example
 │   │   ├── c/                C examples: hello, primes, structs, guess (input), gfx_demo (RGB screen); circuit_test (self-checking, for the circuit)
 │   │   │                     image_demo (gfx_image) with c/images/: mandelbrot, smiley (.png + the .h made from it)
+│   │   │                     benchmark (eight square roots, Quake III and Newton, timed and checked against sqrt())
 │   │   │                     video_player (plays a video.py .h on time with clock()) with c/videos/demo (.mp4 + .h)
 │   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
 │   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag),
