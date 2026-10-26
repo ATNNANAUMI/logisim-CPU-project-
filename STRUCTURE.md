@@ -84,6 +84,7 @@ logisim-CPU-project-/
 │   │   │                     image_demo (gfx_image) with c/images/: mandelbrot, smiley (.png + the .h made from it)
 │   │   │                     benchmark (eight square roots, Quake III and Newton, timed and checked against sqrt())
 │   │   │                     video_player (plays a video.py .h on time with clock()) with c/videos/demo (.mp4 + .h)
+│   │   │                     game_of_life (64x64 torus, 7 scenes of well-known patterns, checks itself; keys 1-7 n r space s)
 │   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
 │   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag),
 │   │                         diag14, diag15 (float division by zero, NaN, INT out of range),
