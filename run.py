@@ -10,7 +10,7 @@ VIDEO = IMG / "video.py"
 VIDEO_TYPES = ("*.mp4", "*.mkv", "*.webm", "*.mov", "*.avi", "*.gif")
 SIM = ROOT / "cpu_sim" / "src"
 ROM_DIR = ROOT / "compiler" / "ROM"   # where the assembler writes, see compiler/src/asm/__main__.py
-SKIP = {".git", ".venv", "venv", "__pycache__", "node_modules"}
+SKIP = {".git", ".venv", "venv", "__pycache__", "node_modules", ".claude"}
 
 MENU = """what do you want to run?
   1) asm    assemble (or compile C) only
@@ -42,7 +42,7 @@ def find_roms():
 def find_sources():
     """.asm and .c files to build: not the C library's own files, the C
     compiler's test programs (compiler/src/) or build output (compiler/ROM/)."""
-    skip = (ROOT / "compiler" / "libc", ROOT / "compiler" / "src", ROM_DIR)
+    skip = (ROOT / "compiler" / "libc", ROOT / "compiler" / "src", ROM_DIR, ROOT / ".claude")
     return [p for p in find("*.asm") + find("*.c") if not any(d in p.parents for d in skip)]
 
 
