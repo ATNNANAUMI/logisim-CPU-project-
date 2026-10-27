@@ -1,11 +1,12 @@
-/* benchmark.c - eight ways to take a square root, timed with clock() and
- * checked against sqrt() (math.h, bit by bit): Quake III's inverse square
- * root (original or improved constant, 1 or 2 Newton steps, or 1 step and a
- * residual correction) and Newton's method (from y = x, or from a bit-based
- * first guess).
+/* benchmark.c - twelve ways to take a square root, timed with clock() and
+ * checked against sqrt() (math.h, exact): the old bit-by-bit sqrt as the
+ * reference, Quake III's inverse square root (original or improved
+ * constant, 1 or 2 Newton steps, or 1 step and a residual correction) and
+ * Newton's method (from y = x, or from one of two bit-based first guesses,
+ * 1 to 3 steps).
  *
- * pypy3 compiler/src/cc run compiler/examples/c/benchmark.c --steps 200000000
- *     (about 170 million instructions; -D ONLY_ALGORITHM=n runs only one)
+ * pypy3 compiler/src/cc run compiler/examples/c/benchmark.c --steps 600000000
+ *     (-D ONLY_ALGORITHM=n runs only one, numbered below)
  * pypy3 compiler/src/cc run compiler/examples/c/benchmark.c --stats \
  *     -D COUNT_ONLY -D ONLY_ALGORITHM=n
  *     (only algorithm n's loop, untimed, for its instruction count)
@@ -13,13 +14,14 @@
  * The times change from run to run: in the simulator clock() is the
  * computer's real clock. Expected output starts
  *   Reference bit-by-bit sqrt()
- *     Time: 1570 ms
- *     Checksum: 423362.6875
+ *     Time: 494 ms
+ *     Checksum: 99998552.0000
  *     Max absolute error: 0.00000000
  *     Max relative error: 0.00000000
  *     Results differing from reference: 0/20000
- * and the other seven differ from the reference in 19960, 18274, 19960,
- * 18469, 5040, 9780 and 16538 of the 20000 results.
+ * and the other eleven differ from the reference in 19958, 17679, 19950,
+ * 17631, 19086, 6576, 15470, 18597, 754, 19824 and 4264 of the 20000
+ * results.
  */
 #include <stdio.h>
 #include <math.h>
@@ -28,19 +30,28 @@
 #define ITERATIONS 20000
 
 /*
- * Default:
- *   0 = benchmark every algorithm
+ * Algorithm selection:
  *
- * To benchmark one algorithm:
- *   1 = reference bit-by-bit sqrt
- *   2 = Quake III, original constant, 1 iteration
- *   3 = Quake III, original constant, 2 iterations
- *   4 = Quake III, improved constant, 1 iteration
- *   5 = Quake III, improved constant, 2 iterations
- *   6 = Newton sqrt, starting with y = x
- *   7 = Newton sqrt, bit-based initial estimate
- *   8 = Quake III, 1 iteration + residual correction
+ *   0  = benchmark every algorithm
+ *   1  = Reference sqrt
+ *   2  = Quake III, original constant, 1 iteration
+ *   3  = Quake III, original constant, 2 iterations
+ *   4  = Quake III, improved constant, 1 iteration
+ *   5  = Quake III, improved constant, 2 iterations
+ *   6  = Newton, starting with y = x, 12 iterations
+ *   7  = Newton, existing bit-based seed, 2 iterations
+ *   8  = Quake III, 1 iteration + residual correction
+ *   9  = Newton, existing bit-based seed, 1 iteration
+ *   10 = Newton, existing bit-based seed, 3 iterations
+ *   11 = Newton, alternative bit-based seed, 1 iteration
+ *   12 = Newton, alternative bit-based seed, 2 iterations
+ *
+ * To select one algorithm, change ONLY_ALGORITHM below.
+ *
+ * COUNT_ONLY mode runs the workload without accuracy checks,
+ * making it suitable for simulator instruction-count tests.
  */
+
 #ifndef ONLY_ALGORITHM
 #define ONLY_ALGORITHM 0
 #endif
@@ -48,10 +59,23 @@
 #define QUAKE_MAGIC_ORIGINAL 0x5F3759DFu
 #define QUAKE_MAGIC_IMPROVED 0x5F375A86u
 
+/*
+ * Alternative square-root seed.
+ *
+ * This changes the constant used to construct the initial
+ * estimate. Its performance and accuracy must be measured.
+ */
+#define SQRT_SEED_ORIGINAL 0x1FC00000u
+#define SQRT_SEED_ALTERNATIVE 0x1FBD1DF5u
+
 typedef union {
     float f;
     unsigned u;
 } FloatBits;
+
+/* ---------------------------------------------------------
+ * Floating-point bit conversion
+ * --------------------------------------------------------- */
 
 static unsigned float_to_bits(float x)
 {
@@ -73,7 +97,9 @@ static float abs_float(float x)
 }
 
 /* ---------------------------------------------------------
- * 1. Reference: your existing bit-by-bit square root
+ * 1. Reference implementation
+ *
+ * Uses the sqrt() provided by the project's math library.
  * --------------------------------------------------------- */
 
 static float reference_sqrt(float x)
@@ -83,9 +109,6 @@ static float reference_sqrt(float x)
 
 /* ---------------------------------------------------------
  * 2-5. Quake III inverse-square-root approximation
- *
- * The final multiplication converts the reciprocal square
- * root estimate into a square root estimate.
  * --------------------------------------------------------- */
 
 static float quake_sqrt(float x, unsigned magic, int iterations)
@@ -142,22 +165,27 @@ static float newton_sqrt(float x)
 }
 
 /* ---------------------------------------------------------
- * 7. Newton's method with a bit-based initial estimate
+ * Generic bit-seeded Newton square root
  *
- * This is an approximate sqrt bit estimate, NOT the Quake
- * inverse-sqrt estimate.
+ * Constructs an approximate sqrt(x) from the float bit
+ * pattern, then performs the requested Newton iterations.
+ *
+ * Intended for the positive, finite, normal inputs used
+ * by this benchmark.
  * --------------------------------------------------------- */
 
-static float newton_seeded_sqrt(float x)
+static float newton_bit_seed_sqrt(float x,
+                                  unsigned seed,
+                                  int iterations)
 {
     unsigned bits = float_to_bits(x);
     float y;
     int i;
 
-    bits = (bits >> 1) + 0x1FC00000u;
+    bits = (bits >> 1) + seed;
     y = bits_to_float(bits);
 
-    for (i = 0; i < 2; i++) {
+    for (i = 0; i < iterations; i++) {
         y = 0.5f * (y + x / y);
     }
 
@@ -165,11 +193,18 @@ static float newton_seeded_sqrt(float x)
 }
 
 /* ---------------------------------------------------------
- * 8. One Quake iteration + residual correction
- *
- * r is the initial sqrt estimate.
- * d = x - r*r measures its squared error.
- * Correct using r + d/(2*r).
+ * 7. Existing bit-based seed, 2 Newton iterations
+ * --------------------------------------------------------- */
+
+static float newton_seeded_sqrt(float x)
+{
+    return newton_bit_seed_sqrt(
+        x, SQRT_SEED_ORIGINAL, 2
+    );
+}
+
+/* ---------------------------------------------------------
+ * 8. Quake III, 1 iteration + residual correction
  * --------------------------------------------------------- */
 
 static float quake_corrected_sqrt(float x)
@@ -181,22 +216,60 @@ static float quake_corrected_sqrt(float x)
 }
 
 /* ---------------------------------------------------------
- * Input sequence used by every implementation
+ * 9. Existing bit-based seed, 1 Newton iteration
+ * --------------------------------------------------------- */
+
+static float newton_seeded_1(float x)
+{
+    return newton_bit_seed_sqrt(
+        x, SQRT_SEED_ORIGINAL, 1
+    );
+}
+
+/* ---------------------------------------------------------
+ * 10. Existing bit-based seed, 3 Newton iterations
+ * --------------------------------------------------------- */
+
+static float newton_seeded_3(float x)
+{
+    return newton_bit_seed_sqrt(
+        x, SQRT_SEED_ORIGINAL, 3
+    );
+}
+
+/* ---------------------------------------------------------
+ * 11. Alternative bit-based seed, 1 Newton iteration
+ * --------------------------------------------------------- */
+
+static float newton_alt_seed_1(float x)
+{
+    return newton_bit_seed_sqrt(
+        x, SQRT_SEED_ALTERNATIVE, 1
+    );
+}
+
+/* ---------------------------------------------------------
+ * 12. Alternative bit-based seed, 2 Newton iterations
+ * --------------------------------------------------------- */
+
+static float newton_alt_seed_2(float x)
+{
+    return newton_bit_seed_sqrt(
+        x, SQRT_SEED_ALTERNATIVE, 2
+    );
+}
+
+/* ---------------------------------------------------------
+ * Test inputs
  * --------------------------------------------------------- */
 
 static float test_input(int i)
 {
-    return (float)(i % 1024) + 0.25f;
+    float x = (float)i + 0.001f;
+    return x * x / 4.0f;
 }
-
 /* ---------------------------------------------------------
- * Benchmark
- *
- * The timed loop contains only the algorithm call,
- * checksum accumulation, input generation, and loop.
- *
- * Accuracy is checked separately, so it does not affect
- * the reported elapsed time.
+ * Benchmark and accuracy measurement
  * --------------------------------------------------------- */
 
 static void benchmark(const char *name, float (*function)(float))
@@ -211,6 +284,7 @@ static void benchmark(const char *name, float (*function)(float))
     unsigned different_bits = 0;
     int i;
 
+    /* Timed section */
     start = clock();
 
     for (i = 0; i < ITERATIONS; i++) {
@@ -220,6 +294,7 @@ static void benchmark(const char *name, float (*function)(float))
 
     end = clock();
 
+    /* Accuracy section, outside the timed region */
     for (i = 0; i < ITERATIONS; i++) {
         float x = test_input(i);
         float expected = reference_sqrt(x);
@@ -251,11 +326,7 @@ static void benchmark(const char *name, float (*function)(float))
 }
 
 /* ---------------------------------------------------------
- * Instruction-count mode
- *
- * Compile with -DCOUNT_ONLY and -DONLY_ALGORITHM=N.
- * This runs only one algorithm's workload. Use --stats to
- * obtain the simulator's total instruction count.
+ * Selected algorithm for instruction-count testing
  * --------------------------------------------------------- */
 
 #ifdef COUNT_ONLY
@@ -278,12 +349,24 @@ static float selected_sqrt(float x)
     return newton_seeded_sqrt(x);
 #elif ONLY_ALGORITHM == 8
     return quake_corrected_sqrt(x);
+#elif ONLY_ALGORITHM == 9
+    return newton_seeded_1(x);
+#elif ONLY_ALGORITHM == 10
+    return newton_seeded_3(x);
+#elif ONLY_ALGORITHM == 11
+    return newton_alt_seed_1(x);
+#elif ONLY_ALGORITHM == 12
+    return newton_alt_seed_2(x);
 #else
-#error "For COUNT_ONLY, set ONLY_ALGORITHM to a value from 1 to 8"
+#error "For COUNT_ONLY, set ONLY_ALGORITHM to a value from 1 to 12"
 #endif
 }
 
 #endif
+
+/* ---------------------------------------------------------
+ * Main
+ * --------------------------------------------------------- */
 
 int main(void)
 {
@@ -330,13 +413,33 @@ int main(void)
 #endif
 
 #if ONLY_ALGORITHM == 0 || ONLY_ALGORITHM == 7
-    benchmark("Newton sqrt(), bit-based seed, 2 iterations",
+    benchmark("Newton sqrt(), existing bit-based seed, 2 iterations",
               newton_seeded_sqrt);
 #endif
 
 #if ONLY_ALGORITHM == 0 || ONLY_ALGORITHM == 8
     benchmark("Quake III, 1 iteration + residual correction",
               quake_corrected_sqrt);
+#endif
+
+#if ONLY_ALGORITHM == 0 || ONLY_ALGORITHM == 9
+    benchmark("Newton sqrt(), existing bit-based seed, 1 iteration",
+              newton_seeded_1);
+#endif
+
+#if ONLY_ALGORITHM == 0 || ONLY_ALGORITHM == 10
+    benchmark("Newton sqrt(), existing bit-based seed, 3 iterations",
+              newton_seeded_3);
+#endif
+
+#if ONLY_ALGORITHM == 0 || ONLY_ALGORITHM == 11
+    benchmark("Newton sqrt(), alternative bit-based seed, 1 iteration",
+              newton_alt_seed_1);
+#endif
+
+#if ONLY_ALGORITHM == 0 || ONLY_ALGORITHM == 12
+    benchmark("Newton sqrt(), alternative bit-based seed, 2 iterations",
+              newton_alt_seed_2);
 #endif
 
 #endif

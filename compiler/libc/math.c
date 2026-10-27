@@ -3,7 +3,7 @@
  * The float unit adds, subtracts, multiplies and divides (correctly
  * rounded). Everything else is built here:
  *   - exact: fabs, copysign, floor, ceil, trunc, round, rint, fmod, frexp,
- *     ldexp, modf, fmin, fmax, sqrt (correctly rounded, bit by bit)
+ *     ldexp, modf, fmin, fmax, sqrt (Newton, then an exact rounding check)
  *   - about 1-2 units in the last place: exp, log, sin, cos, tan, atan,
  *     asin, acos, atan2, sinh, cosh, tanh, cbrt, hypot
  *   - pow: exact for an integer exponent (when the result fits); otherwise
@@ -298,46 +298,54 @@ double remainder(double x, double y)
 double sqrt(double x)
 {
     unsigned ix = to_bits(x);
-    unsigned q, s, r, t;
-    int m;
+    unsigned q;
+    int m, odd;
+    float a, y;
+
     if ((ix & 0x7FFFFFFF) == 0)
         return x;                            /* +-0 */
+
     if (ix & 0x80000000) {
         errno = EDOM;
         return 0.0f / 0.0f;                  /* negative: NaN */
     }
+
     if (ix >= 0x7F800000)
         return x;                            /* inf, NaN */
+
     m = ix >> 23;
-    if (m == 0) {                            /* subnormal: normalise */
+
+    if (m == 0) {                            /* subnormal: normalize */
         while (!(ix & 0x800000)) {
             ix <<= 1;
             m--;
         }
         m++;
     }
+
     m -= 127;
-    ix = (ix & 0x7FFFFF) | 0x800000;
-    if (m & 1)
-        ix += ix;                            /* odd exponent: double the mantissa */
-    m = (m - (m & 1)) / 2;
-    /* the root, one bit at a time (with one extra bit for rounding) */
-    ix += ix;
-    q = s = 0;
-    r = 0x1000000;
-    while (r) {
-        t = s + r;
-        if (t <= ix) {
-            s = t + r;
-            ix -= t;
-            q += r;
-        }
-        ix += ix;
-        r >>= 1;
-    }
-    if (ix)
-        q += q & 1;                          /* round to nearest */
-    ix = (q >> 1) + 0x3F000000;
+    ix &= 0x7FFFFF;
+    odd = m & 1;
+    m = (m - odd) / 2;
+    /* x = a * 4^m with a in [1,4): a keeps the mantissa, exponent 0 or 1 */
+    a = from_bits(ix | (unsigned)(127 + odd) << 23);
+    ix = (ix | 0x800000) << odd;             /* a * 2^23, exact */
+
+    /* Newton from the usual bit-trick seed (a few % off): two steps leave
+       y within a few units in the last place */
+    y = from_bits((to_bits(a) >> 1) + 0x1FBD1DF5);
+    y = 0.5f * (y + a / y);
+    y = 0.5f * (y + a / y);
+
+    /* round correctly: q = y * 2^23 is right when (2q-1)^2 < a*2^25 < (2q+1)^2.
+       Both sides are about 2^49, but they differ by less than 2^31, so the
+       difference is exact in 32-bit arithmetic that wraps around */
+    q = (unsigned)(y * 8388608.0f);
+    while ((int)((ix << 25) - (2 * q + 1) * (2 * q + 1)) > 0)
+        q++;
+    while ((int)((ix << 25) - (2 * q - 1) * (2 * q - 1)) < 0)
+        q--;
+    ix = q + 0x3F000000;
     ix += (unsigned)m << 23;
     return from_bits(ix);
 }
