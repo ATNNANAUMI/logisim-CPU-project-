@@ -114,7 +114,8 @@ The language itself is described in [`c_language.md`](c_language.md).
 27. **`rand` is the C standard's example generator**, not glibc's: tests
     can't compare random numbers with gcc anyway, and this one is small.
 28. **`time()` and `clock()` return -1** (no clock); `getenv` returns NULL;
-    `fopen` fails; `signal` handlers run only for `raise`.
+    `signal` handlers run only for `raise`. (`fopen` failed too until the
+    disk came, 2026-10-27: see 33.)
 29. **math.h:** `sqrt`, `fmod` and the rounding functions are exact; the
     others aim for 1-2 units in the last place; `sin`/`cos`/`tan` use
     Payne-Hanek reduction above 100 so any argument works.
@@ -128,6 +129,25 @@ The language itself is described in [`c_language.md`](c_language.md).
     `asm("...")`, `__attribute__` (ignored), binary constants. Not accepted:
     statement expressions, `?:` with the middle part left out.
 32. **After an error the parser skips to the next statement or declaration** and carries on, up to 20 errors; the code generator only runs when there were none. Errors after the first can be knock-on effects of it, as with gcc.
+
+33. **Files reach `fs.c` through function pointers in `FILE`** (`get`,
+    `put`, `flush`, set by `fopen`). `fputc`, `fgetc`, `fprintf` and
+    `fscanf` call them when they are set, so a program that never calls
+    `fopen` doesn't link the filesystem: `printf` alone grew by 40 words,
+    while a program with files is about 10K words.
+34. **Text files are packed 4 chars a word, binary files are not** (the
+    OS questionnaire, 2026-10-27). C's own text/binary split (`"b"`) picks
+    the kind, so programs stored as words stay unpacked, and the image's
+    bytes read as text on the PC. The kind is fixed when the file is created:
+    a file's flag decides how it is read, not the mode. In a binary file a
+    word can equal `EOF` (`CHAR_BIT` is 32), the problem C has on any machine
+    where `char` is as wide as `int`; `fread` checks `feof`, and so must
+    `fgetc` callers.
+35. **No buffering beyond one word**: a packed file keeps the word being
+    read or written; everything else goes to the disk device at once (it is
+    a file mapped into memory on the PC, so there is nothing to gain).
+    `fopen` registers an `atexit` handler that closes open files, so a
+    program that forgets `fclose` still saves its data.
 
 ## Measured on the circuit while doing this
 

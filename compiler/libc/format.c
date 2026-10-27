@@ -9,7 +9,9 @@
 
 static void put(_Sink *out, int c)
 {
-    if (out->buf == 0)
+    if (out->file)
+        out->file->put(c, out->file);
+    else if (out->buf == 0)
         __builtin_out(_DISPLAY, c);
     else if (out->len + 1 < out->size)
         out->buf[out->len] = c;

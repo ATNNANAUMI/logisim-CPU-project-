@@ -1,93 +1,80 @@
-/* disk_notes.c - the disk device (simulator only): prints the text saved on
- * the disk, then saves every line you type, so the next run shows it again
+/* disk_notes.c - files on the disk (simulator only): prints the notes saved
+ * in /notes.txt, then adds every line you type to it, so the next run shows
+ * them again
  *
- *   python compiler/src/cc run compiler/examples/c/disk_notes.c --disk test.img
- *   (or, after cc run/build: python cpu_sim/src/main.py compiler/ROM/disk_notes.rom
- *    --disk test.img, or the window's "disk" button)
+ *   python compiler/src/disk format test.img        (once: an empty disk)
+ *   python compiler/src/cc build compiler/examples/c/disk_notes.c
+ *   python cpu_sim/src/main.py compiler/ROM/disk_notes.rom --disk test.img
+ *   (or: python compiler/src/cc run compiler/examples/c/disk_notes.c
+ *    --disk test.img --keys $'a note\n!quit\n')
  *
- * Type a line and Enter to save it. !show prints the disk again, !clear
- * erases it, !quit (or Ctrl-D) stops. Without --disk: "no disk".
- *
- * On the disk: word 0 = MAGIC, word 1 = how many chars, then the chars, one
- * per word. A new disk is all zeros, so it reads as empty.
+ * Type a line and Enter to save it. !show prints the notes again, !ls lists
+ * the disk's root directory, !clear empties the notes, !quit (or Ctrl-D)
+ * stops. On the PC: python compiler/src/disk cat test.img /notes.txt
  */
 #include <stdio.h>
 #include <string.h>
-#include <cpu.h>
+#include <errno.h>
+#include <dirent.h>
 
-#define MAGIC 0x4E4F5445        /* "NOTE" */
-#define TEXT 2                  /* the word where the text starts */
-
-static int size;                /* the disk's size in words */
-static int length;              /* chars saved on the disk */
-
-static void seek(int word)
-{
-    device_out(DISK_SEEK_DEVICE, word);
-}
-
-static void load(void)
-{
-    seek(0);
-    if (device_in(DISK_DATA_DEVICE) == MAGIC)
-        length = device_in(DISK_DATA_DEVICE);   /* the position moves on by itself */
-    else
-        length = 0;
-}
+#define NOTES "/notes.txt"
 
 static void show(void)
 {
-    int i;
-    printf("--- on the disk: %d chars ---\n", length);
-    seek(TEXT);
-    for (i = 0; i < length; i++)
-        putchar(device_in(DISK_DATA_DEVICE));
-    printf("--- end ---\n");
+    FILE *f = fopen(NOTES, "r");
+    int c, n = 0;
+    printf("--- %s ---\n", NOTES);
+    if (f) {
+        while ((c = fgetc(f)) != EOF) {
+            putchar(c);
+            n++;
+        }
+        fclose(f);
+    }
+    printf("--- %d chars ---\n", n);
 }
 
-/* the text first, then the length: a run stopped halfway loses only the new line */
-static void save(const char *line)
+static void list(void)
 {
-    int n = strlen(line);
-    int i;
-    if (TEXT + length + n > size) {
-        printf("disk full\n");
-        return;
-    }
-    seek(TEXT + length);
-    for (i = 0; i < n; i++)
-        device_out(DISK_DATA_DEVICE, line[i]);
-    length += n;
-    seek(0);
-    device_out(DISK_DATA_DEVICE, MAGIC);
-    device_out(DISK_DATA_DEVICE, length);
+    DIR *d = opendir("/");
+    struct dirent *e;
+    while ((e = readdir(d)))
+        printf("%8u %s%s\n", e->d_size, e->d_name, e->d_type == DT_DIR ? "/" : "");
+    closedir(d);
 }
 
 int main(void)
 {
     char line[256];
+    FILE *f;
 
-    size = device_in(DISK_SEEK_DEVICE);         /* 0: no disk attached */
-    if (size == 0) {
-        printf("no disk (run with --disk FILE)\n");
+    f = fopen(NOTES, "a");              /* also checks the disk */
+    if (!f) {
+        if (errno == ENODEV)
+            printf("no formatted disk: python compiler/src/disk format FILE, "
+                   "then run with --disk FILE\n");
+        else
+            perror(NOTES);
         return 1;
     }
-    load();
+    fclose(f);
     show();
-    printf("Type lines to save them (!show, !clear, !quit).\n");
+    printf("Type lines to save them (!show, !ls, !clear, !quit).\n");
     while (printf("> "), fgets(line, sizeof line, stdin)) {
         if (strcmp(line, "!quit\n") == 0)
             break;
         if (strcmp(line, "!show\n") == 0) {
             show();
+        } else if (strcmp(line, "!ls\n") == 0) {
+            list();
         } else if (strcmp(line, "!clear\n") == 0) {
-            length = 0;
-            seek(0);
-            device_out(DISK_DATA_DEVICE, 0);    /* no MAGIC: reads as empty */
-            printf("erased\n");
+            fclose(fopen(NOTES, "w"));  /* "w" empties it */
+            printf("cleared\n");
         } else {
-            save(line);
-            printf("saved (%d chars on the disk)\n", length);
+            f = fopen(NOTES, "a");
+            fputs(line, f);
+            printf("saved (%ld chars)\n", ftell(f));
+            fclose(f);
         }
     }
     return 0;

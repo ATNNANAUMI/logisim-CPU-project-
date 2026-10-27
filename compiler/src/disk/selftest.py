@@ -166,6 +166,118 @@ def check_command_line():
     assert "no such disk image" in run("ls", os.path.join(TMP.name, "none.img"))[1]
 
 
+def check_fsck():
+    with new_disk() as disk:
+        disk.mkdir("/d")
+        disk.put("/d/f", bytes(3000))
+        assert disk.check() == []
+        f = disk.lookup("/d/f")
+        disk.set_fat(disk.alloc(), fs.END)              # a block nobody owns
+        disk.set_fat(disk.chain(f.first)[-1], disk.root().first)   # a chain into the root
+        problems = "\n".join(disk.check())
+        assert "leaked" in problems and "in /d/f and in /" in problems, problems
+
+
+C_PROGRAM = r"""
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+#include <dirent.h>
+#include <unistd.h>
+
+int main(void)
+{
+    char line[300];
+    unsigned words[4];
+    int c, n = 0, sum = 0, a, b;
+    float x;
+    FILE *f = fopen("/in.txt", "r");
+    DIR *d;
+    struct dirent *e;
+    while ((c = fgetc(f)) != EOF) {
+        n++;
+        sum += c;
+    }
+    fclose(f);
+    printf("in.txt %d %d\n", n, sum);
+    f = fopen("in.bin", "rb");
+    printf("in.bin %d", (int)fread(words, 1, 4, f));
+    printf(" %x %x %x\n", words[0], words[1], words[2]);
+    fclose(f);
+    d = opendir("/");
+    while ((e = readdir(d)))
+        printf("%s:%d:%u ", e->d_name, e->d_type == DT_DIR, e->d_size);
+    printf("\n");
+    closedir(d);
+    chdir("/sub");
+    f = fopen("deep.txt", "r");
+    fgets(line, sizeof line, f);
+    printf("deep %s", line);
+    fclose(f);
+    f = fopen("/nums.txt", "r");
+    fscanf(f, "%d %d %f", &a, &b, &x);
+    printf("nums %d %g\n", a + b, x * 2);
+    fclose(f);
+    f = fopen("out.txt", "w");
+    for (n = 0; n < 1100; n++)
+        fputc('0' + n % 10, f);
+    fprintf(f, "|end %d\n", 1100);
+    fclose(f);
+    words[0] = 7;
+    words[1] = 0xFFFFFFFF;
+    f = fopen("/out.bin", "wb");
+    fwrite(words, 1, 2, f);
+    fclose(f);
+    f = fopen("/in.txt", "a");
+    fputs("+more", f);
+    fclose(f);
+    mkdir("/made");
+    printf("rename %d remove %d\n", rename("/in.txt", "/made/in.txt"), remove("/in.bin"));
+    printf("errors %d %d %d\n", fopen("/none", "r") == 0 && errno == ENOENT,
+           rmdir("/sub") == -1 && errno == ENOTEMPTY, chdir("/nums.txt") == -1 && errno == ENOTDIR);
+    return 0;
+}
+"""
+
+
+def check_c_library():
+    """The C library (compiler/libc/fs.c, dir.c) and fs.py agree: C reads
+    what the tool wrote, the tool reads what C wrote, and fsck finds every
+    block in exactly one file afterwards."""
+    import sys
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+
+    text = bytes(32 + i % 95 for i in range(1500))        # past one block (1024 chars)
+    with new_disk(fs.BLOCK * 64, "c.img") as disk:
+        disk.put("/in.txt", text)
+        disk.put("/in.bin", bytes.fromhex("0100000002000000ffffffff"), binary=True)
+        disk.mkdir("/sub")
+        disk.put("/sub/deep.txt", b"down here\n")
+        disk.put("/nums.txt", b"12 30 2.25\n")
+        image = disk.path
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "files.c"
+        path.write_text(C_PROGRAM)
+        program, _ = driver.build([str(path)])
+    cpu, out = driver.run_in_simulator(program.rom, "", 20_000_000, disk=image)
+    expect = (f"in.txt 1500 {sum(text)}\n"
+              "in.bin 3 1 2 ffffffff\n"
+              "in.txt:0:1500 in.bin:0:3 sub:1:132 nums.txt:0:11 \n"
+              "deep down here\n"
+              "nums 42 4.5\n"
+              "rename 0 remove 0\n"
+              "errors 1 1 1\n")
+    assert cpu.halted and out == expect, out
+    with FileSystem(image) as disk:
+        assert disk.get("/sub/out.txt") == bytes(48 + n % 10 for n in range(1100)) + b"|end 1100\n"
+        assert disk.get("/out.bin") == bytes.fromhex("07000000ffffffff")
+        assert disk.get("/made/in.txt") == text + b"+more"
+        assert disk.lookup("/in.txt") is None and disk.lookup("/in.bin") is None
+        assert disk.check() == [], disk.check()
+    return f"{cpu.instructions} instructions"
+
+
 CHECKS = [
     check_format,
     check_text_round_trip,
@@ -176,6 +288,8 @@ CHECKS = [
     check_names,
     check_disk_full,
     check_command_line,
+    check_fsck,
+    check_c_library,
 ]
 
 

@@ -14,6 +14,8 @@
  * goes to word n; device_in(DISK_SEEK_DEVICE) is the disk's size in words.
  * device_out/device_in on DISK_DATA_DEVICE write/read one word and move on
  * to the next one. Past the end, reads give 0 and writes are dropped.
+ * A formatted disk holds a filesystem (stdio.h's fopen, TFS1): raw writes
+ * to it can break it.
  */
 #ifndef _CPU_H
 #define _CPU_H

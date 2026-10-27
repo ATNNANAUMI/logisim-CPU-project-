@@ -78,9 +78,15 @@ int getchar(void)
 
 int ungetc(int c, FILE *stream)
 {
-    (void)stream;
     if (c == EOF)
         return EOF;
+    if (stream->get) {                  /* a file on the disk */
+        stream->pushed = c;
+        if (stream->pos > 0)
+            stream->pos--;
+        stream->eof = 0;
+        return c;
+    }
     pushed = c;
     return c;
 }
@@ -98,6 +104,8 @@ void _stdin_clear(void)
 int fgetc(FILE *stream)
 {
     int c;
+    if (stream->get)
+        return stream->get(stream);
     if (stream->output) {
         stream->error = 1;
         return EOF;
@@ -136,6 +144,15 @@ size_t fread(void *ptr, size_t size, size_t count, FILE *stream)
 {
     char *p = ptr;
     size_t i, n = size * count;
+    if (stream->get) {          /* a file: a binary word can equal EOF, so ask feof */
+        for (i = 0; i < n; i++) {
+            int c = stream->get(stream);
+            if (c == EOF && (stream->eof || stream->error))
+                break;
+            p[i] = c;
+        }
+        return size ? i / size : 0;
+    }
     for (i = 0; i < n; i++) {
         int c = fgetc(stream);
         if (c == EOF)

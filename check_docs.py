@@ -25,7 +25,12 @@ def generated_or_placeholder(path):
 
 
 def exists(path):
-    return (ROOT / path).exists() or any(ROOT.glob(path))
+    if path.startswith("/"):            # a path on the CPU's disk ("/notes.txt"), not in the repo
+        return False
+    try:
+        return (ROOT / path).exists() or any(ROOT.glob(path))
+    except ValueError:                  # not a usable glob pattern
+        return False
 
 
 def paragraphs(text):

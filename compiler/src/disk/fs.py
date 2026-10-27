@@ -297,6 +297,37 @@ class FileSystem:
         self.free_chain(node.first)
         self.write(node.parent, node.index * ENTRY + E_FLAGS, [0])
 
+    def check(self):
+        """Problems with the disk, as text: a block used by two chains, a
+        used block nobody reaches (leaked), a length past a file's blocks,
+        a broken chain. An empty list = consistent."""
+        problems = []
+        owner = {b: "the superblock and FAT"
+                 for b in range(self.fat_start + fat_blocks(self.blocks))}
+
+        def walk(node, path):
+            try:
+                chain = self.chain(node.first)
+            except FsError as e:
+                problems.append(f"{path}: {e}")
+                return
+            for b in chain:
+                if b in owner:
+                    problems.append(f"block {b}: in {path} and in {owner[b]}")
+                owner[b] = path
+            words = (node.length + 3) // 4 if node.packed else node.length
+            if words > len(chain) * BLOCK:
+                problems.append(f"{path}: length {node.length} past its {len(chain)} blocks")
+            if node.is_dir:
+                for child in self.entries(node):
+                    walk(child, path.rstrip("/") + "/" + child.name)
+
+        walk(self.root(), "/")
+        for b in range(self.blocks):
+            if self.fat(b) != FREE and b not in owner:
+                problems.append(f"block {b}: used but in no file (leaked)")
+        return problems
+
     # ------------------------------------------------------------ commands
     def put(self, path, data: bytes, binary=False):
         """Create or replace a file: text (packed bytes) or binary (data is

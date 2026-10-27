@@ -1,6 +1,8 @@
-/* FILE: stdin is the keyboard, stdout and stderr are the display.
- * There is no disk: fopen always fails. */
+/* FILE: stdin is the keyboard, stdout and stderr are the display. Files on
+ * the disk (fs.c) carry their own get/put/flush, which these call. */
 #include <stdio.h>
+#include <string.h>
+#include <errno.h>
 #include "local.h"
 
 
@@ -14,6 +16,8 @@ FILE *stderr = &err_file;
 
 int fputc(int c, FILE *stream)
 {
+    if (stream->put)
+        return stream->put(c, stream);
     if (!stream->output) {
         stream->error = 1;
         return EOF;
@@ -29,6 +33,12 @@ int putc(int c, FILE *stream)
 
 int fputs(const char *s, FILE *stream)
 {
+    if (stream->put) {
+        while (*s)
+            if (stream->put(*s++, stream) == EOF)
+                return EOF;
+        return 0;
+    }
     if (!stream->output) {
         stream->error = 1;
         return EOF;
@@ -38,9 +48,11 @@ int fputs(const char *s, FILE *stream)
     return 0;
 }
 
+/* fflush(0) does nothing: open files are saved at exit anyway */
 int fflush(FILE *stream)
 {
-    (void)stream;
+    if (stream && stream->flush)
+        return stream->flush(stream);
     return 0;
 }
 
@@ -48,6 +60,12 @@ size_t fwrite(const void *ptr, size_t size, size_t count, FILE *stream)
 {
     const char *p = ptr;
     size_t i, n = size * count;
+    if (stream->put) {
+        for (i = 0; i < n; i++)
+            if (stream->put(p[i], stream) == EOF)
+                break;
+        return size ? i / size : 0;
+    }
     if (!stream->output) {
         stream->error = 1;
         return 0;
@@ -77,38 +95,13 @@ void clearerr(FILE *stream)
         _stdin_clear();
 }
 
-FILE *fopen(const char *path, const char *mode)
-{
-    (void)path;
-    (void)mode;
-    return 0;
-}
-
-int fclose(FILE *stream)
-{
-    (void)stream;
-    return 0;
-}
-
-int remove(const char *path)
-{
-    (void)path;
-    return -1;
-}
-
-int rename(const char *from, const char *to)
-{
-    (void)from;
-    (void)to;
-    return -1;
-}
-
 void perror(const char *s)
 {
     if (s && *s) {
         fputs(s, stderr);
         fputs(": ", stderr);
     }
-    fputs("error\n", stderr);
+    fputs(strerror(errno), stderr);
+    fputs("\n", stderr);
 }
 

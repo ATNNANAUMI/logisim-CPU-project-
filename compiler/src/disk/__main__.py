@@ -11,6 +11,7 @@ Run it from the project root:
     python compiler/src/disk rmdir disk.img PATH          delete an empty directory
     python compiler/src/disk mv disk.img OLD NEW          rename or move
     python compiler/src/disk df disk.img                  free space
+    python compiler/src/disk fsck disk.img                check that every block is in one file
 
 Paths on the disk start at the root ("/notes/a.txt"; a leading "/" is
 optional). put stores a text file (4 chars a word) unless --binary, which
@@ -115,6 +116,7 @@ def main(argv=None):
     command("rmdir", "delete an empty directory", "path")
     command("mv", "rename or move", "old", "new")
     command("df", "free space")
+    command("fsck", "check the disk's consistency")
     args = cli.parse_args(argv)
 
     try:
@@ -140,6 +142,12 @@ def main(argv=None):
                 disk.rename(args.old, args.new)
             elif args.command == "df":
                 cmd_df(disk, args)
+            elif args.command == "fsck":
+                problems = disk.check()
+                for problem in problems:
+                    print(problem)
+                print(f"{len(problems)} problem(s)")
+                return 1 if problems else 0
         return 0
     except (FsError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
