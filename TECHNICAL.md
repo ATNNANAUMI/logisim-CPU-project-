@@ -239,7 +239,8 @@ only takes the space actually written: a missing file is created as a
 sparse 64 MB file (16M words, `DISK_WORDS`), an existing one keeps its size
 (at most 1G words, 4 GB). One position serves both reads and writes, and
 moving it on after every word makes block copies a loop of `INDATA`s or
-`OUTDATA`s. A reset rewinds it to 0 and keeps the disk.
+`OUTDATA`s. A reset rewinds it to 0 and keeps the disk. The filesystem on
+the disk (TFS1) and the tool that makes images are in 7.6.
 
 Each device compares the 8 low bits of the selected address against its own
 number with a gate decoder (the keyboard: bits 0–3 must be 0, bits 4–7 must
@@ -950,6 +951,10 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
+python compiler/src/disk/selftest.py  # 9 checks: format (sparse, the superblock), text and
+                                      # binary round trips (block edges), overwriting frees
+                                      # blocks, a directory past one block (entries reused),
+                                      # subdirectories, . and .., mv, name rules, disk full, CLI
 python check_docs.py                  # 3 checks on the docs: every repo path they name
                                       # exists, every example (.asm, .c) is listed in
                                       # 5.3, every TWEAKS switch is in 3.4
@@ -1074,6 +1079,40 @@ the demo), plain `python` (about 2.7 MHz) doesn't, and the circuit (about
 walking their pixels would be the next speed-up.
 
 ---
+
+### 7.6 Disk images (`compiler/src/disk/`)
+
+The disk device (1.7) is a file of words; the TFS1 filesystem on it is
+written down in `compiler/src/disk/fs.py` (the docstring is the reference;
+the C library will read the same format). In words, with 256-word blocks:
+
+| where | what |
+| --- | --- |
+| block 0 | superblock: `0x31534654` ("TFS1" as bytes), version 1, block size 256, block count N, FAT start block (1), FAT block count F = ceil(N / 256), the root directory's first block and length |
+| blocks 1 … F | the FAT, one word per block: 0 free, `0xFFFFFFFF` the last block of a chain, else the next block. Blocks 0 … F are marked used |
+| block F + 1 … | the root directory's first block, then data |
+
+A file is a chain of blocks; a directory is a file of 132-word entries
+(name: 128 words, one char per word, 0-terminated, 1–127 chars, no `/`,
+spaces or control characters; first block, 0 = empty; length; flags: 1 in
+use, 2 directory, 4 packed text; a reserved word). Deleted entries (flags 0)
+are reused; directories never shrink; `.` and `..` are resolved in the
+path. A text file holds 4 chars a word, char k in bits 8(k mod 4) of word
+k / 4, so the image's bytes read as plain text on the PC, and its length
+counts chars; a binary file's length counts words. A 64 MB disk has 65,536
+blocks (256 for the FAT) and 65,278 free when new.
+
+```
+python compiler/src/disk format disk.img [--size MB] [--force]   # new disk (64 MB, sparse); --force wipes one
+python compiler/src/disk ls disk.img [PATH]                      # a directory: size (chars/words) and name
+python compiler/src/disk put disk.img HOST [PATH] [--binary]     # copy in (text unless --binary); PATH: a
+                                                                 # name or a directory, default /HOST's name
+python compiler/src/disk get disk.img PATH [HOST|-]              # copy out (- = the terminal)
+python compiler/src/disk cat disk.img PATH
+python compiler/src/disk rm|mkdir|rmdir disk.img PATH            # rmdir: empty directories only
+python compiler/src/disk mv disk.img OLD NEW                     # rename or move (files and directories)
+python compiler/src/disk df disk.img                             # blocks used and free
+```
 
 ## 8. Simulator vs. circuit: open questions
 

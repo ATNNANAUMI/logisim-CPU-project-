@@ -81,6 +81,7 @@ smaller than one word per pixel):
 ```
 python compiler/src/img picture.png             # -> picture.h; #include it, then gfx_image(x, y, picture)
 python compiler/src/img/video.py clip.mp4           # -> clip.h next to it (needs ffmpeg)
+python compiler/src/disk format disk.img            # an empty disk for --disk; then put/get/ls/cat/rm/mkdir/mv/df
 pypy3 compiler/src/cc run compiler/examples/c/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
 python compiler/src/cc run compiler/examples/c/image_demo.c --screen out.png
 ```
@@ -127,6 +128,7 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 | `logisim/run_rom.py` | load a ROM into the circuit and run Logisim headless |
 | `compiler/src/asm/` | assembler, linker, self-checks |
 | `compiler/src/cc/` | C compiler, self-checks, test programs compared with gcc (`tests/`) |
+| `compiler/src/disk/` | disk tool: makes and edits disk images (TFS1 filesystem) for the simulator's `--disk` |
 | `compiler/src/img/` | image converter: PNG -> compressed picture for `gfx_image()` (`gfx.h`); `video.py`: a video -> frames for `video_player.c` |
 | `compiler/libc/` | the C library: headers (`include/`), C and assembly sources |
 | `compiler/examples/` | example programs (assembly, and C in `c/`), the standard library (`stdlib/stdlib.asm`), circuit diagnostics |

@@ -9,11 +9,12 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # four self-check suites (assembler 20, simulator 23, C compiler 15, image tool 10), then check_docs.py
+python run.py test                                   # five self-check suites (assembler 20, simulator 23, C compiler 15, image tool 10, disk tool 9), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
 python compiler/src/img/selftest.py                  # image converter + gfx_image() only
+python compiler/src/disk/selftest.py                 # disk tool + filesystem only
 python compiler/src/cc/tests/difftest.py [names] [--update]   # C test programs against gcc (--update rewrites .expected)
 python compiler/src/cc/tests/fuzz.py [--count N] [--seed S]   # random C programs, gcc against tiny C
 
@@ -35,6 +36,9 @@ python compiler/src/cc compile prog.c [-o prog.asm]                   # C -> ass
 python compiler/src/img pic.png [-o pic.h] [--size WxH] [--colors N] [--dither] [--preview p.png]   # PNG -> compressed pic.h for gfx_image()
 python compiler/src/img/video.py clip.mp4 [-o clip.h] [--fps N] [--seconds S] [--colors N] [--tolerance T] [--preview dir/]   # video (ffmpeg) or PNG folder -> frames for video_player.c
 pypy3 compiler/src/cc run compiler/examples/c/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000   # play ./clip.h on time (waiting burns instructions: big --steps)
+
+python compiler/src/disk format disk.img [--size MB]          # empty TFS1 disk image (64 MB, sparse)
+python compiler/src/disk put|get|cat|ls|rm|mkdir|rmdir|mv|df disk.img ...   # edit it from the PC
 ```
 
 `run_rom.py` finds the jar via `$LOGISIM_JAR` or the Arch package path. A circuit run stops at `HALT` (printing `--- halted at HALT ---`) because Logisim's headless mode watches the output pin labelled `halt` in the top-level `PC` circuit; keep that pin and its label if the circuit is reworked. The `circuit-check` skill (`.claude/skills/`) covers comparing the simulator with the circuit.
@@ -51,7 +55,9 @@ C: `compiler/src/cc/` (preprocessor → parser/type checker → `codegen.py` + `
 
 Pictures: `compiler/src/img/` turns a PNG into a `.h` holding a compressed image (palette + a bit stream of literals and runs, format in `codec.py`'s docstring); `gfx_image()` in `compiler/libc/gfx_image.c` decodes it onto the RGB screen. The two decoders (`codec.decode`, the reference, and the C one) must stay in sync; the img self-check compares them pixel by pixel. Videos: `compiler/src/img/video.py` makes every frame an ordinary picture (one palette shared by all frames, frame 0 whole, later frames only the pixels that changed, the rest transparent) and `compiler/examples/c/video_player.c` draws frame i when `clock()` reaches i × 1000 / fps. `clock()` reads the timer device `0x7C` (milliseconds since reset; planned wiring, not on the circuit), which the simulator takes from the computer's real clock and the window stops while paused.
 
-`compiler/src/asm/`, `compiler/src/cc/`, `compiler/src/img/` and `cpu_sim/src/` import their sibling modules by plain name, so run files as scripts (or put the directory on `sys.path`), not as packages. The assembler, the C compiler and the image converter are invoked as directories (`python compiler/src/asm <cmd>`, `python compiler/src/cc <cmd>`, `python compiler/src/img pic.png`, via `__main__.py`).
+Disk: the simulator's disk device (`0x8C`/`0x8D`, `--disk FILE`) is a file of words; `compiler/src/disk/` makes and edits images in the TFS1 filesystem (format in `fs.py`'s docstring: 256-word blocks chained by a FAT, directories are files of 132-word entries, text files packed 4 chars a word). The C library will read the same format, and `fs.py` is the reference.
+
+`compiler/src/asm/`, `compiler/src/cc/`, `compiler/src/img/`, `compiler/src/disk/` and `cpu_sim/src/` import their sibling modules by plain name, so run files as scripts (or put the directory on `sys.path`), not as packages. The assembler, the C compiler, the image converter and the disk tool are invoked as directories (`python compiler/src/asm <cmd>`, `python compiler/src/cc <cmd>`, `python compiler/src/img pic.png`, `python compiler/src/disk <cmd> disk.img`, via `__main__.py`).
 
 **The circuit is the ground truth.** The simulator was written from the ISA, not derived from the circuit. Behaviours not yet verified on the circuit are switches in `cpu_sim/src/config.py` (TWEAKS, each marked confirmed/guess). The circuit's `NOT` inverted RA until it was rewired to RB on 2026-10-15; the assembler still writes `NOT Rx` with x in both fields, which works either way (see TECHNICAL §8). Diagnostic programs used to measure circuit behaviour live in `compiler/examples/tests/`.
 
@@ -77,6 +83,7 @@ Most facts are written in more than one doc. When you change one of these, updat
 | an example program added, renamed or removed (`.asm` or `.c`) | its own header (build command, expected output); TECHNICAL §5.3, STRUCTURE tree |
 | a TWEAKS switch, or a behaviour measured on the circuit | `config.py`; TECHNICAL §3.4 and §8, STRUCTURE "Open questions / gotchas", the diag file's header (see the `circuit-check` skill) |
 | a subcircuit, pin or device in `CPU.circ` | TECHNICAL §2; STRUCTURE "Circuit hierarchy" |
+| the disk filesystem format (TFS1) | `compiler/src/disk/fs.py` (docstring + code); TECHNICAL §7.6 |
 | a self-check added or removed | TECHNICAL §7.3; the counts in STRUCTURE's tree and in this file |
 | the C language or the C compiler's conventions | `compiler/c_language.md`; TECHNICAL §10, STRUCTURE "C compiler conventions", `compiler/c_decisions.md` when it is a design decision or a guess |
 | a C library function or header | the header and its `compiler/libc/*.c`; `compiler/c_language.md` §7; TECHNICAL §10.5 for library structure |
