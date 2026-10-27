@@ -102,12 +102,12 @@ logisim-CPU-project-/
     │   ├── isa.py            decode(), disassemble(), opcode tables
     │   ├── alu.py            int_op(), float_op() → (R0 value, flags)
     │   ├── memory.py         ROM/RAM banks, v2.0 raw loader
-    │   ├── devices.py        Display (0x5C), Keyboard (0xF0, empty reads 0), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), DeviceBus (+ hex display value, 0x3C)
+    │   ├── devices.py        Display (0x5C), Keyboard (0xF0, empty reads 0), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), Disk (0x8C seek/size, 0x8D data; mmap of a file), DeviceBus (+ hex display value, 0x3C)
     │   ├── cpu.py            CPU: step() (traced), run() (fast loop), reset(), stack ops, COMM
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
-    │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png]`
-    │   └── selftest.py       22 checks
+    │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG]`
+    │   └── selftest.py       23 checks
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -180,6 +180,9 @@ The design follows the "But How Do It Know?" style: a single bus,
   `gfx_image()` draws it (32–50 instructions a pixel). Timer (planned, in
   the simulator and C's `clock()`): `0x7C`, `INDATA` = milliseconds since
   reset (real time in the simulator, stopped while the window is paused).
+  Disk (simulator only, `--disk FILE`, 64 MB sparse if missing): `0x8C`
+  `OUTDATA` = seek to a word, `INDATA` = size in words; `0x8D` `OUTDATA`/
+  `INDATA` = write/read one word and move on. No disk: the ports are empty.
   Videos: `compiler/src/img/video.py` -> frames that `video_player.c` draws
   on time (about 350k instructions a 128×96 frame: pypy3 keeps up at 12 fps).
 
@@ -231,6 +234,7 @@ python compiler/src/asm build prog.asm compiler/examples/stdlib/stdlib.asm [--ma
 python compiler/src/asm build prog.asm --lib compiler/examples/stdlib/stdlib.asm       # only the stdlib functions used
 python cpu_sim/src/main.py compiler/ROM/prog.rom                       # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 --keys $'text\n'
+python cpu_sim/src/main.py compiler/ROM/prog.rom --disk disk.img            # with a disk (cc run --disk too)
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom   (jar: $LOGISIM_JAR or the Arch package path)
 python compiler/src/cc run prog.c [--keys $'12\n'] [--stats]      # C: build + run in the simulator
 python compiler/src/cc build prog.c [more.c x.asm] [-o prog.rom]   # C: -> compiler/ROM/prog.rom (+ prog.asm)

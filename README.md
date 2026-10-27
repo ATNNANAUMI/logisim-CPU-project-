@@ -23,7 +23,8 @@ words each (the circuit itself still has the 16-bit version), four flags
 IEEE-754 float ALUs, and I/O through a single `COMM` instruction: a text
 display at `0x5C`, a hex number display at `0x3C` and a keyboard at `0xF0`
 (plus a 128×128 RGB screen at `0x6C`, drawn on from C with `gfx.h`, and a
-millisecond timer at `0x7C`, wiring planned, which C's `clock()` reads).
+millisecond timer at `0x7C`, wiring planned, which C's `clock()` reads,
+and, in the simulator only, a disk kept in a file at `0x8C`/`0x8D`).
 Every ALU result goes to **R0**.
 
 ## Requirements
@@ -59,6 +60,7 @@ python compiler/src/asm build compiler/examples/stdlib/stdlib_demo.asm \
 # run it in the simulator (window, or terminal only)
 python cpu_sim/src/main.py compiler/ROM/demo.rom
 python cpu_sim/src/main.py compiler/ROM/demo.rom --headless --steps 2000000
+python cpu_sim/src/main.py compiler/ROM/demo.rom --disk disk.img     # with a disk (a file, created if missing)
 
 # run it on the real circuit, headless (finds an installed Logisim-evolution; --jar or $LOGISIM_JAR otherwise)
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/demo.rom

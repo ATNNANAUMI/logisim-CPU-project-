@@ -49,6 +49,17 @@ VIDEO_HEIGHT = 128
 # simulator follows the computer's real clock and stops it while paused.
 TIMER_ADDR = 0x7C
 
+# Disk (simulator only: Logisim's RAM can't keep its contents in a file).
+# OUTDATA to DISK_SEEK_ADDR sets the word position; INDATA from it reads the
+# disk's size in words. DISK_DATA_ADDR moves one word: OUTDATA writes it,
+# INDATA reads it, and both move the position on by one. Past the end, reads
+# give 0 and writes are dropped. The disk is a binary file, 4 bytes per word,
+# little-endian; a missing file is created (sparse) with DISK_WORDS words.
+DISK_SEEK_ADDR = 0x8C
+DISK_DATA_ADDR = 0x8D
+DISK_WORDS = 1 << 24           # 64 MB
+DISK_MAX_WORDS = 1 << 30       # 4 GB, 30-bit word positions
+
 # ------------------------------------------------------------------ TWEAKS
 # A flag = "RA > RB".  Signed compare (True) or unsigned magnitude (False)?
 # Confirmed: signed.

@@ -224,6 +224,58 @@ def test_timer():
     assert timer.read() == 62
 
 
+def test_disk():
+    import os
+    import tempfile
+    from devices import Disk
+    # seek to 5, write two words; seek to 6, read two words; read the size
+    words = [0x0301, 0x8C, 0x0831, 0x0302, 5, 0x0822,             # OUTADDR 0x8C, OUTDATA 5
+             0x0301, 0x8D, 0x0831, 0x0302, 0xDEADBEEF, 0x0822,    # OUTADDR 0x8D, 2 words
+             0x0302, 0x12345678, 0x0822,
+             0x0301, 0x8C, 0x0831, 0x0302, 6, 0x0822,             # seek to 6
+             0x0301, 0x8D, 0x0811, 0x0803, 0x0804,                # INADDR 0x8D, INDATA R3, R4
+             0x0301, 0x8C, 0x0811, 0x0805, 0x0F00]                # INADDR 0x8C, INDATA R5
+    with tempfile.TemporaryDirectory() as folder:
+        path = os.path.join(folder, "disk.img")
+        for fast in (False, True):
+            cpu = CPU()
+            cpu.mem.load_rom(words)
+            cpu.bus.disk = Disk(path, words=64)                  # created on the first pass
+            if fast:
+                cpu.run(100)
+            else:
+                while cpu.step() is not None:
+                    pass
+            assert (cpu.regs[3], cpu.regs[4], cpu.regs[5]) == (0x12345678, 0, 64)
+            assert cpu.bus.disk.position == 8
+            cpu.reset()                                         # rewinds, keeps the disk
+            assert cpu.bus.disk.position == 0
+            cpu.bus.attach_disk(None)
+        assert os.path.getsize(path) == 256
+        disk = Disk(path)                                       # an existing file keeps its size
+        disk.seek(5)
+        assert (disk.words, disk.read()) == (64, 0xDEADBEEF)
+        disk.seek(63)
+        disk.write(7)
+        disk.write(8)                                           # past the end: dropped
+        assert disk.read() == 0 and disk.position == 66
+        disk.close()
+        with open(path, "rb") as f:
+            data = f.read()
+        assert data[20:24] == bytes.fromhex("efbeadde") and data[252:] == bytes([7, 0, 0, 0])
+        with open(path, "ab") as f:
+            f.write(b"x")
+        try:
+            Disk(path)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("a file that isn't whole words was accepted")
+    # with no disk the ports are not driven: INDATA leaves the register alone
+    # DATA R6,7 ; DATA R1,0x8D ; COMM INADDR,R1 ; COMM INDATA,R6
+    assert run([0x0306, 7, 0x0301, 0x8D, 0x0811, 0x0806, 0x0F00]).regs[6] == 7
+
+
 def test_addr_and_jmrb():
     # ADDR R1 ; JMRB R1 lands on the instruction after ADDR
     cpu = run([0x0901, 0x0A01, 0x0F00], steps=5)

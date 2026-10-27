@@ -215,6 +215,8 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 | `0x6C` | RGB screen | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; on the 128×128 RGB Video only the low 7 bits of x and y are wired. Write-only |
 | `0x6D` | RGB screen clear (*simulator only*) | any word pulses the RGB Video's reset: all black. Not built on the circuit yet, where it does nothing |
 | `0x7C` | timer (*planned*) | `INDATA` reads the milliseconds since reset, wrapping at 32 bits; C's `clock()` |
+| `0x8C` | disk seek (*simulator only*) | `OUTDATA` sets the disk's word position; `INDATA` reads the disk's size in words |
+| `0x8D` | disk data (*simulator only*) | `OUTDATA` writes the word at the position, `INDATA` reads it; both move the position on by one. Past the end, reads give 0 and writes are dropped |
 
 `0x6C`/`0x6D` were chosen on 2026-10-11; `0x6C` was built on the circuit
 (`RGB_Display`, section 2.2) on 2026-10-22. The numbers are `VIDEO_*` in
@@ -226,6 +228,18 @@ runs at the right speed however fast it is simulated; the window stops it
 while the simulation is paused (and while single-stepping). On the circuit
 it would be a 32-bit counter stepped every millisecond, so its input clock
 has to come from a divider matched to the CPU's clock rate.
+
+The disk (`0x8C`/`0x8D`, 2026-10-27) exists only in the simulator, because
+Logisim's RAM can't keep its contents in a file. It is attached with
+`--disk FILE` (3.3) or the window's `disk` button; without one, both
+addresses are empty (`INDATA` leaves the register alone, so C's
+`device_in` reads 0). The file is binary, 4 bytes per word, little-endian,
+mapped into memory (`mmap`), so every write reaches the file and a big disk
+only takes the space actually written: a missing file is created as a
+sparse 64 MB file (16M words, `DISK_WORDS`), an existing one keeps its size
+(at most 1G words, 4 GB). One position serves both reads and writes, and
+moving it on after every word makes block copies a loop of `INDATA`s or
+`OUTDATA`s. A reset rewinds it to 0 and keeps the disk.
 
 Each device compares the 8 low bits of the selected address against its own
 number with a gate decoder (the keyboard: bits 0–3 must be 0, bits 4–7 must
@@ -420,12 +434,12 @@ modules import each other by plain name, so run them as scripts
 | `isa.py` | opcode tables, `decode(word) -> Instr`, `disassemble(word, operand)`. `Instr.takes_operand` says whether a literal word follows |
 | `alu.py` | `int_op(name, a, b)` and `float_op(name, a, b)`, each returning `(R0 value, flag nibble)`; float32 ↔ bits helpers |
 | `memory.py` | `Memory` with two 16M-word banks (Python lists, 128 MB each), `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
-| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `DeviceBus` (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
+| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()`, `reset()`, `resume()` |
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 22 checks on the core |
+| `selftest.py` | 23 checks on the core |
 
 ### 3.2 Execution model
 
@@ -457,7 +471,7 @@ headless runner (without `--trace`) and `python compiler/src/cc run` all use
 ### 3.3 Running it
 
 ```
-python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--trace] [--keys TEXT] [--screen FILE.png]
+python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--trace] [--keys TEXT] [--screen FILE.png] [--disk FILE]
 ```
 
 * without `--headless`: opens the window with the ROM loaded
@@ -467,13 +481,16 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
 * `--keys`: preloads the keyboard buffer (use `$'...\n'` in bash for Enter)
 * `--screen FILE.png`: saves the RGB screen at the end (headless only; drawn
   at twice the size)
+* `--disk FILE`: attaches a disk image (devices `0x8C`/`0x8D`, 1.7); a
+  missing file is created, 64 MB and sparse
 
 **The window:**
 
-* left: load ROM/RAM, reset, step, run/pause, resume (after `HALT`), a speed
+* left: load ROM/RAM, attach a disk (a file dialog; a new name creates one), reset, step, run/pause, resume (after `HALT`), a speed
   dropdown (1 Hz … 1 MHz, or `max`), and a trace toggle. Below them: the 16
   registers, IAR, ESP, EBP, the flags as checkboxes, and a status block (bank,
-  selected devices, instruction count, measured rate, run state)
+  selected devices, the disk and its position, instruction count, measured
+  rate, run state)
 * middle: ROM and RAM tabs, 256 words per page, with optional disassembly and
   "follow IAR"; and a C source tab (below)
 * right: the display (`0x5C`) and the RGB screen (`0x6C`, a tab that comes
@@ -910,12 +927,13 @@ python compiler/src/asm/selftest.py   # 20 checks: encodings, values, strings, j
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 22 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 23 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
                                       # floats, FCMP flags, keyboard, backspace, ADDR/JMRB,
                                       # float specials, float SHL, run() against step()
                                       # on random code, run() stopping at breakpoints,
-                                      # the top of both 16M-word banks, the timer
+                                      # the top of both 16M-word banks, the timer,
+                                      # the disk (kept in its file, size, past the end)
 python compiler/src/cc/selftest.py    # 15 checks: preprocessor, error messages (several per run), warnings,
                                       # type sizes, exit/atexit, keyboard input, globals
                                       # after a reset, library override, reserved names,
@@ -1075,6 +1093,7 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | float division by zero, NaN, `INT` out of range | as in 1.5 | confirmed (`diag14.asm`, `diag15.asm`, 2026-10-10). The simulator used to give `0.0/0.0 = +inf`, `1.0/-0.0 = +inf` and `INT(inf) = 0`; it now matches the circuit |
 | number display `0x3C` | shows the last word sent (window and headless output) | 8 hex digits in `PC` |
 | RGB screen `0x6C`/`0x6D` | 128×128 RGB565, the "RGB screen" tab, `--screen` | `RGB_Display` → RGB Video in `PC` (2026-10-22); the `0x6D` clear isn't built |
+| disk `0x8C`/`0x8D` | a file, `--disk` or the window's `disk` button | none (Logisim's RAM can't save itself) |
 | timing | one instruction per step | several clock cycles per instruction (stepper) |
 
 ---
@@ -1120,7 +1139,7 @@ how the compiler works.
 ```
 python compiler/src/cc compile prog.c [-o prog.asm]                 # C -> assembly
 python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map] [--no-libc] [--lib x.asm]
-python compiler/src/cc run   prog.c [...] [--keys TEXT] [--steps N] [--stats] [--trace] [--screen FILE.png]
+python compiler/src/cc run   prog.c [...] [--keys TEXT] [--steps N] [--stats] [--trace] [--screen FILE.png] [--disk FILE]
         common options: -I dir, -D NAME[=value], -w (no warnings)
 ```
 

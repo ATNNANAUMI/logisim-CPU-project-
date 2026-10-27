@@ -5,6 +5,9 @@ INADDR selects the input device, INDATA consumes one word from it.
 The CPU gets no feedback: talking to a device that is not there does nothing.
 """
 
+import mmap
+import os
+import struct
 import time
 from collections import deque
 
@@ -137,12 +140,58 @@ class Video:
                 + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
 
 
+class Disk:
+    """Persistent disk at 0x8C (seek) and 0x8D (data), simulator only.
+
+    A binary file, 4 bytes per word, little-endian, mapped into memory, so
+    a big disk costs nothing until it is used and every write reaches the
+    file. A missing file is created as a sparse file of `words` words."""
+
+    WORD = struct.Struct("<I")
+
+    def __init__(self, path, words=config.DISK_WORDS):
+        self.path = str(path)
+        if not os.path.exists(self.path):
+            with open(self.path, "wb") as f:
+                f.truncate(words * 4)
+        self.file = open(self.path, "r+b")
+        size = os.fstat(self.file.fileno()).st_size
+        if size == 0 or size % 4 or size // 4 > config.DISK_MAX_WORDS:
+            self.file.close()
+            raise ValueError(f"{self.path}: a disk is 1 to {config.DISK_MAX_WORDS} "
+                             f"words of 4 bytes, this file has {size} bytes")
+        self.words = size // 4
+        self.map = mmap.mmap(self.file.fileno(), size)
+        self.position = 0
+
+    def seek(self, value: int) -> None:
+        self.position = value & config.WORD_MASK
+
+    def read(self) -> int:
+        i = self.position
+        self.position = (i + 1) & config.WORD_MASK
+        return self.WORD.unpack_from(self.map, i * 4)[0] if i < self.words else 0
+
+    def write(self, value: int) -> None:
+        i = self.position
+        self.position = (i + 1) & config.WORD_MASK
+        if i < self.words:
+            self.WORD.pack_into(self.map, i * 4, value & config.WORD_MASK)
+
+    def close(self) -> None:
+        if not self.map.closed:
+            self.map.flush()
+            self.map.close()
+            self.file.close()
+
+
 class DeviceBus:
     def __init__(self):
         self.display = Display()
         self.keyboard = Keyboard()
         self.video = Video()
         self.timer = Timer()
+        self.disk: Disk | None = None  # attached with attach_disk()
         self.hex_value = None          # None = nothing sent yet (display blank)
         self.out_addr = 0
         self.in_addr = 0
@@ -163,6 +212,11 @@ class DeviceBus:
             self.video.write(value)
         elif self.out_addr == config.VIDEO_CLEAR_ADDR:
             self.video.clear()
+        elif self.disk is not None:
+            if self.out_addr == config.DISK_DATA_ADDR:
+                self.disk.write(value)
+            elif self.out_addr == config.DISK_SEEK_ADDR:
+                self.disk.seek(value)
 
     def in_data(self) -> int | None:
         """None means no input device is selected: nothing drives the bus,
@@ -171,7 +225,19 @@ class DeviceBus:
             return self.keyboard.read()
         if self.in_addr == config.TIMER_ADDR:
             return self.timer.read()
+        if self.disk is not None:
+            if self.in_addr == config.DISK_DATA_ADDR:
+                return self.disk.read()
+            if self.in_addr == config.DISK_SEEK_ADDR:
+                return self.disk.words
         return None
+
+    def attach_disk(self, path) -> None:
+        """Use the disk file at path (created if missing); None takes it out."""
+        disk = None if path is None else Disk(path)
+        if self.disk is not None:
+            self.disk.close()
+        self.disk = disk
 
     def reset(self) -> None:
         self.out_addr = self.in_addr = 0
@@ -181,3 +247,5 @@ class DeviceBus:
         self.video.clear()
         self.video.used = False
         self.timer.reset()
+        if self.disk is not None:          # the disk keeps its contents
+            self.disk.position = 0

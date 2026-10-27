@@ -301,8 +301,9 @@ def format_map(program, title):
 
 # ------------------------------------------------------------------ running
 
-def run_in_simulator(rom_words, keys="", max_steps=50_000_000, trace=False):
-    """Run a ROM image in the Python simulator. Returns (cpu, display text)."""
+def run_in_simulator(rom_words, keys="", max_steps=50_000_000, trace=False, disk=None):
+    """Run a ROM image in the Python simulator. Returns (cpu, display text).
+    disk: a disk image file for devices 0x8C/0x8D, created if missing."""
     if str(SIM_DIR) not in sys.path:
         sys.path.append(str(SIM_DIR))
     from cpu import CPU                      # cpu_sim/src
@@ -311,6 +312,8 @@ def run_in_simulator(rom_words, keys="", max_steps=50_000_000, trace=False):
     cpu.mem.load_rom(rom_words)
     if keys:
         cpu.bus.keyboard.type(keys)
+    if disk:
+        cpu.bus.attach_disk(disk)
     if trace:
         steps = 0
         while steps < max_steps:
@@ -322,4 +325,5 @@ def run_in_simulator(rom_words, keys="", max_steps=50_000_000, trace=False):
             steps += 1
     else:
         cpu.run(max_steps)
+    cpu.bus.attach_disk(None)
     return cpu, cpu.bus.display.text
