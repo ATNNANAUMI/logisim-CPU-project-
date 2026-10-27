@@ -88,7 +88,7 @@ logisim-CPU-project-/
 │   │   │                     grapher (graphing calculator: type f(x), Enter; zoom/move/view commands)
 │   │   │                     snake (W/A/S/D, R restarts)
 │   │   │                     qr (QR code encoder: the repo link, then any typed text; checked with zbarimg/qrencode)
-│   │   │                     disk_counter (the disk device: counts its runs in word 1000; --disk FILE)
+│   │   │                     disk_notes (the disk device: shows the saved text, saves typed lines; --disk FILE)
 │   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
 │   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag),
 │   │                         diag14, diag15 (float division by zero, NaN, INT out of range),
