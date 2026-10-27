@@ -1,16 +1,16 @@
-/* primes.c - the primes below 200 (sieve of Eratosthenes), and the hex display
+/* primes.c - the primes below 2000 (sieve of Eratosthenes), and the hex display
  *
  *   python compiler/src/cc run compiler/examples/c/primes.c
  *
- * prints the 46 primes below 200, ten per line, then "46 primes"; the last
- * prime (199 = 0x000000C7) is left on the 8-digit hex display.
+ * prints the 303 primes below 2000, ten per line, then "303 primes"; the
+ * last prime (1999 = 0x000007CF) is left on the 8-digit hex display.
  */
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
 #include <cpu.h>
 
-#define N 200
+#define N 2000
 
 int main(void)
 {
@@ -23,7 +23,7 @@ int main(void)
             continue;
         for (j = i * i; j < N; j += i)
             composite[j] = true;
-        printf("%4d", i);
+        printf("%5d", i);
         if (++count % 10 == 0)
             printf("\n");
         last = i;
