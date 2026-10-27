@@ -59,6 +59,8 @@ def main(argv=None):
                            help="print the instruction count and the registers at the end")
             p.add_argument("--screen", default="", metavar="FILE.png",
                            help="save the RGB screen (gfx.h) as a PNG at the end")
+            p.add_argument("--disk", metavar="FILE",
+                           help="disk image for devices 0x8C/0x8D (created, 64 MB sparse, if missing)")
 
     args = cli.parse_args(argv)
     warn = None if args.no_warn else driver.print_warning
@@ -84,7 +86,12 @@ def main(argv=None):
             print(f"{out}: {len(program.rom)} words of ROM, {program.ram_used} words of RAM")
             return 0
 
-        cpu, text = driver.run_in_simulator(program.rom, args.keys, args.steps, args.trace)
+        try:
+            cpu, text = driver.run_in_simulator(program.rom, args.keys, args.steps, args.trace,
+                                                disk=args.disk)
+        except (ValueError, OSError) as e:          # a disk file that can't be used
+            print(e, file=sys.stderr)
+            return 1
         sys.stdout.write(text)
         if text and not text.endswith("\n"):
             sys.stdout.write("\n")

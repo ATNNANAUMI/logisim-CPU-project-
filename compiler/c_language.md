@@ -39,7 +39,8 @@ python run.py build prog.c                         # build, then open the simula
   keys first (`--keys $'12\n'` in bash for Enter), `--steps N` limits the
   instructions (default 50 million), `--stats` prints the instruction count
   and R0 at the end, `--trace` prints every instruction, `--screen F.png`
-  saves the RGB screen.
+  saves the RGB screen, `--disk FILE` attaches a disk image (created if
+  missing).
 * `-I dir` adds a folder for `#include`, `-D NAME[=value]` defines a macro,
   `-w` hides warnings, `--no-libc` leaves the library and start-up code out
   (the program then needs its own `start`), `--lib FILE` links an assembly
@@ -212,6 +213,7 @@ power function is `ipow`, so it doesn't clash with C's `pow`.)
 | `wait_key()` | waits for one key and returns it, no echo |
 | `wait_ms(ms)` | does nothing for `ms` milliseconds (the timer, device `0x7C`) |
 | `device_out(d, v)` / `device_in(d)` | raw `COMM` to any device (`__builtin_out`, `__builtin_in`) |
+| `DISK_SEEK_DEVICE`, `DISK_DATA_DEVICE` | the disk (simulator only, `cc run --disk FILE`): `device_out(DISK_SEEK_DEVICE, n)` goes to word n, `device_in(DISK_SEEK_DEVICE)` is the size in words (0: no disk); `device_out`/`device_in` on `DISK_DATA_DEVICE` write/read a word and move on to the next |
 | `halt()` | stops the CPU (`__builtin_trap()`) |
 
 **Inline assembly:** `asm("text");` (also `__asm__`) puts its text, one

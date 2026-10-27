@@ -426,7 +426,8 @@ class SimulatorWindow(tk.Tk):
         row1.pack(fill="x", padx=4, pady=2)
         ttk.Button(row1, text="load ROM", command=self.load_rom).pack(side="left")
         ttk.Button(row1, text="load RAM", command=self.load_ram).pack(side="left", padx=2)
-        ttk.Button(row1, text="reset", command=self.reset).pack(side="left")
+        ttk.Button(row1, text="disk", command=self.load_disk).pack(side="left")
+        ttk.Button(row1, text="reset", command=self.reset).pack(side="left", padx=2)
 
         row2 = ttk.Frame(box)
         row2.pack(fill="x", padx=4, pady=2)
@@ -600,6 +601,20 @@ class SimulatorWindow(tk.Tk):
         path = filedialog.askopenfilename(title="RAM image")
         if path:
             self._load(path, self.cpu.mem.load_ram)
+
+    def load_disk(self) -> None:
+        # a save dialog, so a new name can be typed: a missing disk is created
+        path = filedialog.asksaveasfilename(title="disk image (created if missing)",
+                                            confirmoverwrite=False)
+        if not path:
+            return
+        try:
+            self.cpu.bus.attach_disk(path)
+        except (ValueError, OSError) as error:
+            messagebox.showerror("disk failed", str(error))
+            return
+        self._log(f"disk {path}: {self.cpu.bus.disk.words} words")
+        self.refresh(memory=False)
 
     def _load(self, path, loader) -> None:
         try:
@@ -801,6 +816,7 @@ class SimulatorWindow(tk.Tk):
         lines = (
             f"bank  {'RAM' if self.cpu.iar & config.RAM_BIT else 'ROM'}",
             f"out   0x{self.cpu.bus.out_addr:X}   in 0x{self.cpu.bus.in_addr:X}",
+            f"disk  {self._disk_text()}",
             f"in    {self._where()}",
             f"count {self.cpu.instructions}",
             f"rate  {self._measured_rate()}",
@@ -859,6 +875,12 @@ class SimulatorWindow(tk.Tk):
         if video.used and not self._screen_shown:
             self._screen_shown = True
             self.outputs.select(self.screen_tab)
+
+    def _disk_text(self) -> str:
+        disk = self.cpu.bus.disk
+        if disk is None:
+            return "none"
+        return f"{os.path.basename(disk.path)} at {disk.position}"
 
     def _measured_rate(self) -> str:
         """Instructions actually executed per second, averaged over ~0.5 s."""

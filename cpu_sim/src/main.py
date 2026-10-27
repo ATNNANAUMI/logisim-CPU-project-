@@ -4,6 +4,7 @@
     python cpu_sim/src/main.py compiler/ROM/hello.rom           open it with a ROM loaded
     python cpu_sim/src/main.py compiler/ROM/hello.rom --headless   run in the terminal
         (--screen out.png saves the RGB screen at the end)
+    python cpu_sim/src/main.py prog.rom --disk disk.img        with a disk (created if missing)
 """
 
 import argparse
@@ -12,12 +13,14 @@ from cpu import CPU
 from memory import load_image
 
 
-def build_cpu(rom_path=None, ram_path=None) -> CPU:
+def build_cpu(rom_path=None, ram_path=None, disk_path=None) -> CPU:
     cpu = CPU()
     if rom_path:
         cpu.mem.load_rom(load_image(rom_path))
     if ram_path:
         cpu.mem.load_ram(load_image(ram_path))
+    if disk_path:
+        cpu.bus.attach_disk(disk_path)
     return cpu
 
 
@@ -64,15 +67,23 @@ def main() -> None:
     parser.add_argument("--keys", default="", help="preload the keyboard buffer")
     parser.add_argument("--screen", default="", metavar="FILE.png",
                         help="save the RGB screen (device 0x6C) as a PNG at the end")
+    parser.add_argument("--disk", metavar="FILE",
+                        help="disk image for devices 0x8C/0x8D (created, 64 MB sparse, if missing)")
     args = parser.parse_args()
 
-    cpu = build_cpu(args.rom, args.ram)
-    if args.headless:
-        run_headless(cpu, args.steps, args.trace, args.keys, args.screen)
-        return
+    try:
+        cpu = build_cpu(args.rom, args.ram, args.disk)
+    except (ValueError, OSError) as error:
+        parser.error(str(error))
+    try:
+        if args.headless:
+            run_headless(cpu, args.steps, args.trace, args.keys, args.screen)
+            return
 
-    from gui import SimulatorWindow
-    SimulatorWindow(cpu, rom_path=args.rom).mainloop()
+        from gui import SimulatorWindow
+        SimulatorWindow(cpu, rom_path=args.rom).mainloop()
+    finally:
+        cpu.bus.attach_disk(None)
 
 
 if __name__ == "__main__":

@@ -18,3 +18,5 @@ labs
 .claude/worktrees/
 # over GitHub's 100 MB limit (its .h is committed)
 compiler/examples/c/videos/recording_20261022_12-00-41.mp4
+# disk images (--disk): can be big, and are made by a script, not committed
+*.img

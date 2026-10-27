@@ -9,6 +9,11 @@
  *   wait_ms(ms)        do nothing for ms milliseconds (the timer, device 0x7C;
  *                      clock() in time.h reads it too)
  *   halt()             stop the CPU (RESUME continues after it)
+ *
+ * The disk (simulator only, run with --disk FILE): device_out(DISK_SEEK_DEVICE, n)
+ * goes to word n; device_in(DISK_SEEK_DEVICE) is the disk's size in words.
+ * device_out/device_in on DISK_DATA_DEVICE write/read one word and move on
+ * to the next one. Past the end, reads give 0 and writes are dropped.
  */
 #ifndef _CPU_H
 #define _CPU_H
@@ -17,6 +22,8 @@
 #define HEX_DEVICE 0x3C
 #define KEYBOARD_DEVICE 0xF0
 #define TIMER_DEVICE 0x7C
+#define DISK_SEEK_DEVICE 0x8C
+#define DISK_DATA_DEVICE 0x8D
 
 #define device_out(d, v) __builtin_out((d), (v))
 #define device_in(d) __builtin_in(d)

@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # four self-check suites (assembler 20, simulator 22, C compiler 15, image tool 10), then check_docs.py
+python run.py test                                   # four self-check suites (assembler 20, simulator 23, C compiler 15, image tool 10), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
@@ -25,10 +25,10 @@ python -c "import sys; sys.path.insert(0,'compiler/src/cc'); import selftest; se
 python compiler/src/asm build prog.asm compiler/examples/stdlib/stdlib.asm [-o name.rom] [--map]
 python compiler/src/asm build prog.asm --lib compiler/examples/stdlib/stdlib.asm   # link only the stdlib functions used
 python cpu_sim/src/main.py compiler/ROM/prog.rom                             # GUI
-python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 [--trace] [--keys $'text\n'] [--screen out.png]
+python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 [--trace] [--keys $'text\n'] [--screen out.png] [--disk disk.img]
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom [--seconds N]   # real circuit, headless
 
-python compiler/src/cc run prog.c [--keys $'text\n'] [--stats]       # C: build + run in the simulator
+python compiler/src/cc run prog.c [--keys $'text\n'] [--stats] [--disk disk.img]   # C: build + run in the simulator
 python compiler/src/cc build prog.c [more.c x.asm] [-o name.rom] [--map] [--lib x.asm]   # C: links the C library itself
 python compiler/src/cc compile prog.c [-o prog.asm]                   # C -> assembly only
 
