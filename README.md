@@ -123,6 +123,7 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 | --- | --- |
 | `logisim/CPU.circ` | the circuit (top level: `PC`) |
 | `logisim/run_rom.py` | load a ROM into the circuit and run Logisim headless |
+| `logisim/microcode/` | the control section as a microcode ROM (table, image, check against the circuit) |
 | `compiler/src/asm/` | assembler, linker, self-checks |
 | `compiler/src/cc/` | C compiler, self-checks, test programs compared with gcc (`tests/`) |
 | `compiler/src/img/` | image converter: PNG -> compressed picture for `gfx_image()` (`gfx.h`); `video.py`: a video -> frames for `video_player.c` |

@@ -31,6 +31,11 @@ logisim-CPU-project-/
 ├── logisim/
 │   ├── CPU.circ              THE CIRCUIT. Top-level circuit = "PC" (RGB Video fed by RGB_Display)
 │   ├── run_rom.py            patches a .rom into the ROM inside subcircuit "RAM", runs Logisim headless, prints TTY
+│   ├── microcode/            CONTROL_SECTION as a 64K x 32 microcode ROM (not wired into CPU.circ yet; TECHNICAL 2.5)
+│   │   ├── microcode.py      the table (steps per instruction, bit layout) -> microcode.rom; --list prints it
+│   │   ├── microcode.rom     the generated image ("v2.0 raw")
+│   │   ├── verify.py         runs CONTROL_SECTION's gates through Logisim for every IR/step/flags, compares with the ROM
+│   │   └── ControlSweep.java the sweep verify.py compiles and runs (needs javac + the Logisim jar)
 │   └── cpu datas/            old notes: stack micro-steps, personal TODO
 │
 ├── compiler/
@@ -227,6 +232,8 @@ python compiler/src/asm build prog.asm --lib compiler/examples/stdlib/stdlib.asm
 python cpu_sim/src/main.py compiler/ROM/prog.rom                       # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 --keys $'text\n'
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom   (jar: $LOGISIM_JAR or the Arch package path)
+python logisim/microcode/microcode.py [--list]                     # control section -> logisim/microcode/microcode.rom
+python logisim/microcode/verify.py [--quick]                        # that ROM against CONTROL_SECTION's gates (a few minutes)
 python compiler/src/cc run prog.c [--keys $'12\n'] [--stats]      # C: build + run in the simulator
 python compiler/src/cc build prog.c [more.c x.asm] [-o prog.rom]   # C: -> compiler/ROM/prog.rom (+ prog.asm)
 python run.py build prog.c                                          # C or asm: build, then open the simulator
@@ -249,6 +256,9 @@ pypy3 compiler/src/cc run compiler/examples/c/video_player.c -I . -D 'VIDEO="cli
   (`diag12.asm`, `diag13.asm`). The simulator now matches the circuit.
 * The simulator also gave `0.0/0.0 = +inf`, `1.0/-0.0 = +inf` and `INT(inf) = 0`;
   `diag14.asm`/`diag15.asm` measured the circuit and the simulator now matches.
+* Read from the control section's gates (`logisim/microcode/`, TECHNICAL 2.5),
+  not yet run: `CMP`/`FCMP` never write R0 (the simulator writes 0) and take
+  16 clock cycles (the stepper never resets); other instructions take 3 to 6.
 * Still-unconfirmed behaviours can be switched in `cpu_sim/src/config.py`
   (TWEAKS).
 * The C library is compiled once and cached in `compiler/ROM/libc/`; the
