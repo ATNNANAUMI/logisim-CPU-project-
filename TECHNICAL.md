@@ -1332,7 +1332,7 @@ leads to after an unconditional jump.
   load address, n, entry, words to zero after the image) and the n words,
   little-endian, so `disk put` stores it as a binary file (it spots the
   magic). `spawnv()` (`spawn.c`) checks the header, copies the words with
-  `_fs_read` (one seek a block, about 5 instructions a word), zeroes the
+  `_fs_read` (one seek a block, about 14 instructions a word), zeroes the
   variables, and jumps to the entry with R1 = a block: argc, argv, the
   address to go back to, its current directory. That crt0 keeps the block,
   calls the `_init_` routines and `_fs_inherit(cwd)` (when `fs.c` is linked),

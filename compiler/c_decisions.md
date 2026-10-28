@@ -182,7 +182,8 @@ The language itself is described in [`c_language.md`](c_language.md).
 42. **`spawnv` reads the program straight from the disk** (`_fs_read`: one
     seek a block, then the data port moves on by itself), not through
     `fread`, which costs about 210 instructions a word: a 10K-word program
-    loads in about 60K instructions instead of 2.1M.
+    loads in about 140K instructions instead of 2.1M (measured: 13.7 a word;
+    the loop selects the device again for every word).
 43. **After a program, the caller forgets what it knew about the disk**
     (`_fs_forget`: the chain cache, the allocation hint, mounted). Its open
     `FILE`s are not refreshed: a guess that "close files before `spawnv`" is
