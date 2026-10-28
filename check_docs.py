@@ -22,7 +22,8 @@ PATH = re.compile(r"(?<![\w./-])((?:compiler|cpu_sim|logisim|os|\.claude)/"
 
 
 def generated_or_placeholder(path):
-    return path.startswith("compiler/ROM/") or "NN" in path
+    # compiler/ROM/ and disk images (os/disk.img) are git-ignored, made by scripts
+    return path.startswith("compiler/ROM/") or path.endswith(".img") or "NN" in path
 
 
 def exists(path):
