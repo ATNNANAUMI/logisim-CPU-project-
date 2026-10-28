@@ -13,6 +13,7 @@ file has the details.
 8. [Simulator vs. circuit: open questions](#8-simulator-vs-circuit-open-questions)
 9. [Outdated files and stale information](#9-outdated-files-and-stale-information)
 10. [The C compiler (`compiler/src/cc/`) and the C library (`compiler/libc/`)](#10-the-c-compiler-compilersrccc-and-the-c-library-compilerlibc)
+11. [The OS (`os/`)](#11-the-os-os)
 
 ---
 
@@ -833,11 +834,11 @@ line is empty (so it can't erase the prompt).
 | `c/benchmark.c` | C: twelve square roots (the old bit-by-bit `sqrt` as the reference, Quake III's inverse square root with two constants, one or two Newton steps or a residual correction, Newton's method from `y = x` or from two bit-based first guesses) timed with `clock()` over 20 000 inputs and checked against the reference: max absolute and relative error, how many results differ. `-D ONLY_ALGORITHM=n` runs one; `-D COUNT_ONLY` drops the timing so `--stats` gives that one's instruction count. Needs `--steps 600000000` with `cc run` |
 | `c/sqrt_benchmark.c` | C: the library's `sqrt()` (Newton from a bit-based guess, then an exact rounding check) against the bit-by-bit one it replaced, 20 000 inputs 5 times: every result the same, about 1.4× faster. Needs `--steps 400000000` with `cc run` |
 | `c/video_player.c` | C: plays a video made by `compiler/src/img/video.py` (7.5) at its own speed, waiting on `clock()` (the timer); prints how many frames were late. Plays `c/videos/demo.h` (from `demo.mp4`, ffmpeg's moving test picture, 4 s); `-I . -D 'VIDEO="clip.h"'` plays `./clip.h` instead. Needs `--steps 2000000000` with `cc run` (waiting runs millions of instructions a second) |
-| `c/game_of_life.c` | C: Conway's Game of Life on the RGB screen, a 64×64 world that wraps around (2×2-pixel cells, only changed cells redrawn). First checks itself on well-known patterns (24 checks: still lifes, oscillators' periods, spaceships' moves, the diehard dying at 130, the glider gun), then shows seven scenes in turn: Gosper glider gun + eater, oscillators and still lifes, spaceships, R-pentomino, diehard, acorn, random soup. Keys `1`–`7` pick a scene, `n` next, `r` restart, space pause, `s` one step; the hex display shows the generation. `-D SCENE=n` starts at scene n, `-D FULL_TEST` also checks that the first three scenes repeat. 100 000–330 000 instructions a generation |
+| `c/game_of_life.c` | C: Conway's Game of Life on the RGB screen, a 64×64 world that wraps around (2×2-pixel cells, only changed cells redrawn). First checks itself on well-known patterns (24 checks: still lifes, oscillators' periods, spaceships' moves, the diehard dying at 130, the glider gun), then shows seven scenes in turn: Gosper glider gun + eater, oscillators and still lifes, spaceships, R-pentomino, diehard, acorn, random soup. Keys `1`–`7` pick a scene, `n` next, `r` restart, space pause, `s` one step, `q` quit; the hex display shows the generation. `-D SCENE=n` starts at scene n, `-D FULL_TEST` also checks that the first three scenes repeat. 100 000–330 000 instructions a generation |
 | `c/grapher.c` | C: a graphing calculator on the RGB screen. Type a function of x on the bottom line (`+ - * / ^`, implied products like `2x`, `\|x\|`, `sin cos tan sqrt ln log exp ...`, `pi`, `e`) and Enter: it is parsed into a small stack program and drawn, up to six functions in different colours, two pixels thick, over a grid with numbers on the axes; gaps where the value is not a number, jumps like tan's left unjoined. Commands `clear`, `reset`, `zoom f`, `in`, `out`, `move dx dy`, `view x0 x1 y0 y1`, `demo`, `help` (the list of what can be typed, also on the screen at the start). 100–200 ms a function in the simulator |
 | `c/qr.c` | C: a QR code encoder written from the standard, drawn on the RGB screen as big as it fits. Starts with this project's GitHub link; type any text and Enter for a new code (an empty line goes back to the link). Byte mode, versions 1–10, levels L/M/Q/H (`-D LEVEL=n`, M by default), Reed-Solomon over GF(256) with the blocks interleaved, and all eight masks scored by the standard's penalty rules (`-D MASK=n` forces one). `-D TEXT="..."` the first text, `-D DARK=c` the module colour. Every version and level decodes with `zbarimg` and matches `qrencode` module for module with the same mask. About 2.6 million instructions for the link (0.9 s in the simulator) |
-| `c/snake.c` | C: Snake on the RGB screen, a 16×14 grid of 8×8 cells under a score panel; `W`/`A`/`S`/`D` steer, `R` restarts after a game over (`key_pressed()`, `wait_ms()`) |
-| `c/loader.c` | C: runs programs from the disk (simulator only): type a name and arguments, it runs `/bin/<name>` with `spawnv()` and shows the exit status; an empty line lists `/bin`. The first step towards the OS's shell |
+| `c/snake.c` | C: Snake on the RGB screen, a 16×14 grid of 8×8 cells under a score panel; `W`/`A`/`S`/`D` steer, `R` restarts after a game over, `Q` quits (`key_pressed()`, `wait_ms()`) |
+| `c/loader.c` | C: runs programs from the disk (simulator only): type a name and arguments, it runs `/bin/<name>` with `spawnv()` and shows the exit status; an empty line lists `/bin`. The first step towards the OS's shell, `os/shell.c` (11) |
 | `c/echo.c` | C: a program for the OS (`cc build --exe`, then `disk put` into `/bin`): prints its arguments, like Unix `echo` |
 | `c/disk_notes.c` | C: files on the disk (simulator only, `--disk FILE` on a disk made by `python compiler/src/disk format`): prints `/notes.txt`, then adds each typed line to it (`!help` lists the commands: `!show`, `!ls`, `!clear`, `!quit`), so the next run shows them again |
 | `c/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, `~` on registers, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
@@ -963,7 +964,7 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 12 checks: format (sparse, the superblock), text and
+python compiler/src/disk/selftest.py  # 13 checks: format (sparse, the superblock), text and
                                       # binary round trips (block edges), overwriting frees
                                       # blocks, a directory past one block (entries reused),
                                       # subdirectories, . and .., mv, name rules, disk full, CLI,
@@ -971,10 +972,13 @@ python compiler/src/disk/selftest.py  # 12 checks: format (sparse, the superbloc
                                       # (each reads what the other wrote; fsck clean after),
                                       # and spawnv(): a --exe program put on the disk, run
                                       # three times (arguments, exit status, fresh variables,
-                                      # the caller's directory and heap, load errors)
+                                      # the caller's directory and heap, load errors), and
+                                      # os/shell.c on a disk from os/make_disk.py: a session
+                                      # of every built-in, > and >>, quotes, a /bin program's
+                                      # arguments and exit status, the error messages
 python check_docs.py                  # 3 checks on the docs: every repo path they name
-                                      # exists, every example (.asm, .c) is listed in
-                                      # 5.3, every TWEAKS switch is in 3.4
+                                      # exists, every example (.asm, .c) and os/*.c is
+                                      # listed (5.3, 11), every TWEAKS switch is in 3.4
 ```
 
 `check_docs.py` checks only mechanical facts. It skips build output under
@@ -1154,6 +1158,7 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | number display `0x3C` | shows the last word sent (window and headless output) | 8 hex digits in `PC` |
 | RGB screen `0x6C`/`0x6D` | 128×128 RGB565, the "RGB screen" tab, `--screen` | `RGB_Display` → RGB Video in `PC` (2026-10-22); the `0x6D` clear isn't built |
 | disk `0x8C`/`0x8D` | a file, `--disk` or the window's `disk` button | none (Logisim's RAM can't save itself) |
+| text display `0x5C`: control characters | `\n` new line, `\r` clears the line, `\b` deletes, `\f` clears it all; others are printed | the `display` subcircuit gives the TTY 7 data bits and a write strobe (its clear pin isn't wired). Logisim 4.1.0's `TTY` (read in its code, `TtyState.add`, not run): `\n` and `\r` both start a new line, `\b` deletes, `\f` clears; other control characters are dropped. **`\r` differs**; nothing in the toolchain prints it |
 | timing | one instruction per step | several clock cycles per instruction (stepper) |
 
 ---
@@ -1404,3 +1409,67 @@ files only) and three assembly files: `runtime.asm` (`_pow2`, `_udiv`,
   `jumps`, `preproc`, `arrays`, `features`, `globals`, `structs`,
   `control`) also ran on the circuit and printed exactly their
   `.expected` (gcc's) output.
+
+---
+
+## 11. The OS (`os/`)
+
+Simulator only (it needs the disk, 1.7 and 7.6). One program at a time,
+like CP/M or MS-DOS: there are no interrupts and no memory protection, so
+no multitasking.
+
+| file | what it is |
+| --- | --- |
+| `os/shell.c` | the OS's ROM: a command shell, built like any C program (17,787 words of ROM, 2,922 of RAM) |
+| `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples, 2.8K–17.4K words each, in under a second |
+
+```
+python os/make_disk.py [IMG] [--new] [--size MB]
+python compiler/src/cc build os/shell.c
+python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img
+python compiler/src/cc run os/shell.c --disk os/disk.img --keys $'ls /bin\nprimes\nhalt\n'
+```
+
+At start the shell prints a line and checks for a formatted disk
+(`opendir("/")`). Without one it says how to attach one and goes on: the
+commands that need no disk still work, the others say `No such device`.
+Then it prompts with the current directory (`/docs> `), reads a line with
+`fgets` (the C library echoes it and handles backspace), splits it into
+words at spaces (`"..."` and `'...'` keep spaces in one word; the quotes go)
+and takes out `> FILE` or `>> FILE`. The first word picks the command.
+
+Built-in commands (the `commands[]` table, which `help` also prints):
+
+| command | what it does |
+| --- | --- |
+| `help` | the commands, then the programs in `/bin` |
+| `ls [-l] [path...]` | the names (directories end in `/`), two spaces apart, wrapped at 64 columns (the circuit's TTY); `-l`: one a line with its size (chars for a text file, words for a binary one) or `<dir>`. A file's path prints its name |
+| `cd [dir]`, `pwd` | `chdir` (no argument: `/`), `getcwd` |
+| `cat [file...]` | the files; it stops at a char over 255, which only a binary file has ("a binary file (a program?)"). With no file, the keyboard up to Ctrl-D, then `clearerr(stdin)` so the prompt reads again: `cat > notes.txt` writes a file |
+| `echo [word...]` | the words, one space apart |
+| `rm path...` | `remove`: files and empty directories |
+| `mv from to` | `rename`; into `to` when that is a directory |
+| `mkdir dir...`, `rmdir dir...` | |
+| `df` | `statvfs("/")`: 1 KB blocks, used, free (it reads the whole FAT: 0.9 million instructions on 64 MB) |
+| `clear` | a form feed (12) to the text display, `gfx_clear()` for the RGB screen |
+| `halt` | `exit(0)`: the CPU halts. Ctrl-D at the prompt does the same |
+
+A built-in writes to `out`: the display, or the file after `>` (`fopen`
+`"w"`, a text file) or `>>` (`"a"`), closed after the command. Error
+messages always go to the display. A command with the wrong arguments
+prints its usage.
+
+Any other first word is a program: a word with a `/` is a path (relative
+ones start at the current directory), else `/bin/NAME`. `spawnv(path,
+words)` (10.4) loads it at `0x1100000` and runs it in the current
+directory with the words as `argv`; the shell's variables and heap stay
+below `0x1100000`. When it ends, the shell prints `[NAME: exit status N]`
+if N isn't 0. If it can't be loaded the shell says `NAME: no such command`
+(a plain name not in `/bin`) or the path and `strerror` (`Exec format
+error` for a text file, `Is a directory`). `>` after a program is refused:
+the program has its own copy of the C library, whose `stdout` is the
+display.
+
+A program that never ends keeps the CPU: nothing can stop it from the
+outside. The examples `make_disk.py` puts in `/bin` end by themselves, on
+Ctrl-D (`grapher`, `qr`) or on `q` (`snake`, `game_of_life`).

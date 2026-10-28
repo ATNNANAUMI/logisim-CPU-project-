@@ -75,7 +75,7 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       12 checks (incl. the C library's files on the simulator against fs.py, spawnv)
+│   │   └── selftest.py       13 checks (incl. the C library's files on the simulator against fs.py, spawnv, os/shell.c)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), setjmp.asm,
 │   │                         spawn.c + spawn.asm (spawnv: load a --exe program from the disk, run it, come back)
@@ -90,9 +90,9 @@ logisim-CPU-project-/
 │   │   │                     image_demo (gfx_image) with c/images/: mandelbrot, smiley (.png + the .h made from it)
 │   │   │                     benchmark (twelve square roots, Quake III and Newton, timed and checked against sqrt()), sqrt_benchmark (library sqrt vs the old bit-by-bit one)
 │   │   │                     video_player (plays a video.py .h on time with clock()) with c/videos/demo (.mp4 + .h)
-│   │   │                     game_of_life (64x64 torus, 7 scenes of well-known patterns, checks itself; keys 1-7 n r space s)
+│   │   │                     game_of_life (64x64 torus, 7 scenes of well-known patterns, checks itself; keys 1-7 n r space s q)
 │   │   │                     grapher (graphing calculator: type f(x), Enter; zoom/move/view commands)
-│   │   │                     snake (W/A/S/D, R restarts)
+│   │   │                     snake (W/A/S/D, R restarts, Q quits)
 │   │   │                     qr (QR code encoder: the repo link, then any typed text; checked with zbarimg/qrencode)
 │   │   │                     disk_notes (files on the disk: shows /notes.txt, adds typed lines; --disk FILE)
 │   │   │                     loader (runs /bin programs with spawnv), echo (a program for the OS: build --exe)
@@ -104,13 +104,19 @@ logisim-CPU-project-/
 │   └── ROM/                  build output (.obj/.rom/.map/.asm), git-ignored, created on first build;
 │                             ROM/libc/ caches the compiled C library
 │
+├── os/                       the OS (simulator only), CP/M / DOS style: one program at a time
+│   ├── shell.c               the OS's ROM: checks the disk, prompts with the current directory; built-ins help ls
+│   │                         cd pwd cat echo rm mv mkdir rmdir df clear halt (> and >> to a file); any other
+│   │                         name runs /bin/NAME (or a path) with spawnv() and waits
+│   └── make_disk.py          os/disk.img (git-ignored): TFS1, the C examples built --exe in /bin, /readme.txt
+│
 └── cpu_sim/
     ├── src/                  simulator (modules import each other by plain name: run as scripts)
     │   ├── config.py         sizes, device addresses, TWEAKS (behaviour switches, marked confirmed/guess)
     │   ├── isa.py            decode(), disassemble(), opcode tables
     │   ├── alu.py            int_op(), float_op() → (R0 value, flags)
     │   ├── memory.py         ROM/RAM banks, v2.0 raw loader
-    │   ├── devices.py        Display (0x5C), Keyboard (0xF0, empty reads 0), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), Disk (0x8C seek/size, 0x8D data; mmap of a file), DeviceBus (+ hex display value, 0x3C)
+    │   ├── devices.py        Display (0x5C; form feed clears it), Keyboard (0xF0, empty reads 0), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), Disk (0x8C seek/size, 0x8D data; mmap of a file), DeviceBus (+ hex display value, 0x3C)
     │   ├── cpu.py            CPU: step() (traced), run() (fast loop), reset(), stack ops, COMM
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
@@ -180,7 +186,8 @@ The design follows the "But How Do It Know?" style: a single bus,
   (no jump). `STK SET/GET, RB` = `stack[EBP+RB]`; that sum wraps at the RAM's
   address width, across the whole RAM (EBP=0, RB=-1 → last RAM word
   `0x1FFFFFF`; measured at 16 bits on the circuit, `diag11`/`diag16`).
-* `COMM INDATA|INADDR|OUTDATA|OUTADDR, RB`. Display `0x5C`, number display
+* `COMM INDATA|INADDR|OUTDATA|OUTADDR, RB`. Display `0x5C` (form feed, 12,
+  clears it, as Logisim's TTY does), number display
   `0x3C`, keyboard `0xF0` (empty reads 0). RGB screen: `0x6C` one pixel per
   word (x bits 31–24, y 23–16, RGB565 15–0), `0x6D` clears (simulator only:
   not built on the circuit yet). Pictures: `compiler/src/img` compresses
@@ -236,13 +243,15 @@ The design follows the "But How Do It Know?" style: a single bus,
 * stdin: a line at a time, echoed, backspace edits, Ctrl-D (0x04) = EOF.
 * Files: `fopen` & co. on the `--disk` image (TFS1, needs `python compiler/src/disk
   format`); text files packed 4 chars a word, `"b"` files a word per char (a word
-  can equal EOF: use `fread`/`feof`); `dirent.h`, `unistd.h` (mkdir, chdir, getcwd);
+  can equal EOF: use `fread`/`feof`); `dirent.h`, `unistd.h` (mkdir, chdir, getcwd),
+  `sys/statvfs.h` (free space);
   `fs.c` is linked only into programs that call `fopen`. Paths `/a/b` or relative.
 * Programs for the OS: `cc build --exe` links for RAM at `0x1100000` (code and
   data together) and writes a TEX1 `.exe` (5-word header + words); `spawnv(path,
   argv)` loads one from the disk, runs it with argc/argv and returns its exit
   status (longjmp back). crt0 holds `_Exit` and `_heap_end` (the OS's heap stops
   at `0x1100000` when `spawnv` is linked). Each program has its own libc copy.
+  `os/shell.c` is the shell that runs them (built-ins + `/bin/NAME`).
 * Tests: `compiler/src/cc/tests/*.c` must print exactly gcc's output
   (`.expected`); `difftest.py` checks with gcc.
 
@@ -264,6 +273,8 @@ python compiler/src/cc/tests/difftest.py [--update]                # C tests aga
 python compiler/src/img pic.png [--colors 16] [--size 64x]         # PNG -> pic.h for gfx_image(x, y, pic)
 python compiler/src/img/video.py clip.mp4 [--fps 10] [--seconds 5]  # video -> clip.h for video_player.c (needs ffmpeg)
 python compiler/src/disk format disk.img; python compiler/src/disk put disk.img notes.txt   # disk images (ls get cat rm mkdir mv df fsck)
+python os/make_disk.py; python compiler/src/cc build os/shell.c                 # the OS: os/disk.img with /bin, the shell's ROM
+python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img             # run it, type help
 pypy3 compiler/src/cc run compiler/examples/c/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
 ```
 

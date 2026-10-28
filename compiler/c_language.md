@@ -352,7 +352,7 @@ for it and returns its exit status (like DOS's `spawnv(P_WAIT, ...)`), or
 `ENOEXEC` (not a program). It starts in the current directory. Close the
 files you have open first: the caller's open `FILE`s don't see the
 program's changes. A `--exe` program can't call `spawnv` (the build
-refuses).
+refuses). `os/shell.c` (TECHNICAL §11) is a shell built on it.
 
 **stdlib.h:** `malloc`, `calloc`, `realloc`, `free` (first fit, from
 `_end` to the end of RAM, or to `0x1100000` with `spawnv`); `exit`, `atexit`, `_Exit`, `abort`; `abs`,
