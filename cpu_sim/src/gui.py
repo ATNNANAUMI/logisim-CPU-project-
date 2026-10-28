@@ -559,6 +559,7 @@ class SimulatorWindow(tk.Tk):
                                insertbackground="#c8ffc8")
         self.display.pack(fill="both", expand=True, padx=4, pady=4)
         self.display.configure(state="disabled")
+        self._display_shown = None
 
         hexbox = ttk.LabelFrame(parent, text=f"hex display (0x{config.HEX_DISPLAY_ADDR:02X})")
         hexbox.pack(fill="x")
@@ -827,11 +828,20 @@ class SimulatorWindow(tk.Tk):
             line if len(line) <= STATE_CHARS else line[:STATE_CHARS - 1] + "…"
             for line in lines))
 
-        self.display.configure(state="normal")
-        self.display.delete("1.0", "end")
-        self.display.insert("1.0", self.cpu.bus.display.text)
-        self.display.see("end")
-        self.display.configure(state="disabled")
+        text = self.cpu.bus.display.text
+        if text != self._display_shown:
+            # follow new output only when already at the bottom, so the
+            # display can be scrolled back while the program runs
+            first, last = self.display.yview()
+            self.display.configure(state="normal")
+            self.display.delete("1.0", "end")
+            self.display.insert("1.0", text)
+            if last >= 1.0:
+                self.display.see("end")
+            else:
+                self.display.yview_moveto(first)
+            self.display.configure(state="disabled")
+            self._display_shown = text
         hv = self.cpu.bus.hex_value
         self.hex_label.configure(text="--------" if hv is None else f"{hv:08X}")
         self._draw_screen()
