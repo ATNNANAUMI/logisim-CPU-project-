@@ -1,4 +1,4 @@
-/* scanf, sscanf, vscanf, vsscanf: formatted input.
+/* scanf, sscanf, fscanf, vscanf, vsscanf, vfscanf: formatted input.
  *
  * Conversions: %d %i %u %o %x %X %c %s %[...] %f %e %g %E %G %n %%,
  * with * (read but don't store), a width, and the length modifiers
@@ -9,7 +9,8 @@
 #include "local.h"
 
 typedef struct {
-    const char *s;          /* a string to read, or 0 for stdin */
+    const char *s;          /* a string to read, or 0 for a stream */
+    FILE *f;                /* the stream: stdin or a file */
     int count;              /* characters read so far */
 } In;
 
@@ -22,7 +23,7 @@ static int get(In *in)
             return EOF;
         in->s++;
     } else {
-        c = getchar();
+        c = in->f == stdin ? getchar() : fgetc(in->f);
         if (c == EOF)
             return EOF;
     }
@@ -38,7 +39,7 @@ static void unget(In *in, int c)
     if (in->s)
         in->s--;
     else
-        ungetc(c, stdin);
+        ungetc(c, in->f);
 }
 
 static int is_space(int c)
@@ -329,8 +330,14 @@ static int scan(In *in, const char *fmt, va_list ap)
 
 int vscanf(const char *fmt, va_list ap)
 {
+    return vfscanf(stdin, fmt, ap);
+}
+
+int vfscanf(FILE *stream, const char *fmt, va_list ap)
+{
     In in;
     in.s = 0;
+    in.f = stream;
     in.count = 0;
     return scan(&in, fmt, ap);
 }
@@ -339,6 +346,7 @@ int vsscanf(const char *s, const char *fmt, va_list ap)
 {
     In in;
     in.s = s;
+    in.f = 0;
     in.count = 0;
     return scan(&in, fmt, ap);
 }
@@ -367,9 +375,8 @@ int fscanf(FILE *stream, const char *fmt, ...)
 {
     va_list ap;
     int n;
-    (void)stream;
     va_start(ap, fmt);
-    n = vscanf(fmt, ap);
+    n = vfscanf(stream, fmt, ap);
     va_end(ap);
     return n;
 }

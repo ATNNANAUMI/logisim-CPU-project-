@@ -5,6 +5,7 @@
 int vprintf(const char *fmt, va_list ap)
 {
     _Sink out;
+    out.file = 0;
     out.buf = 0;
     out.size = 0;
     out.len = 0;

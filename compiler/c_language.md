@@ -274,10 +274,11 @@ by `<stdarg.h>` and `<stddef.h>`), `__builtin_expect(e, c)`,
 
 ## 7. The C library
 
-Headers: `assert.h`, `cpu.h`, `ctype.h`, `errno.h`, `float.h`, `gfx.h`,
-`inttypes.h`, `iso646.h`, `limits.h`, `locale.h`, `math.h`, `setjmp.h`,
-`signal.h`, `stdalign.h`, `stdarg.h`, `stdbool.h`, `stddef.h`, `stdint.h`,
-`stdio.h`, `stdlib.h`, `stdnoreturn.h`, `string.h`, `time.h`.
+Headers: `assert.h`, `cpu.h`, `ctype.h`, `dirent.h`, `errno.h`, `float.h`,
+`gfx.h`, `inttypes.h`, `iso646.h`, `limits.h`, `locale.h`, `math.h`,
+`setjmp.h`, `signal.h`, `stdalign.h`, `stdarg.h`, `stdbool.h`, `stddef.h`,
+`stdint.h`, `stdio.h`, `stdlib.h`, `stdnoreturn.h`, `string.h`, `time.h`,
+`unistd.h`.
 
 Only the library files a program uses are linked in, and a program may
 define its own function with a library name (it is used instead).
@@ -293,12 +294,36 @@ define its own function with a library name (it is used instead).
   to nearest with ties to even), so `printf("%.2f", x)` gives the same
   digits as glibc for the same float.
 * Input: `getchar`, `fgetc`/`getc`, `ungetc`, `fgets`, `fread`, `scanf`,
-  `sscanf`, `vscanf`, `vsscanf`, `fscanf`. The keyboard is read a line at
+  `sscanf`, `vscanf`, `vsscanf`, `fscanf`, `vfscanf`. The keyboard is read a line at
   a time, like a terminal: keys are shown as they are typed, backspace
   removes the last one, and the program gets the line after Enter.
   **Ctrl-D** (`0x04`) at the start of a line is end of file. `scanf`
   supports `%d %i %u %o %x %c %s %[...] %f %e %g %n` with `*` and widths.
-* There are no files: `fopen` returns `NULL`, `remove`/`rename` fail.
+* **Files** are on the disk (simulator only: `cc run --disk FILE` or the
+  window's `disk` button, on an image made with `python compiler/src/disk
+  format FILE`; TECHNICAL §7.6 has the TFS1 format). `fopen` (modes `r w a`,
+  `+`, `b`), `fclose`, `fflush`, `fseek`/`ftell`/`rewind` (`SEEK_SET`,
+  `SEEK_CUR`, `SEEK_END`), `remove` (files and empty directories),
+  `rename` (also into another directory; fails if the new name exists),
+  and every function above on a `FILE *`. A **text** file (no `b`) holds 4
+  chars a word, so only the low 8 bits of a char are kept and the image
+  reads as plain text on the PC; a **binary** file (`b`) holds one whole
+  word per char, so `fgetc` can return a word equal to `EOF` (`feof` tells
+  them apart; `fread` already does). Which kind a file is is fixed when it
+  is created (or emptied by `w`). Paths start at the root (`/a/b`) or at
+  the current directory; names are 1-127 chars, no `/`, spaces or control
+  characters. At most 8 files are open at once; open files are saved by
+  `fclose`, `fflush`, `exit` and the end of `main`. Without a formatted
+  disk `fopen` returns `NULL` with `errno` `ENODEV`.
+
+**unistd.h, dirent.h:** `chdir`, `getcwd`, `mkdir(path, ...)` (a mode is
+ignored; POSIX puts `mkdir` in `sys/stat.h`), `rmdir` (empty directories);
+`opendir`, `readdir` (`d_name`, `d_type` `DT_DIR`/`DT_REG`, and `d_size`, not
+standard: chars for a text file, words otherwise; `.` and `..` aren't
+listed), `closedir`, at most 4 open. Errors set `errno`: `ENOENT`,
+`EEXIST`, `ENOTDIR`, `EISDIR`, `ENOTEMPTY`, `ENOSPC`, `ENODEV`, `EMFILE`,
+`ENAMETOOLONG`, `EINVAL`, `EBUSY` (the root), with Linux's numbers;
+`strerror` and `perror` print them.
 
 **stdlib.h:** `malloc`, `calloc`, `realloc`, `free` (first fit, from
 `_end` to the end of RAM); `exit`, `atexit`, `_Exit`, `abort`; `abs`,

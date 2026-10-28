@@ -6,6 +6,7 @@ int vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
 {
     _Sink out;
     int n;
+    out.file = 0;
     out.buf = buf;
     out.size = size;
     out.len = 0;

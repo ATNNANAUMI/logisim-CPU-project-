@@ -71,6 +71,11 @@ logisim-CPU-project-/
 │   │   │                     (previous pixel, above, above-left, above-right; gamma lengths), or packed
 │   │   │                     indices when that is smaller (b bits a pixel); encode, decode
 │   │   └── selftest.py       10 checks (incl. gfx_image() on the simulator against codec.decode, video_player.c)
+│   ├── src/disk/             disk images for the --disk device (run as `python compiler/src/disk <cmd> disk.img`)
+│   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
+│   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
+│   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
+│   │   └── selftest.py       11 checks (incl. the C library's files on the simulator against fs.py)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod, _Exit), setjmp.asm
 │   ├── examples/
@@ -88,7 +93,7 @@ logisim-CPU-project-/
 │   │   │                     grapher (graphing calculator: type f(x), Enter; zoom/move/view commands)
 │   │   │                     snake (W/A/S/D, R restarts)
 │   │   │                     qr (QR code encoder: the repo link, then any typed text; checked with zbarimg/qrencode)
-│   │   │                     disk_notes (the disk device: shows the saved text, saves typed lines; --disk FILE)
+│   │   │                     disk_notes (files on the disk: shows /notes.txt, adds typed lines; --disk FILE)
 │   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
 │   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag),
 │   │                         diag14, diag15 (float division by zero, NaN, INT out of range),
@@ -184,6 +189,8 @@ The design follows the "But How Do It Know?" style: a single bus,
   Disk (simulator only, `--disk FILE`, 64 MB sparse if missing): `0x8C`
   `OUTDATA` = seek to a word, `INDATA` = size in words; `0x8D` `OUTDATA`/
   `INDATA` = write/read one word and move on. No disk: the ports are empty.
+  Filesystem on it: TFS1 (`compiler/src/disk/fs.py`), made/edited by
+  `python compiler/src/disk`.
   Videos: `compiler/src/img/video.py` -> frames that `video_player.c` draws
   on time (about 350k instructions a 128×96 frame: pypy3 keeps up at 12 fps).
 
@@ -243,6 +250,7 @@ python run.py build prog.c                                          # C or asm: 
 python compiler/src/cc/tests/difftest.py [--update]                # C tests against gcc
 python compiler/src/img pic.png [--colors 16] [--size 64x]         # PNG -> pic.h for gfx_image(x, y, pic)
 python compiler/src/img/video.py clip.mp4 [--fps 10] [--seconds 5]  # video -> clip.h for video_player.c (needs ffmpeg)
+python compiler/src/disk format disk.img; python compiler/src/disk put disk.img notes.txt   # disk images (ls get cat rm mkdir mv df fsck)
 pypy3 compiler/src/cc run compiler/examples/c/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
 ```
 
