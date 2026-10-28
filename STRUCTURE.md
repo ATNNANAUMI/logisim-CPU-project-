@@ -115,7 +115,7 @@ logisim-CPU-project-/
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG]`
-    │   └── selftest.py       23 checks
+    │   └── selftest.py       24 checks
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)

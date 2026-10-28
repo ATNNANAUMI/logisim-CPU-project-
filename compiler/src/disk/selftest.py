@@ -184,6 +184,7 @@ C_PROGRAM = r"""
 #include <errno.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <sys/statvfs.h>
 
 int main(void)
 {
@@ -192,6 +193,7 @@ int main(void)
     int c, n = 0, sum = 0, a, b;
     float x;
     FILE *f = fopen("/in.txt", "r");
+    struct statvfs s;
     DIR *d;
     struct dirent *e;
     while ((c = fgetc(f)) != EOF) {
@@ -233,8 +235,11 @@ int main(void)
     fclose(f);
     mkdir("/made");
     printf("rename %d remove %d\n", rename("/in.txt", "/made/in.txt"), remove("/in.bin"));
-    printf("errors %d %d %d\n", fopen("/none", "r") == 0 && errno == ENOENT,
-           rmdir("/sub") == -1 && errno == ENOTEMPTY, chdir("/nums.txt") == -1 && errno == ENOTDIR);
+    printf("errors %d %d %d %d\n", fopen("/none", "r") == 0 && errno == ENOENT,
+           rmdir("/sub") == -1 && errno == ENOTEMPTY, chdir("/nums.txt") == -1 && errno == ENOTDIR,
+           statvfs("/none", &s) == -1 && errno == ENOENT);
+    statvfs("/made", &s);
+    printf("df %u %u %u %u\n", s.f_blocks, s.f_bfree, (unsigned)s.f_bsize, (unsigned)s.f_namemax);
     return 0;
 }
 """
@@ -242,8 +247,9 @@ int main(void)
 
 def check_c_library():
     """The C library (compiler/libc/fs.c, dir.c) and fs.py agree: C reads
-    what the tool wrote, the tool reads what C wrote, and fsck finds every
-    block in exactly one file afterwards."""
+    what the tool wrote, the tool reads what C wrote, statvfs() counts the
+    free blocks fs.py counts, and fsck finds every block in exactly one file
+    afterwards."""
     import sys
     sys.path.append(str(HERE.parent / "cc"))
     import driver                       # compiler/src/cc
@@ -267,9 +273,10 @@ def check_c_library():
               "deep down here\n"
               "nums 42 4.5\n"
               "rename 0 remove 0\n"
-              "errors 1 1 1\n")
-    assert cpu.halted and out == expect, out
+              "errors 1 1 1 1\n")
     with FileSystem(image) as disk:
+        expect += f"df {disk.blocks} {disk.free_blocks()} 256 127\n"
+        assert cpu.halted and out == expect, out
         assert disk.get("/sub/out.txt") == bytes(48 + n % 10 for n in range(1100)) + b"|end 1100\n"
         assert disk.get("/out.bin") == bytes.fromhex("07000000ffffffff")
         assert disk.get("/made/in.txt") == text + b"+more"

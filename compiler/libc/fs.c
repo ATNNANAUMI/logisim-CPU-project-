@@ -1,5 +1,5 @@
 /* fs.c - files on the disk: fopen, fclose, fseek, ftell, rewind, remove,
- * rename, and the filesystem under them (also used by dir.c).
+ * rename, statvfs, and the filesystem under them (also used by dir.c).
  *
  * The disk is the simulator's disk device (0x8C seek, 0x8D data; run with
  * --disk FILE). Its filesystem is TFS1; compiler/src/disk/fs.py is the
@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <sys/statvfs.h>
 #include "local.h"
 
 #define SEEK_PORT 0x8C
@@ -711,5 +712,25 @@ int rename(const char *from, const char *to)
     _fs_lookup(from, &node);            /* again: its directory may have grown */
     node.flags = 0;
     _fs_save(&node);
+    return 0;
+}
+
+/* the disk's size and free blocks (sys/statvfs.h) */
+int statvfs(const char *path, struct statvfs *buf)
+{
+    unsigned b, free = 0;
+    _Node node;
+    if (_fs_lookup(path, &node))
+        return -1;
+    __builtin_out(SEEK_PORT, fat_start * _FS_BLOCK);
+    for (b = 0; b < blocks; b++)
+        if (__builtin_in(DATA_PORT) == 0)       /* the position moves on by itself */
+            free++;
+    memset(buf, 0, sizeof *buf);
+    buf->f_bsize = buf->f_frsize = _FS_BLOCK;
+    buf->f_blocks = blocks;
+    buf->f_bfree = buf->f_bavail = free;
+    buf->f_fsid = MAGIC;
+    buf->f_namemax = _FS_NAME - 1;
     return 0;
 }
