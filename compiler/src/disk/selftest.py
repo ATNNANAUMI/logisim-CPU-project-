@@ -134,11 +134,57 @@ def check_names():
         raises("no name", disk.put, "/", b"")
 
 
+FILL_DISK = r"""
+#include <stdio.h>
+#include <errno.h>
+#include <sys/statvfs.h>
+
+int main(void)
+{
+    struct statvfs s;
+    FILE *f = fopen("/big", "wb");
+    int i, n = 0;
+    for (i = 0; i < 14 * 256; i++) {
+        if (fputc(i, f) == EOF && ferror(f))
+            break;
+        n++;
+    }
+    printf("wrote %d errno %d\n", n, errno);
+    fclose(f);
+    statvfs("/", &s);
+    printf("free %u remove %d\n", s.f_bfree, remove("/big"));
+    f = fopen("/again", "wb");
+    for (i = 0; i < 300; i++)
+        fputc(i, f);
+    fclose(f);
+    statvfs("/", &s);
+    printf("free %u\n", s.f_bfree);
+    return 0;
+}
+"""
+
+
 def check_disk_full():
+    """fs.py and the C library both stop at a full disk; C's block search
+    wraps round the end of the FAT and finds the blocks freed after."""
+    import sys
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+
     with new_disk(fs.BLOCK * 8) as disk:             # 8 blocks: 3 for the system, 5 free
         assert disk.free_blocks() == 5
         disk.put("/f", bytes(4 * 1024))               # 4 blocks
         raises("disk full", disk.put, "/g", bytes(2 * 1024))
+    with new_disk(fs.BLOCK * 16, "full.img") as disk:   # 13 free
+        image = disk.path
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "fill.c"
+        path.write_text(FILL_DISK)
+        program, _ = driver.build([str(path)])
+    cpu, out = driver.run_in_simulator(program.rom, "", 20_000_000, disk=image)
+    assert cpu.halted and out == f"wrote {13 * 256} errno 28\nfree 0 remove 0\nfree 11\n", out
+    with FileSystem(image) as disk:
+        assert disk.check() == [] and disk.lookup("/again").length == 300
 
 
 def check_command_line():

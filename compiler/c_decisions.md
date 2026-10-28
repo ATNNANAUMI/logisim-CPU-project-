@@ -204,6 +204,15 @@ The language itself is described in [`c_language.md`](c_language.md).
     prints the bytes sent to the TTY, not its screen. The same code shows
     that `'\r'` starts a new line on the TTY, where the simulator clears the
     line; left as it was (TECHNICAL §8).
+46. **`alloc` reads the FAT in one sweep** (one seek, then the data port
+    moves on by itself), from the hint round to it again, as `fs.py` does:
+    19 instructions a used block instead of about 84 (`% blocks` and a
+    `fat()` call with its own seek each time). It matters because the hint
+    goes back to 0 at every mount and after every program `spawnv` runs: on
+    the demo disk (636 blocks used by `/bin`), the shell's
+    `echo "two  spaces" > /a.txt` went from 93,158 instructions to 50,492.
+    On a full 64 MB disk the first new block would have cost about 5.5
+    million.
 
 ## Measured on the circuit while doing this
 

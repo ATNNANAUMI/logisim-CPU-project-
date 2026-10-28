@@ -1420,7 +1420,7 @@ no multitasking.
 
 | file | what it is |
 | --- | --- |
-| `os/shell.c` | the OS's ROM: a command shell, built like any C program (17,787 words of ROM, 2,922 of RAM) |
+| `os/shell.c` | the OS's ROM: a command shell, built like any C program (17,833 words of ROM, 2,923 of RAM) |
 | `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples, 2.8K–17.4K words each, in under a second |
 
 ```
