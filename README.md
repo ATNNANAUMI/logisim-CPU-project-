@@ -24,7 +24,9 @@ IEEE-754 float ALUs, and I/O through a single `COMM` instruction: a text
 display at `0x5C`, a hex number display at `0x3C` and a keyboard at `0xF0`
 (plus a 128×128 RGB screen at `0x6C`, drawn on from C with `gfx.h`, and a
 millisecond timer at `0x7C`, wiring planned, which C's `clock()` reads,
-and, in the simulator only, a disk kept in a file at `0x8C`/`0x8D`).
+and, in the simulator only, a disk kept in a file at `0x8C`/`0x8D`, with a
+filesystem that C's `fopen` reads and writes and `compiler/src/disk` edits
+from the PC).
 Every ALU result goes to **R0**.
 
 ## Requirements
