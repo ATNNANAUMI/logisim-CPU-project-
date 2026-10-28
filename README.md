@@ -26,7 +26,7 @@ display at `0x5C`, a hex number display at `0x3C` and a keyboard at `0xF0`
 millisecond timer at `0x7C`, wiring planned, which C's `clock()` reads,
 and, in the simulator only, a disk kept in a file at `0x8C`/`0x8D`, with a
 filesystem that C's `fopen` reads and writes and `compiler/src/disk` edits
-from the PC).
+from the PC, and programs that C's `spawnv` loads from it into RAM and runs).
 Every ALU result goes to **R0**.
 
 ## Requirements
@@ -73,6 +73,7 @@ C programs go through the C compiler, which links the C library on its own:
 ```
 python compiler/src/cc run compiler/examples/c/hello.c          # build + run in the simulator, print the display
 python compiler/src/cc build compiler/examples/c/primes.c       # -> compiler/ROM/primes.rom (+ primes.asm to read)
+python compiler/src/cc build compiler/examples/c/echo.c --exe   # -> echo.exe, a program for the disk (see c/loader.c)
 python run.py build compiler/examples/c/guess.c                 # build, then open the simulator window
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/primes.rom
 ```

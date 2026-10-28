@@ -5,6 +5,7 @@
 extern int errno;
 
 #define ENOENT 2        /* no such file or directory */
+#define ENOEXEC 8       /* not a program (spawnv) */
 #define EBADF 9         /* not a file on the disk */
 #define EBUSY 16        /* the root directory */
 #define EEXIST 17

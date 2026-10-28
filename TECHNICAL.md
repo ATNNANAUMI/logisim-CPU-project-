@@ -39,6 +39,7 @@ chooses the bank:
 0x0000000 ─ 0x0FFFFFF   ROM  16M × 32   program and constant data, read only
 0x1000000 ─ 0x1003FFF   RAM  stack area (16K words, indexed by ESP/EBP)
 0x1004000 ─ 0x1FFFFFF   RAM  free; the linker puts .ram data here
+0x1100000 ─ 0x1FFFFFF   RAM  (by convention) where spawnv() loads programs for the OS
 ```
 
 **The circuit is still the 16-bit version** (17-bit bus, bit 16 = RAM, 64K
@@ -53,8 +54,9 @@ before it can run these programs, and `logisim/run_rom.py` refuses until then.
   and `EBP` are 14-bit indices into it, so they wrap at 16K. `STK SET/GET`
   addresses are not limited to the stack area: they wrap across the whole
   RAM (see 1.6).
-* The IAR is 25 bits, so the CPU *can* fetch from RAM, but the assembler never
-  puts code there.
+* The IAR is 25 bits, so the CPU *can* fetch from RAM. The linker puts code
+  there only for a program for the OS (`cc build --exe`, 4.6 and 10.4),
+  which `spawnv()` loads from the disk at `0x1100000`.
 
 ### 1.3 Instruction word
 
@@ -729,6 +731,13 @@ RAM  0x1000000 stack (never touched by the linker)
 
 The output is a v2.0 raw image (section 6).
 
+**A program for the OS** (`linker.link(..., base=PROGRAM_BASE)`, used by
+`cc build --exe`, 10.4) is linked all in RAM: the entry jump at the base
+(`0x1100000`), the ROM parts after it, then the RAM parts straight after the
+code. Every step above is the same; only the bases move, so the checks on
+`CALL`s and jumps to RAM labels still apply (they look at the label's
+section, not its address). The image must fit below the end of RAM.
+
 ---
 
 ## 5. Calling convention and the standard library
@@ -828,6 +837,8 @@ line is empty (so it can't erase the prompt).
 | `c/grapher.c` | C: a graphing calculator on the RGB screen. Type a function of x on the bottom line (`+ - * / ^`, implied products like `2x`, `\|x\|`, `sin cos tan sqrt ln log exp ...`, `pi`, `e`) and Enter: it is parsed into a small stack program and drawn, up to six functions in different colours, two pixels thick, over a grid with numbers on the axes; gaps where the value is not a number, jumps like tan's left unjoined. Commands `clear`, `reset`, `zoom f`, `in`, `out`, `move dx dy`, `view x0 x1 y0 y1`, `demo`, `help` (the list of what can be typed, also on the screen at the start). 100–200 ms a function in the simulator |
 | `c/qr.c` | C: a QR code encoder written from the standard, drawn on the RGB screen as big as it fits. Starts with this project's GitHub link; type any text and Enter for a new code (an empty line goes back to the link). Byte mode, versions 1–10, levels L/M/Q/H (`-D LEVEL=n`, M by default), Reed-Solomon over GF(256) with the blocks interleaved, and all eight masks scored by the standard's penalty rules (`-D MASK=n` forces one). `-D TEXT="..."` the first text, `-D DARK=c` the module colour. Every version and level decodes with `zbarimg` and matches `qrencode` module for module with the same mask. About 2.6 million instructions for the link (0.9 s in the simulator) |
 | `c/snake.c` | C: Snake on the RGB screen, a 16×14 grid of 8×8 cells under a score panel; `W`/`A`/`S`/`D` steer, `R` restarts after a game over (`key_pressed()`, `wait_ms()`) |
+| `c/loader.c` | C: runs programs from the disk (simulator only): type a name and arguments, it runs `/bin/<name>` with `spawnv()` and shows the exit status; an empty line lists `/bin`. The first step towards the OS's shell |
+| `c/echo.c` | C: a program for the OS (`cc build --exe`, then `disk put` into `/bin`): prints its arguments, like Unix `echo` |
 | `c/disk_notes.c` | C: files on the disk (simulator only, `--disk FILE` on a disk made by `python compiler/src/disk format`): prints `/notes.txt`, then adds each typed line to it (`!help` lists the commands: `!show`, `!ls`, `!clear`, `!quit`), so the next run shows them again |
 | `c/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, `~` on registers, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
 | `tests/diag10.asm` | `INT` on floats below 1 (diagnostic, resolved: they give 0) |
@@ -951,12 +962,15 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 11 checks: format (sparse, the superblock), text and
+python compiler/src/disk/selftest.py  # 12 checks: format (sparse, the superblock), text and
                                       # binary round trips (block edges), overwriting frees
                                       # blocks, a directory past one block (entries reused),
                                       # subdirectories, . and .., mv, name rules, disk full, CLI,
                                       # fsck, and the C library on the simulator against fs.py
-                                      # (each reads what the other wrote; fsck clean after)
+                                      # (each reads what the other wrote; fsck clean after),
+                                      # and spawnv(): a --exe program put on the disk, run
+                                      # three times (arguments, exit status, fresh variables,
+                                      # the caller's directory and heap, load errors)
 python check_docs.py                  # 3 checks on the docs: every repo path they name
                                       # exists, every example (.asm, .c) is listed in
                                       # 5.3, every TWEAKS switch is in 3.4
@@ -1108,7 +1122,8 @@ blocks (256 for the FAT) and 65,278 free when new.
 ```
 python compiler/src/disk format disk.img [--size MB] [--force]   # new disk (64 MB, sparse); --force wipes one
 python compiler/src/disk ls disk.img [PATH]                      # a directory: size (chars/words) and name
-python compiler/src/disk put disk.img HOST [PATH] [--binary]     # copy in (text unless --binary); PATH: a
+python compiler/src/disk put disk.img HOST [PATH] [--binary]     # copy in (text unless --binary, or a TEX1
+                                                                 # program from cc build --exe); PATH: a
                                                                  # name or a directory, default /HOST's name
 python compiler/src/disk get disk.img PATH [HOST|-]              # copy out (- = the terminal)
 python compiler/src/disk cat disk.img PATH
@@ -1182,7 +1197,7 @@ how the compiler works.
 
 ```
 python compiler/src/cc compile prog.c [-o prog.asm]                 # C -> assembly
-python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map] [--no-libc] [--lib x.asm]
+python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map] [--no-libc] [--lib x.asm] [--exe]
 python compiler/src/cc run   prog.c [...] [--keys TEXT] [--steps N] [--stats] [--trace] [--screen FILE.png] [--disk FILE]
         common options: -I dir, -D NAME[=value], -w (no warnings)
 ```
@@ -1193,7 +1208,8 @@ written. `build` and `run` also write `<name>.asm` for each `.c` next to the
 `.rom`; `build` always writes the `.map` too (with the C source lines, for
 the simulator window's C view; `.loc` directives carry them). `run` builds, runs the image in the simulator without a window and
 prints the display; it exits with 2 if the program doesn't halt within
-`--steps` (default 50 million).
+`--steps` (default 50 million). `build --exe` writes `<name>.exe` instead,
+a program for the OS (10.4) for `python compiler/src/disk put`.
 
 ### 10.2 Modules
 
@@ -1304,10 +1320,29 @@ leads to after an unconditional jump.
   copies its starting values from the `_T_<file>` template in ROM, and
   clears the rest. `driver.crt0_source` writes the start-up code for each
   build: `start` calls every linked `_init_` routine, then
-  `main(0, {NULL})`, then `exit` with main's result. The build links, in
-  order: crt0, the given files, the library files they need, and a last
-  object whose `.ram` label `_end` marks the end of all variables (where
-  malloc's heap starts).
+  `main(0, {NULL})`, then `exit` with main's result. crt0 also holds
+  `_Exit` (HALT, in a loop) and `_heap_end`, the word where malloc's heap
+  ends: the end of RAM, or `0x1100000` when `spawnv` is linked (the build
+  then also checks that the program's variables end below it). The build
+  links, in order: crt0, the given files, the library files they need, and
+  a last object whose `.ram` label `_end` marks the end of all variables
+  (where malloc's heap starts).
+* **Programs for the OS** (`build --exe`) are linked at `0x1100000` (4.6)
+  and saved as a TEX1 executable: a 5-word header (`0x31584554` "TEX1",
+  load address, n, entry, words to zero after the image) and the n words,
+  little-endian, so `disk put` stores it as a binary file (it spots the
+  magic). `spawnv()` (`spawn.c`) checks the header, copies the words with
+  `_fs_read` (one seek a block, about 5 instructions a word), zeroes the
+  variables, and jumps to the entry with R1 = a block: argc, argv, the
+  address to go back to, its current directory. That crt0 keeps the block,
+  calls the `_init_` routines and `_fs_inherit(cwd)` (when `fs.c` is linked),
+  then `main(argc, argv)`; its `_Exit` jumps back to `spawn.asm`'s
+  `_spawn_return` with R0 = the status, which `longjmp`s to the stack
+  `spawnv()` had, so `exit()` works at any depth. The program has its own
+  copy of the library (its own heap, from its `_end` to the end of RAM, and
+  its own open files); afterwards `spawnv()` calls `_fs_forget()` so the
+  caller re-reads the disk. A `--exe` program can't link `spawnv` (it would
+  load over itself).
 * Labels: C names as they are (or `_X` + name, 5 in `c_language.md`);
   compiler labels `_K<n>` (code), `_L<n>` (statements), `_S<n>` (strings),
   `_F<n>` (`__func__`), `_V<n>_<name>` (static locals), `_C<n>`, `_G<n>`.
@@ -1319,8 +1354,9 @@ per group of functions: `printf.c`, `format.c`, `fdigits.c`, `scanf.c`,
 `string.c`, `malloc.c`, `math.c`, `gfx.c`, `gfx_text.c` and `gfx_image.c` for the RGB
 screen, `fs.c` (files on the disk, TFS1 as in 7.6) and `dir.c`
 (directories), ...), `local.h` (shared by the library
-files only) and two assembly files: `runtime.asm` (`_pow2`, `_udiv`,
-`_umod`, `_Exit`) and `setjmp.asm`.
+files only) and three assembly files: `runtime.asm` (`_pow2`, `_udiv`,
+`_umod`), `setjmp.asm`, and `spawn.asm` (the jumps of `spawn.c`'s `spawnv`,
+10.4). `_Exit` is in the generated crt0.
 
 * The driver compiles each library file the first time it is needed and
   keeps the `.obj` (and the `.asm`, for reading) in `compiler/ROM/libc/`,
