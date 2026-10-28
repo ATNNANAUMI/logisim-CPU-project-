@@ -211,7 +211,7 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 
 | address | device | behaviour |
 | --- | --- | --- |
-| `0x5C` | text display (TTY) | prints the low 7 bits as ASCII; `0x0A` newline, `0x08` backspace |
+| `0x5C` | text display (TTY) | prints the low 7 bits as ASCII; `0x0A` newline, `0x08` backspace, `0x0C` (form feed) clears it (Logisim's `TTY` does this; read in its code, not run on the circuit) |
 | `0x3C` | number display | latches the 32-bit word and shows it on 8 hex digits (the simulator shows it in the window, and as `HEX DISPLAY:` in headless output) |
 | `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08` |
 | `0x6C` | RGB screen | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; on the 128×128 RGB Video only the low 7 bits of x and y are wired. Write-only |
@@ -437,12 +437,12 @@ modules import each other by plain name, so run them as scripts
 | `isa.py` | opcode tables, `decode(word) -> Instr`, `disassemble(word, operand)`. `Instr.takes_operand` says whether a literal word follows |
 | `alu.py` | `int_op(name, a, b)` and `float_op(name, a, b)`, each returning `(R0 value, flag nibble)`; float32 ↔ bits helpers |
 | `memory.py` | `Memory` with two 16M-word banks (Python lists, 128 MB each), `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
-| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
+| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes, `\f` clears it all, so headless output shows only what came after the last `\f`), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()`, `reset()`, `resume()` |
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 23 checks on the core |
+| `selftest.py` | 24 checks on the core |
 
 ### 3.2 Execution model
 
@@ -940,9 +940,10 @@ python compiler/src/asm/selftest.py   # 20 checks: encodings, values, strings, j
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 23 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 24 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
-                                      # floats, FCMP flags, keyboard, backspace, ADDR/JMRB,
+                                      # floats, FCMP flags, keyboard, backspace, the display's
+                                      # backspace and form feed, ADDR/JMRB,
                                       # float specials, float SHL, run() against step()
                                       # on random code, run() stopping at breakpoints,
                                       # the top of both 16M-word banks, the timer,
@@ -1352,7 +1353,7 @@ leads to after an unconditional jump.
 `compiler/libc/` holds the headers (`include/`), the library in C (one file
 per group of functions: `printf.c`, `format.c`, `fdigits.c`, `scanf.c`,
 `string.c`, `malloc.c`, `math.c`, `gfx.c`, `gfx_text.c` and `gfx_image.c` for the RGB
-screen, `fs.c` (files on the disk, TFS1 as in 7.6) and `dir.c`
+screen, `fs.c` (files on the disk, TFS1 as in 7.6, and `statvfs`) and `dir.c`
 (directories), ...), `local.h` (shared by the library
 files only) and three assembly files: `runtime.asm` (`_pow2`, `_udiv`,
 `_umod`), `setjmp.asm`, and `spawn.asm` (the jumps of `spawn.c`'s `spawnv`,
@@ -1360,8 +1361,8 @@ files only) and three assembly files: `runtime.asm` (`_pow2`, `_udiv`,
 
 * The driver compiles each library file the first time it is needed and
   keeps the `.obj` (and the `.asm`, for reading) in `compiler/ROM/libc/`,
-  with a key made from the file, the compiler's sources and the headers: a
-  change to any of them rebuilds it.
+  with a key made from the file, the compiler's sources and the headers
+  (`include/sys/` too): a change to any of them rebuilds it.
 * `driver.select_library` links a library file only when it defines a name
   that is still missing, repeating until nothing is: like a static library,
   so a program's own `puts` wins. The chosen files are then linked as
@@ -1372,7 +1373,7 @@ files only) and three assembly files: `runtime.asm` (`_pow2`, `_udiv`,
 * `FILE` (in `local.h`) carries `get`/`put`/`flush` pointers that `fopen`
   sets; `file.c`, `getchar.c`, `format.c` and `scanf.c` call them for
   files on the disk, so `fs.c` is linked only into programs that call
-  `fopen` (c_decisions 33–35).
+  `fopen` or `statvfs` (c_decisions 33–35).
 * `format.c` prints floats exactly: `fdigits.c` turns the float's exact
   value into decimal digits (base-10000 pieces for big integer parts, a
   160-bit binary fraction for the rest) and rounds ties to even.

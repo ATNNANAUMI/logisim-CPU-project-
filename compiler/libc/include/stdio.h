@@ -1,6 +1,7 @@
 /* stdio.h - input and output
  *
- * Output goes to the text display (device 0x5C), stdout and stderr alike.
+ * Output goes to the text display (device 0x5C), stdout and stderr alike;
+ * '\f' (form feed) clears it.
  * Input comes from the keyboard (device 0xF0) a line at a time, echoed as it
  * is typed, with backspace editing. Ctrl-D (0x04) at the start of a line
  * means end of file.

@@ -112,8 +112,8 @@ def _compiler_stamp():
     for p in sorted(HERE.glob("*.py")) + sorted(ASM_DIR.glob("*.py")):
         h.update(p.name.encode())
         h.update(p.read_bytes())
-    for p in sorted(INCLUDE_DIR.glob("*.h")):
-        h.update(p.name.encode())
+    for p in sorted(INCLUDE_DIR.rglob("*.h")):         # sys/*.h too
+        h.update(str(p.relative_to(INCLUDE_DIR)).encode())
         h.update(p.read_bytes())
     return h.hexdigest()
 

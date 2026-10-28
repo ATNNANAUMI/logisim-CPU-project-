@@ -292,8 +292,8 @@ by `<stdarg.h>` and `<stddef.h>`), `__builtin_expect(e, c)`,
 Headers: `assert.h`, `cpu.h`, `ctype.h`, `dirent.h`, `errno.h`, `float.h`,
 `gfx.h`, `inttypes.h`, `iso646.h`, `limits.h`, `locale.h`, `math.h`,
 `setjmp.h`, `signal.h`, `stdalign.h`, `stdarg.h`, `stdbool.h`, `stddef.h`,
-`stdint.h`, `stdio.h`, `stdlib.h`, `stdnoreturn.h`, `string.h`, `time.h`,
-`unistd.h`.
+`stdint.h`, `stdio.h`, `stdlib.h`, `stdnoreturn.h`, `string.h`, `sys/statvfs.h`,
+`time.h`, `unistd.h`.
 
 Only the library files a program uses are linked in, and a program may
 define its own function with a library name (it is used instead).
@@ -302,7 +302,7 @@ define its own function with a library name (it is used instead).
 
 * Output: `printf`, `fprintf`, `sprintf`, `snprintf`, `vprintf` and the
   other `v` forms, `puts`, `putchar`, `fputs`, `fputc`/`putc`, `fwrite`.
-  `stdout` and `stderr` both go to the display. `printf` supports
+  `stdout` and `stderr` both go to the display (`'\f'` clears it). `printf` supports
   `%d %i %u %o %x %X %c %s %p %f %F %e %E %g %G %n %%` with flags, width and
   precision; length modifiers are accepted and change nothing. Floats are
   printed exactly (the decimal digits of the float's exact value, rounded
@@ -339,6 +339,11 @@ listed), `closedir`, at most 4 open. Errors set `errno`: `ENOENT`,
 `EEXIST`, `ENOTDIR`, `EISDIR`, `ENOTEMPTY`, `ENOSPC`, `ENODEV`, `EMFILE`,
 `ENAMETOOLONG`, `EINVAL`, `EBUSY` (the root), with Linux's numbers;
 `strerror` and `perror` print them.
+
+**sys/statvfs.h:** `statvfs(path, &s)` gives the disk's size and free
+space in blocks of `f_bsize` (256) chars: `f_blocks`, `f_bfree` (=
+`f_bavail`), `f_namemax` (127); `f_files` and friends are 0. It reads the
+whole FAT (14 instructions a block, 0.9 million on a 64 MB disk).
 
 **unistd.h: `spawnv(path, argv)`** runs the program in the file `path` (made
 with `cc build --exe`) with `argv[0]`, `argv[1]`, ... up to a `NULL`, waits
