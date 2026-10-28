@@ -226,6 +226,7 @@ char *strerror(int errnum)
     switch (errnum) {
     case 0: return "Success";
     case 2: return "No such file or directory";
+    case 8: return "Exec format error";
     case 9: return "Bad file descriptor";
     case 16: return "Device or resource busy";
     case 17: return "File exists";

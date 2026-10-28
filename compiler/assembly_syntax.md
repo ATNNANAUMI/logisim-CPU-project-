@@ -217,6 +217,10 @@ RAM  0x1000000 - 0x1003FFF   stack (never touched by the linker)
 
 Exactly one file must define `.global start`. That's where the program begins.
 
+A C program built as a program for the OS (`cc build --exe`) is laid out
+the same way but all in RAM from `0x1100000`: the entry jump, the ROM parts,
+then the RAM parts (TECHNICAL 4.6).
+
 **Libraries.** A file given with `--lib` (section 10) is a library: only the
 functions the program uses go in. The assembler cuts each file into
 *parts*: a new part starts at every `.global` label and at every `.part`

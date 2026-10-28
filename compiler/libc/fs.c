@@ -46,6 +46,22 @@ static void disk_write(unsigned addr, unsigned value)
     __builtin_out(DATA_PORT, value);
 }
 
+/* after a program run by spawnv() (with its own copy of this file) has
+   used the disk: what is remembered about it may be out of date */
+void _fs_forget(void)
+{
+    mounted = 0;
+    hint = 0;
+    cache_first = 0;
+}
+
+/* a program run by spawnv() starts in its caller's directory */
+void _fs_inherit(const char *cwd)
+{
+    if (cwd && strlen(cwd) < _FS_PATH)
+        strcpy(_fs_cwd, cwd);
+}
+
 int _fs_mount(void)
 {
     if (mounted)
@@ -129,6 +145,28 @@ unsigned _fs_word(unsigned first, unsigned offset)
 {
     unsigned b = nth_block(first, offset / _FS_BLOCK);
     return b ? disk_read(b * _FS_BLOCK + offset % _FS_BLOCK) : 0;
+}
+
+/* n words of a chain from word `offset` into buf: one seek a block, then
+   the data port moves on by itself (spawnv() loads programs with it) */
+void _fs_read(unsigned first, unsigned offset, unsigned *buf, unsigned n)
+{
+    while (n > 0) {
+        unsigned b = nth_block(first, offset / _FS_BLOCK);
+        unsigned i = offset % _FS_BLOCK, k = _FS_BLOCK - i;
+        if (k > n)
+            k = n;
+        n -= k;
+        offset += k;
+        if (b == 0) {
+            while (k-- > 0)
+                *buf++ = 0;
+            continue;
+        }
+        __builtin_out(SEEK_PORT, b * _FS_BLOCK + i);
+        while (k-- > 0)
+            *buf++ = __builtin_in(DATA_PORT);
+    }
 }
 
 /* the disk address of word `offset` of a node, adding blocks as needed

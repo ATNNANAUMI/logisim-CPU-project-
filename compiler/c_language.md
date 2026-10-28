@@ -25,6 +25,7 @@ Run from the project root:
 python compiler/src/cc run prog.c                  # build, then run in the simulator (no window)
 python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map]
 python compiler/src/cc compile prog.c [-o prog.asm]   # C to assembly only
+python compiler/src/cc build prog.c --exe          # a program for the OS: prog.exe, for the disk
 python run.py build prog.c                         # build, then open the simulator window
 ```
 
@@ -46,6 +47,10 @@ python run.py build prog.c                         # build, then open the simula
   (the program then needs its own `start`), `--lib FILE` links an assembly
   (or `.obj`) library, keeping only the functions the program uses (like the
   assembler's `--lib`).
+* `build --exe` makes a **program for the OS**: `compiler/ROM/prog.exe`, to
+  copy to the disk (`python compiler/src/disk put disk.img
+  compiler/ROM/prog.exe /bin/prog`) and run with `spawnv()` (section 4).
+  Any C program works; it gets `argc`/`argv` from its caller.
 * On the circuit: `python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom`.
   The circuit runs about 160 instructions a second, so keep circuit runs
   small: `hello.c` takes 1 400 instructions, a `printf` with a float a few
@@ -143,7 +148,8 @@ ROM  0x00000   RJMP start (from the linker)
                and the starting values of initialised globals
 RAM  0x1000000 the stack (16K words), grows upward
      0x1004000 global and static variables
-     _end      the heap (malloc) up to 0x1FFFFFF
+     _end      the heap (malloc) up to 0x1FFFFFF (up to 0x10FFFFF in a
+               program that calls spawnv: programs are loaded from 0x1100000)
 ```
 
 * `start` (in the generated start-up code, crt0) calls each file's
@@ -155,6 +161,15 @@ RAM  0x1000000 the stack (16K words), grows upward
   RESUME halts it again.
 * Each call takes 2 words of stack plus its arguments and its locals; deep
   recursion can run past the 16K words of stack (it wraps, nothing checks).
+* **A program for the OS** (`build --exe`) lives all in RAM: its code,
+  constants and variables from `0x1100000`, its heap after them up to
+  `0x1FFFFFF`. `spawnv(path, argv)` loads it from the disk and calls
+  `main(argc, argv)`; `exit()` or the end of `main` goes back to the caller
+  with the status (`spawnv`'s result) instead of halting. Its variables
+  start fresh on every run, it starts in the caller's current directory,
+  and it shares the stack with the caller (above the caller's frame). It
+  has its own copy of the library: open files, `errno`, the heap and
+  `atexit` are its own. Nothing protects the caller's memory from it.
 
 
 ## 5. Calling convention and mixing with assembly
@@ -325,8 +340,17 @@ listed), `closedir`, at most 4 open. Errors set `errno`: `ENOENT`,
 `ENAMETOOLONG`, `EINVAL`, `EBUSY` (the root), with Linux's numbers;
 `strerror` and `perror` print them.
 
+**unistd.h: `spawnv(path, argv)`** runs the program in the file `path` (made
+with `cc build --exe`) with `argv[0]`, `argv[1]`, ... up to a `NULL`, waits
+for it and returns its exit status (like DOS's `spawnv(P_WAIT, ...)`), or
+-1 with `errno` set when it can't be loaded: `ENOENT`, `EISDIR`, or
+`ENOEXEC` (not a program). It starts in the current directory. Close the
+files you have open first: the caller's open `FILE`s don't see the
+program's changes. A `--exe` program can't call `spawnv` (the build
+refuses).
+
 **stdlib.h:** `malloc`, `calloc`, `realloc`, `free` (first fit, from
-`_end` to the end of RAM); `exit`, `atexit`, `_Exit`, `abort`; `abs`,
+`_end` to the end of RAM, or to `0x1100000` with `spawnv`); `exit`, `atexit`, `_Exit`, `abort`; `abs`,
 `labs`, `div`, `ldiv`; `atoi`, `atol`, `atof`, `strtol`, `strtoul`, `strtod`,
 `strtof`; `rand` (0..32767, the generator from the C standard's example, so
 not the same numbers as glibc), `srand`; `qsort`, `bsearch`; `getenv`

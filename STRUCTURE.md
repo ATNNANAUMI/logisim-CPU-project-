@@ -48,7 +48,7 @@ logisim-CPU-project-/
 │   │   ├── selftest.py       20 checks (incl. building every compiler/examples program)
 │   │   └── asm_grammar.py    generates railroad-diagram HTML of the grammar (needs railroad-diagrams)
 │   ├── src/cc/               C compiler (run as `python compiler/src/cc <cmd>`); imports src/asm's modules
-│   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; run: --keys --steps --stats --trace)
+│   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; build: --exe; run: --keys --steps --stats --trace)
 │   │   ├── lexer.py, preprocessor.py   tokens; #include/#define/#if, macro expansion (hide sets)
 │   │   ├── typesys.py        types (sizes in words), promotions, compatibility
 │   │   ├── nodes.py          syntax tree Node, Obj (variable/function)
@@ -56,7 +56,7 @@ logisim-CPU-project-/
 │   │   ├── regalloc.py       which locals get registers; which a call must keep
 │   │   ├── codegen.py        tree → assembly (Val/Addr model, calls, frames, switch tables)
 │   │   ├── peephole.py       clean-ups per function
-│   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0, link, run in simulator
+│   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0 (ROM or --exe), link, TEX1 .exe, run in simulator
 │   │   ├── cerror.py         CError (file:line:col: error: ...)
 │   │   ├── selftest.py       15 checks (incl. every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
@@ -75,9 +75,10 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       11 checks (incl. the C library's files on the simulator against fs.py)
+│   │   └── selftest.py       12 checks (incl. the C library's files on the simulator against fs.py, spawnv)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
-│   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod, _Exit), setjmp.asm
+│   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), setjmp.asm,
+│   │                         spawn.c + spawn.asm (spawnv: load a --exe program from the disk, run it, come back)
 │   ├── examples/
 │   │   ├── programs/         hello, print_a-z, count_0-9, sum_1-10, abs_value, stack_reverse, echo (no stdlib); guess, untested (with stdlib)
 │   │   ├── stdlib/stdlib.asm             standard library (I/O, strings, memory, math, conversion)
@@ -94,6 +95,7 @@ logisim-CPU-project-/
 │   │   │                     snake (W/A/S/D, R restarts)
 │   │   │                     qr (QR code encoder: the repo link, then any typed text; checked with zbarimg/qrencode)
 │   │   │                     disk_notes (files on the disk: shows /notes.txt, adds typed lines; --disk FILE)
+│   │   │                     loader (runs /bin programs with spawnv), echo (a program for the OS: build --exe)
 │   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
 │   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag),
 │   │                         diag14, diag15 (float division by zero, NaN, INT out of range),
@@ -190,7 +192,8 @@ The design follows the "But How Do It Know?" style: a single bus,
   `OUTDATA` = seek to a word, `INDATA` = size in words; `0x8D` `OUTDATA`/
   `INDATA` = write/read one word and move on. No disk: the ports are empty.
   Filesystem on it: TFS1 (`compiler/src/disk/fs.py`), made/edited by
-  `python compiler/src/disk`.
+  `python compiler/src/disk`. Programs for the OS (`cc build --exe`) run
+  from RAM at `0x1100000`, loaded by C's `spawnv()`.
   Videos: `compiler/src/img/video.py` -> frames that `video_player.c` draws
   on time (about 350k instructions a 128×96 frame: pypy3 keeps up at 12 fps).
 
@@ -235,6 +238,11 @@ The design follows the "But How Do It Know?" style: a single bus,
   format`); text files packed 4 chars a word, `"b"` files a word per char (a word
   can equal EOF: use `fread`/`feof`); `dirent.h`, `unistd.h` (mkdir, chdir, getcwd);
   `fs.c` is linked only into programs that call `fopen`. Paths `/a/b` or relative.
+* Programs for the OS: `cc build --exe` links for RAM at `0x1100000` (code and
+  data together) and writes a TEX1 `.exe` (5-word header + words); `spawnv(path,
+  argv)` loads one from the disk, runs it with argc/argv and returns its exit
+  status (longjmp back). crt0 holds `_Exit` and `_heap_end` (the OS's heap stops
+  at `0x1100000` when `spawnv` is linked). Each program has its own libc copy.
 * Tests: `compiler/src/cc/tests/*.c` must print exactly gcc's output
   (`.expected`); `difftest.py` checks with gcc.
 
@@ -250,6 +258,7 @@ python cpu_sim/src/main.py compiler/ROM/prog.rom --disk disk.img            # wi
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom   (jar: $LOGISIM_JAR or the Arch package path)
 python compiler/src/cc run prog.c [--keys $'12\n'] [--stats]      # C: build + run in the simulator
 python compiler/src/cc build prog.c [more.c x.asm] [-o prog.rom]   # C: -> compiler/ROM/prog.rom (+ prog.asm)
+python compiler/src/cc build prog.c --exe                          # C: -> prog.exe, a program for the OS (disk put it)
 python run.py build prog.c                                          # C or asm: build, then open the simulator
 python compiler/src/cc/tests/difftest.py [--update]                # C tests against gcc
 python compiler/src/img pic.png [--colors 16] [--size 64x]         # PNG -> pic.h for gfx_image(x, y, pic)

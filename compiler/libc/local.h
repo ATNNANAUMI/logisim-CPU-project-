@@ -69,6 +69,7 @@ typedef struct {
 
 int _fs_mount(void);
 unsigned _fs_word(unsigned first, unsigned offset);     /* a word of a chain (0 past its end) */
+void _fs_read(unsigned first, unsigned offset, unsigned *buf, unsigned n);  /* n words of it */
 int _fs_lookup(const char *path, _Node *node);          /* 0, or -1 with errno set */
 int _fs_parent(const char *path, _Node *dir, char *name);
 int _fs_add(_Node *dir, const char *name, unsigned flags, _Node *node);
@@ -76,6 +77,8 @@ void _fs_save(_Node *node);
 void _fs_unlink(_Node *node);   /* free its blocks and its entry */
 int _fs_empty(_Node *dir);
 int _fs_normalize(const char *path, char *out);
+void _fs_forget(void);          /* spawn.c: after a program has used the disk */
+void _fs_inherit(const char *cwd);      /* crt0 of a program for the OS */
 extern char _fs_cwd[_FS_PATH];
 
 #endif
