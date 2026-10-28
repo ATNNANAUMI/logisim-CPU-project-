@@ -90,19 +90,26 @@ static void set_fat(unsigned block, unsigned value)
     disk_write(fat_start * _FS_BLOCK + block, value);
 }
 
-/* a free block, filled with zeros and marked as a chain's end; 0 if the disk is full */
+/* a free block, filled with zeros and marked as a chain's end; 0 if the disk
+   is full. The FAT is read from the hint on, round to it again, with one
+   seek: the data port moves on by itself (fs.py's alloc looks in the same
+   order) */
 static unsigned alloc(void)
 {
-    unsigned n, b, i;
+    unsigned n, b = hint < blocks ? hint : 0, i;
+    __builtin_out(SEEK_PORT, fat_start * _FS_BLOCK + b);
     for (n = 0; n < blocks; n++) {
-        b = (hint + n) % blocks;
-        if (fat(b) == 0) {
+        if (__builtin_in(DATA_PORT) == 0) {
             set_fat(b, END);
             hint = b + 1;
             __builtin_out(SEEK_PORT, b * _FS_BLOCK);
             for (i = 0; i < _FS_BLOCK; i++)
                 __builtin_out(DATA_PORT, 0);    /* the position moves on by itself */
             return b;
+        }
+        if (++b == blocks) {
+            b = 0;
+            __builtin_out(SEEK_PORT, fat_start * _FS_BLOCK);
         }
     }
     errno = ENOSPC;
