@@ -231,6 +231,10 @@ The design follows the "But How Do It Know?" style: a single bus,
   Initialised globals are copied to RAM by per-file `_init_` routines that
   crt0 calls before `main`; malloc's heap runs from `_end` to `0x1FFFFFF`.
 * stdin: a line at a time, echoed, backspace edits, Ctrl-D (0x04) = EOF.
+* Files: `fopen` & co. on the `--disk` image (TFS1, needs `python compiler/src/disk
+  format`); text files packed 4 chars a word, `"b"` files a word per char (a word
+  can equal EOF: use `fread`/`feof`); `dirent.h`, `unistd.h` (mkdir, chdir, getcwd);
+  `fs.c` is linked only into programs that call `fopen`. Paths `/a/b` or relative.
 * Tests: `compiler/src/cc/tests/*.c` must print exactly gcc's output
   (`.expected`); `difftest.py` checks with gcc.
 
