@@ -396,6 +396,108 @@ def check_spawn():
     return f"{cpu.instructions} instructions"
 
 
+SHELL_KEYS = ("help\n"
+              "mkdir docs\n"
+              "echo \"two  spaces\" > docs/a.txt\n"
+              "echo more >> docs/a.txt\n"
+              "cd docs\n"
+              "cat a.txt\n"
+              "mv a.txt /\n"
+              "ls -l /\n"
+              "echo a \"b c\"\n"
+              "/bin/echo x \"y z\"\n"
+              "/bin/echo\n"
+              "cat /bin/echo\n"
+              "/a.txt\n"
+              "nope\n"
+              "primes > p.txt\n"
+              "cd ..\n"
+              "cat > typed.txt\n"
+              "line 1\n"
+              "\x04"
+              "cat typed.txt\n"
+              "rmdir docs\n"
+              "ls\n"
+              "df\n"
+              "halt\n")
+
+SHELL_OUTPUT = """\
+tiny OS shell: help lists the commands
+/> mkdir docs
+/> echo "two  spaces" > docs/a.txt
+/> echo more >> docs/a.txt
+/> cd docs
+/docs> cat a.txt
+two  spaces
+more
+/docs> mv a.txt /
+/docs> ls -l /
+   <dir>  bin/
+{readme:8}  readme.txt
+   <dir>  docs/
+      17  a.txt
+/docs> echo a "b c"
+a b c
+/docs> /bin/echo x "y z"
+x y z
+/docs> /bin/echo
+/bin/echo: no arguments (argc = 1)
+[/bin/echo: exit status 1]
+/docs> cat /bin/echo
+cat: /bin/echo: a binary file (a program?)
+/docs> /a.txt
+/a.txt: Exec format error
+/docs> nope
+nope: no such command (help lists them)
+/docs> primes > p.txt
+> works only for the built-in commands
+/docs> cd ..
+/> cat > typed.txt
+line 1
+/> cat typed.txt
+line 1
+/> rmdir docs
+/> ls
+bin/  readme.txt  a.txt  typed.txt
+/> df
+{df}
+/> halt
+CPU halted
+"""
+
+
+def check_shell():
+    """os/shell.c on a disk made by os/make_disk.py: built-in commands, >
+    and >>, quotes, a program from /bin with its arguments and exit status,
+    the errors, cat from the keyboard up to Ctrl-D, df against fs.py."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "os"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # os/
+
+    image = os.path.join(TMP.name, "shell.img")
+    sizes = make_disk.make(image, programs=["echo"], new=True, size_mb=1, log=lambda _: None)
+    shell, _ = driver.build([str(root / "os" / "shell.c")])
+    cpu, text = driver.run_in_simulator(shell.rom, SHELL_KEYS, 50_000_000, disk=image)
+    assert cpu.halted, text
+    help_text, sep, rest = text.partition("/> mkdir docs\n")
+    assert help_text.startswith("tiny OS shell: help lists the commands\n/> help\n  help ") and \
+        help_text.endswith("programs in /bin (type the name):\n  echo\n"), help_text
+    with FileSystem(image) as disk:
+        used = disk.blocks - disk.free_blocks()
+        df = (f"{disk.blocks} blocks of 1 KB (256 words): {used} used, "
+              f"{disk.free_blocks()} free ({(used * 100 + disk.blocks - 1) // disk.blocks}% used)")
+        got = help_text.partition("/> help\n")[0] + sep + rest
+        assert got == SHELL_OUTPUT.format(df=df, readme=len(make_disk.README)), got
+        assert disk.get("/a.txt") == b"two  spaces\nmore\n"
+        assert disk.get("/typed.txt") == b"line 1\n"
+        assert disk.lookup("/bin/echo").length == sizes["echo"] + 5
+        assert disk.check() == [], disk.check()
+    return f"{cpu.instructions} instructions"
+
+
 CHECKS = [
     check_format,
     check_text_round_trip,
@@ -409,6 +511,7 @@ CHECKS = [
     check_fsck,
     check_c_library,
     check_spawn,
+    check_shell,
 ]
 
 

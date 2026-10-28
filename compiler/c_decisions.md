@@ -189,6 +189,22 @@ The language itself is described in [`c_language.md`](c_language.md).
     `FILE`s are not refreshed: a guess that "close files before `spawnv`" is
     good enough for a shell.
 
+### What the shell needed from the library (2026-10-28, OS roadmap Phase 4)
+
+44. **Free space is POSIX's `statvfs()` in `<sys/statvfs.h>`**, not a
+    made-up `df()`: code written for Linux compiles, and the struct already
+    has the fields `df` needs. It is the first header in a subfolder, so the
+    library cache key now hashes `include/` recursively. Blocks are counted
+    in chars (`f_bsize` 256), as everything in this C is.
+45. **`'\f'` (form feed) clears the text display.** Logisim's `TTY` already
+    does this (read in its code, `TtyState.add`, 4.1.0), and the circuit's
+    `display` subcircuit gives the TTY only 7 data bits and a write strobe,
+    so a character is the only way to clear it there; the simulator's
+    `Display` now does the same. Not run on the circuit: headless Logisim
+    prints the bytes sent to the TTY, not its screen. The same code shows
+    that `'\r'` starts a new line on the TTY, where the simulator clears the
+    line; left as it was (TECHNICAL §8).
+
 ## Measured on the circuit while doing this
 
 * `diag12`/`diag13`: the carry flag is a *borrow* for `SUB`, and `CMP`,
