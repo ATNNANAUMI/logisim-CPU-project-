@@ -2,6 +2,8 @@
 
     python compiler/src/cc compile prog.c          -> compiler/ROM/prog.asm
     python compiler/src/cc build prog.c [more]     -> compiler/ROM/prog.rom
+    python compiler/src/cc build prog.c --exe      -> compiler/ROM/prog.exe, a program for
+                                                      the OS (spawnv() runs it from the disk)
     python compiler/src/cc run prog.c [more]       build, then run it in the simulator
 
 build and run take .c, .asm and .obj files together. The C library is
@@ -50,6 +52,10 @@ def main(argv=None):
         p.add_argument("--lib", action="append", default=[], metavar="FILE",
                        help="link FILE (.asm/.obj) as a library: only what the program uses")
         add_common(p)
+        if name == "build":
+            p.add_argument("--exe", action="store_true",
+                           help="a program for the OS: linked for RAM, saved as a TEX1 .exe "
+                                "for the disk (spawnv() runs it)")
         if name == "run":
             p.add_argument("--keys", default="", help="keys typed before the program starts")
             p.add_argument("--steps", type=int, default=50_000_000,
@@ -72,16 +78,28 @@ def main(argv=None):
             print(f"{out}: {text.count(chr(10))} lines of assembly")
             return 0
 
-        out = driver.output_path(args.output, args.inputs[0], ".rom")
+        exe = args.command == "build" and args.exe
+        if exe and args.no_libc:
+            print("--exe needs the C library (its start-up code goes back to the OS)",
+                  file=sys.stderr)
+            return 1
+        out = driver.output_path(args.output, args.inputs[0], ".exe" if exe else ".rom")
         program, _ = driver.build(args.inputs, args.include, args.define,
                                   asm_dir=out.parent, use_libc=not args.no_libc, warn=warn,
-                                  libs=args.lib)
-        out.write_text(driver.format_rom(program), encoding="utf-8")
+                                  libs=args.lib, exe=exe)
+        if exe:
+            out.write_bytes(driver.exe_bytes(program))
+        else:
+            out.write_text(driver.format_rom(program), encoding="utf-8")
         if args.map or args.command == "build":
             # build always writes the map: the simulator window reads it to
             # show the C source (its "source lines" section)
             out.with_suffix(".map").write_text(driver.format_map(program, out.name),
                                                encoding="utf-8")
+        if exe:
+            print(f"{out}: {len(program.rom)} words loaded at 0x{program.base:x}, "
+                  f"{program.ram_used} words of RAM after them")
+            return 0
         if args.command == "build":
             print(f"{out}: {len(program.rom)} words of ROM, {program.ram_used} words of RAM")
             return 0

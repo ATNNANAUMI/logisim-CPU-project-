@@ -7,6 +7,10 @@ Memory layout it builds:
     RAM  0x1000000   stack (16K words), never touched by the linker
          0x1004000   each file's RAM part, in the order given
 
+A program for the OS (link(..., base=PROGRAM_BASE)) goes all in RAM, to be
+loaded there from the disk: the entry jump at the base, the ROM parts after
+it, then the RAM parts. Its "ROM" words are then ordinary, writable RAM.
+
 Each bank has a 24-bit address (16M words); the address bus is one bit wider
 and its top bit selects RAM. The constants below are the whole memory map for
 the assembler and the C compiler; the simulator has the same one in
@@ -31,6 +35,7 @@ RAM_BASE = 1 << BANK_BITS                  # RAM word i is at address RAM_BASE +
 STACK_WORDS = 0x4000                       # ESP and EBP are 14-bit
 RAM_DATA_START = RAM_BASE + STACK_WORDS
 RAM_END = RAM_BASE + (1 << BANK_BITS)      # one past the last RAM word
+PROGRAM_BASE = RAM_BASE + 0x100000         # where the OS loads programs (spawn.c)
 ENTRY = "start"
 ENTRY_WORD = 0x0400        # RJMP; the next word is the offset to start
 ENTRY_SIZE = 2
@@ -48,9 +53,10 @@ class Symbol:
 @dataclass
 class Program:
     rom: list          # the ROM image, from address 0
-    ram_used: int      # words of RAM reserved above the stack
+    ram_used: int      # words of RAM data (above the stack, or after the code with a base)
     symbols: list      # every label's final address (for the map file)
     lines: list = None # (address, file, line) where source lines start
+    base: int = 0      # the address of rom[0]
 
 
 @dataclass
@@ -177,11 +183,13 @@ def _view(obj, keep):
                  lines)
 
 
-def link(objects, libraries=()):
+def link(objects, libraries=(), base=None):
     """Join object files. Returns a Program; raises AsmErrors.
 
     libraries: the objects (from the list) to link as libraries: only the
-    parts the program needs."""
+    parts the program needs.
+    base: link for that RAM address (a program the OS loads), code and data
+    together; None: the usual ROM image."""
     lib_ids = {id(o) for o in libraries}
     exported = {name for o in objects for name in o.globals}   # before anything is dropped
     keep = _choose_parts(objects, lib_ids)
@@ -190,17 +198,30 @@ def link(objects, libraries=()):
 
     # 1. Give each file its place in ROM and RAM.
     bases = []
-    rom_next, ram_next = ENTRY_SIZE, RAM_DATA_START
+    origin = 0 if base is None else base
+    rom_next = origin + ENTRY_SIZE
+    ram_start = RAM_DATA_START
+    if base is not None:
+        ram_start = rom_next + sum(len(obj.rom) for obj in objects)
+    ram_next = ram_start
     for obj in objects:
         bases.append({"rom": rom_next, "ram": ram_next})
         rom_next += len(obj.rom)
         ram_next += obj.ram_size
-    if rom_next > ROM_SIZE:
-        errors.append(AsmError(f"the program needs {rom_next} words of ROM, "
-                               f"only {ROM_SIZE} fit"))
-    if ram_next > RAM_END:
-        errors.append(AsmError(f"RAM data needs {ram_next - RAM_DATA_START} words, "
-                               f"only {RAM_END - RAM_DATA_START} fit above the stack"))
+    if base is not None:
+        if not RAM_DATA_START <= base < RAM_END:
+            errors.append(AsmError(f"the base 0x{base:x} isn't in the RAM above the stack "
+                                   f"(0x{RAM_DATA_START:x}-0x{RAM_END - 1:x})"))
+        elif ram_next > RAM_END:
+            errors.append(AsmError(f"the program needs {ram_next - base} words of RAM, "
+                                   f"only {RAM_END - base} fit after 0x{base:x}"))
+    else:
+        if rom_next > ROM_SIZE:
+            errors.append(AsmError(f"the program needs {rom_next} words of ROM, "
+                                   f"only {ROM_SIZE} fit"))
+        if ram_next > RAM_END:
+            errors.append(AsmError(f"RAM data needs {ram_next - RAM_DATA_START} words, "
+                                   f"only {RAM_END - RAM_DATA_START} fit above the stack"))
 
     # 2. Work out every label's final address; collect the .global ones.
     symbols, table = [], {}
@@ -225,7 +246,7 @@ def link(objects, libraries=()):
     elif start.section != "rom":
         errors.append(AsmError(f"'start' in {start.source} is a RAM label, "
                                "it must be in ROM"))
-    rom = [ENTRY_WORD, enc.jump_offset(start.address, 1) if start else 0]
+    rom = [ENTRY_WORD, enc.jump_offset(start.address, origin + 1) if start else 0]
 
     # 4. Copy each file's words, filling in the relocations.
     reported = set()
@@ -271,7 +292,7 @@ def link(objects, libraries=()):
     symbols.sort(key=lambda s: (s.address, s.name))
     lines = sorted((base["rom"] + offset, path, line)
                    for obj, base in zip(objects, bases) for offset, path, line in obj.lines)
-    return Program(rom, ram_next - RAM_DATA_START, symbols, lines)
+    return Program(rom, ram_next - ram_start, symbols, lines, origin)
 
 
 def format_raw(words, per_line=8):
@@ -296,7 +317,7 @@ def format_map(program, title):
     """A text list of every label and its final address."""
     lines = [f"# labels in {title}",
              "# address  section  label                     file",
-             f"{0:07x}    rom      (entry: RJMP start)"]
+             f"{program.base:07x}    rom      (entry: RJMP start)"]
     for s in program.symbols:
         mark = "  (global)" if s.is_global else ""
         lines.append(f"{s.address:07x}    {s.section:<7}  {s.name:<25} {s.source}{mark}")

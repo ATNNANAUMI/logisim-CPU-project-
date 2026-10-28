@@ -15,7 +15,8 @@ Run it from the project root:
 
 Paths on the disk start at the root ("/notes/a.txt"; a leading "/" is
 optional). put stores a text file (4 chars a word) unless --binary, which
-stores the host file's bytes as little-endian words; PATH defaults to the
+stores the host file's bytes as little-endian words (a program built with
+`cc build --exe` is always stored that way); PATH defaults to the
 host file's name in the root, and a PATH that is a directory puts it there.
 """
 
@@ -28,6 +29,8 @@ import fs
 from fs import FileSystem, FsError
 
 MB = 1 << 20
+
+EXE_MAGIC = b"TEX1"         # a program for the OS (compiler/libc/spawn.c)
 
 
 def size_text(node):
@@ -65,7 +68,8 @@ def cmd_put(disk, args):
     target = disk.lookup(path)
     if target is not None and target.is_dir:
         path = path.rstrip("/") + "/" + Path(args.host).name
-    node = disk.put(path, data, binary=args.binary)
+    binary = args.binary or data[:4] == EXE_MAGIC
+    node = disk.put(path, data, binary=binary)
     print(f"{path}: {size_text(node)}")
 
 
