@@ -278,6 +278,117 @@ def check_c_library():
     return f"{cpu.instructions} instructions"
 
 
+SPAWNED = r"""
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+int runs = 1;           /* starts at 1 on every run: initialised again */
+int zeros[300];         /* set to 0 by spawnv() each time */
+
+static void deep(int n, int status)
+{
+    if (n == 0)
+        exit(status);
+    deep(n - 1, status);
+}
+
+int main(int argc, char **argv)
+{
+    char cwd[40], *p = malloc(5000);
+    FILE *f;
+    int i;
+    memset(p, 0x55, 5000);      /* its own heap, after its variables */
+    printf("%d %d %d %s:", runs++, zeros[299], argc, getcwd(cwd, sizeof cwd));
+    zeros[299] = 9;
+    for (i = 0; i < argc; i++)
+        printf(" %s", argv[i]);
+    printf("\n");
+    f = fopen("log.txt", "a");
+    fprintf(f, "%s;", argv[argc - 1]);
+    fclose(f);
+    if (argc > 2)
+        deep(20, 40 + argc);
+    return argc;
+}
+"""
+
+SPAWNER = r"""
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
+
+int main(void)
+{
+    char *one[] = { "prog", "a", 0 }, *three[] = { "prog", "b", "c", 0 };
+    char *kept = malloc(20), line[40];
+    FILE *f;
+    strcpy(kept, "kept");
+    chdir("/work");
+    printf("-> %d\n", spawnv("/bin/prog", one));
+    printf("-> %d\n", spawnv("/bin/prog", three));
+    printf("-> %d\n", spawnv("../bin/prog", one));
+    printf("%d %d", spawnv("/none", one) == -1 && errno == ENOENT,
+           spawnv("/work", one) == -1 && errno == EISDIR);
+    printf(" %d %s\n", spawnv("/bin/text", one) == -1 && errno == ENOEXEC, kept);
+    f = fopen("log.txt", "r");
+    fgets(line, sizeof line, f);
+    printf("%s\n", line);
+    return 0;
+}
+"""
+
+
+def check_spawn():
+    """A program built with --exe, put on the disk by the tool, run three
+    times by spawnv() from a ROM program: arguments, exit status (from main
+    and from exit() deep down), fresh variables each run, the caller's
+    directory and heap, and the files it writes."""
+    import sys
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import linker                       # compiler/src/asm (driver puts it on the path)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        (tmp / "prog.c").write_text(SPAWNED)
+        (tmp / "spawner.c").write_text(SPAWNER)
+        program, _ = driver.build([str(tmp / "prog.c")], exe=True)
+        assert program.base == linker.PROGRAM_BASE and program.rom[0] == linker.ENTRY_WORD
+        (tmp / "prog.exe").write_bytes(driver.exe_bytes(program))
+        image = str(tmp / "s.img")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            for args in (["format", image, "--size", "1"], ["mkdir", image, "/bin"],
+                         ["mkdir", image, "/work"], ["put", image, str(tmp / "prog.exe"), "/bin/prog"]):
+                assert cli.main(args) == 0, out.getvalue()
+        with FileSystem(image) as disk:
+            node = disk.lookup("/bin/prog")
+            assert not node.packed and node.length == len(program.rom) + 5   # stored as words
+            disk.put("/bin/text", b"TEX1 but packed text")
+        spawner, _ = driver.build([str(tmp / "spawner.c")])
+        heap_end = next(s.address for s in spawner.symbols if s.name == "_heap_end")
+        assert spawner.rom[heap_end] == linker.PROGRAM_BASE, hex(spawner.rom[heap_end])
+        try:
+            (tmp / "bad.c").write_text("#include <unistd.h>\nint main(void) { return spawnv(0, 0); }\n")
+            driver.build([str(tmp / "bad.c")], exe=True)
+        except driver.BuildError as e:
+            assert "can't call spawnv()" in str(e), e
+        else:
+            raise AssertionError("--exe with spawnv() built")
+        cpu, text = driver.run_in_simulator(spawner.rom, "", 20_000_000, disk=image)
+    expect = ("1 0 2 /work: prog a\n-> 2\n"
+              "1 0 3 /work: prog b c\n-> 43\n"
+              "1 0 2 /work: prog a\n-> 2\n"
+              "1 1 1 kept\n"
+              "a;c;a;\n")
+    assert cpu.halted and text == expect, text
+    return f"{cpu.instructions} instructions"
+
+
 CHECKS = [
     check_format,
     check_text_round_trip,
@@ -290,6 +401,7 @@ CHECKS = [
     check_command_line,
     check_fsck,
     check_c_library,
+    check_spawn,
 ]
 
 

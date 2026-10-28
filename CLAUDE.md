@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # five self-check suites (assembler 20, simulator 23, C compiler 15, image tool 10, disk tool 11), then check_docs.py
+python run.py test                                   # five self-check suites (assembler 20, simulator 23, C compiler 15, image tool 10, disk tool 12), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
@@ -31,6 +31,7 @@ python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom [--seconds N]  
 
 python compiler/src/cc run prog.c [--keys $'text\n'] [--stats] [--disk disk.img]   # C: build + run in the simulator
 python compiler/src/cc build prog.c [more.c x.asm] [-o name.rom] [--map] [--lib x.asm]   # C: links the C library itself
+python compiler/src/cc build prog.c --exe            # a program for the OS: prog.exe (TEX1), for `disk put`; spawnv() runs it
 python compiler/src/cc compile prog.c [-o prog.asm]                   # C -> assembly only
 
 python compiler/src/img pic.png [-o pic.h] [--size WxH] [--colors N] [--dither] [--preview p.png]   # PNG -> compressed pic.h for gfx_image()
@@ -55,7 +56,7 @@ C: `compiler/src/cc/` (preprocessor → parser/type checker → `codegen.py` + `
 
 Pictures: `compiler/src/img/` turns a PNG into a `.h` holding a compressed image (palette + a bit stream of literals and runs, format in `codec.py`'s docstring); `gfx_image()` in `compiler/libc/gfx_image.c` decodes it onto the RGB screen. The two decoders (`codec.decode`, the reference, and the C one) must stay in sync; the img self-check compares them pixel by pixel. Videos: `compiler/src/img/video.py` makes every frame an ordinary picture (one palette shared by all frames, frame 0 whole, later frames only the pixels that changed, the rest transparent) and `compiler/examples/c/video_player.c` draws frame i when `clock()` reaches i × 1000 / fps. `clock()` reads the timer device `0x7C` (milliseconds since reset; planned wiring, not on the circuit), which the simulator takes from the computer's real clock and the window stops while paused.
 
-Disk: the simulator's disk device (`0x8C`/`0x8D`, `--disk FILE`) is a file of words; `compiler/src/disk/` makes and edits images in the TFS1 filesystem (format in `fs.py`'s docstring: 256-word blocks chained by a FAT, directories are files of 132-word entries, text files packed 4 chars a word). The C library's `fs.c`/`dir.c` (`fopen` and friends, `dirent.h`, `unistd.h`) read and write the same format, and `fs.py` is the reference; the disk self-check runs both against each other.
+Disk: the simulator's disk device (`0x8C`/`0x8D`, `--disk FILE`) is a file of words; `compiler/src/disk/` makes and edits images in the TFS1 filesystem (format in `fs.py`'s docstring: 256-word blocks chained by a FAT, directories are files of 132-word entries, text files packed 4 chars a word). The C library's `fs.c`/`dir.c` (`fopen` and friends, `dirent.h`, `unistd.h`) read and write the same format, and `fs.py` is the reference; the disk self-check runs both against each other. Programs for the OS: `cc build --exe` links a C program for RAM at `0x1100000` (`linker.link(base=...)`) into a TEX1 `.exe` (format in `compiler/libc/spawn.c`), and `spawnv()` (`spawn.c`/`spawn.asm`) loads it from the disk, runs it with argc/argv through the block crt0 gets in R1, and comes back by longjmp when it exits.
 
 `compiler/src/asm/`, `compiler/src/cc/`, `compiler/src/img/`, `compiler/src/disk/` and `cpu_sim/src/` import their sibling modules by plain name, so run files as scripts (or put the directory on `sys.path`), not as packages. The assembler, the C compiler, the image converter and the disk tool are invoked as directories (`python compiler/src/asm <cmd>`, `python compiler/src/cc <cmd>`, `python compiler/src/img pic.png`, `python compiler/src/disk <cmd> disk.img`, via `__main__.py`).
 
@@ -67,7 +68,7 @@ Key ISA facts that trip people up (details in STRUCTURE.md):
 - The carry flag: `SUB` sets C on a *borrow* (`RA < RB` unsigned); `CMP`, `--`, `NEG`, `MULT` never set it (measured on the circuit).
 - `STK CALL/RET` only move the stack frame; the `CALL`/`RET` pseudo-ops do the jump and clobber R0/R14/R15.
 - The linker puts `RJMP start` at address 0. Exactly one file has `.global start`. Calling or jumping to a RAM label is a link error.
-- Memory: 16M words of ROM and of RAM (24-bit banks, 25-bit addresses, RAM from `0x1000000`; stack `0x1000000–0x1003FFF`, linker data from `0x1004000`). **The circuit still has 16-bit banks** (RAM from `0x10000`), so programs built now run only in the simulator until it is widened (TECHNICAL §2.4); `run_rom.py` refuses. A simulated CPU holds two 128 MB lists.
+- Memory: 16M words of ROM and of RAM (24-bit banks, 25-bit addresses, RAM from `0x1000000`; stack `0x1000000–0x1003FFF`, linker data from `0x1004000`, programs for the OS from `0x1100000`). **The circuit still has 16-bit banks** (RAM from `0x10000`), so programs built now run only in the simulator until it is widened (TECHNICAL §2.4); `run_rom.py` refuses. A simulated CPU holds two 128 MB lists.
 - In C, every scalar is one word (`sizeof(char) == 1`, `CHAR_BIT == 32`), `double` is the 32-bit float, and there is no `long long`.
 
 ## Keeping the docs in sync

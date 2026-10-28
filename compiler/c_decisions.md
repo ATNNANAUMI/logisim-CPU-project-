@@ -84,7 +84,8 @@ The language itself is described in [`c_language.md`](c_language.md).
     start-up code (crt0, generated per build) calls them all, so a reset
     without clearing RAM restarts the program correctly.
 21. **`main` is called as `main(0, {NULL})`; its result goes to `exit`,
-    which halts with the status in R0.** HALT is in a loop so RESUME stops
+    which halts with the status in R0** (a program for the OS gets real
+    arguments and goes back to its caller instead: 38-40). HALT is in a loop so RESUME stops
     again instead of running into whatever follows.
 22. **malloc's heap is everything from `_end` (a label the build puts after
     all RAM data) to the end of RAM.** One-word headers, first fit, free
@@ -148,6 +149,44 @@ The language itself is described in [`c_language.md`](c_language.md).
     a file mapped into memory on the PC, so there is nothing to gain).
     `fopen` registers an `atexit` handler that closes open files, so a
     program that forgets `fclose` still saves its data.
+
+### Programs for the OS (2026-10-28, OS roadmap Phase 3)
+
+36. **Programs for the OS are linked for a fixed RAM address, `0x1100000`,
+    code and data together** (`cc build --exe`). `CALL` puts absolute return
+    addresses in code and `DATA R0, label` absolute addresses, so code
+    can't move after linking without relocation info; a fixed address
+    (CP/M's `0x100`) needs none. The 1M words below it are for the OS's
+    variables and heap (OS questionnaire Q9).
+37. **Each program links its own copy of the C library** (questionnaire
+    Q10, Q19b): a shared copy in the OS needs a fixed table of entry
+    points and splitting the library's variables (heap, open files,
+    `errno`, the line buffer) between OS and program, for little gain at
+    ~4,500 words a program. Written down as a future plan.
+38. **`spawnv` runs a program and waits (DOS style), it doesn't replace
+    the caller** (`exec`). The caller is the shell, which must come back.
+    The name and the "returns the exit status" behaviour are DOS's
+    `spawnv(P_WAIT, ...)`, without the mode.
+39. **The program gets a block in R1** (argc, argv, the return address, the
+    caller's directory) rather than fixed addresses: nothing about the OS's
+    layout is built into programs. `argv` points into the caller's memory,
+    which stays untouched while the program runs.
+40. **The way back is `setjmp`/`longjmp`.** The program's `_Exit` jumps to
+    `_spawn_return`, which `longjmp`s to `spawnv`, so `exit()` from any
+    depth (and a stack left in any state) gets back. `_Exit` moved from
+    `runtime.asm` into the generated crt0 so the two kinds of program can
+    differ there.
+41. **malloc's heap end is a word in crt0 (`_heap_end`)**: the end of RAM,
+    or `0x1100000` only in a program that links `spawnv`, so no other
+    program loses heap.
+42. **`spawnv` reads the program straight from the disk** (`_fs_read`: one
+    seek a block, then the data port moves on by itself), not through
+    `fread`, which costs about 210 instructions a word: a 10K-word program
+    loads in about 60K instructions instead of 2.1M.
+43. **After a program, the caller forgets what it knew about the disk**
+    (`_fs_forget`: the chain cache, the allocation hint, mounted). Its open
+    `FILE`s are not refreshed: a guess that "close files before `spawnv`" is
+    good enough for a shell.
 
 ## Measured on the circuit while doing this
 
