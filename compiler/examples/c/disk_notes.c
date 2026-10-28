@@ -8,9 +8,11 @@
  *   (or: python compiler/src/cc run compiler/examples/c/disk_notes.c
  *    --disk test.img --keys $'a note\n!quit\n')
  *
- * Type a line and Enter to save it. !show prints the notes again, !ls lists
- * the disk's root directory, !clear empties the notes, !quit (or Ctrl-D)
- * stops. On the PC: python compiler/src/disk cat test.img /notes.txt
+ * Type a line and Enter to save it. Commands (!help lists them): !show
+ * prints the notes again, !ls lists the disk's root directory, !clear
+ * empties the notes, !quit (or Ctrl-D) stops; any other line starting with
+ * ! is refused, not saved. On the PC: python compiler/src/disk cat test.img
+ * /notes.txt
  */
 #include <stdio.h>
 #include <string.h>
@@ -32,6 +34,16 @@ static void show(void)
         fclose(f);
     }
     printf("--- %d chars ---\n", n);
+}
+
+static void help(void)
+{
+    printf("Type a line and Enter to save it in %s.\n", NOTES);
+    printf("  !show   print the notes\n");
+    printf("  !ls     list the disk's root directory\n");
+    printf("  !clear  empty the notes\n");
+    printf("  !help   this list\n");
+    printf("  !quit   stop (Ctrl-D too)\n");
 }
 
 static void list(void)
@@ -59,7 +71,7 @@ int main(void)
     }
     fclose(f);
     show();
-    printf("Type lines to save them (!show, !ls, !clear, !quit).\n");
+    printf("Type lines to save them (!help for the commands).\n");
     while (printf("> "), fgets(line, sizeof line, stdin)) {
         if (strcmp(line, "!quit\n") == 0)
             break;
@@ -70,6 +82,10 @@ int main(void)
         } else if (strcmp(line, "!clear\n") == 0) {
             fclose(fopen(NOTES, "w"));  /* "w" empties it */
             printf("cleared\n");
+        } else if (strcmp(line, "!help\n") == 0) {
+            help();
+        } else if (line[0] == '!') {
+            printf("unknown command; !help lists them\n");
         } else {
             f = fopen(NOTES, "a");
             fputs(line, f);
