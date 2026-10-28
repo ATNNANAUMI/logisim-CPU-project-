@@ -173,6 +173,22 @@ def test_keyboard_backspace_is_a_key():
     assert (cpu.regs[2], cpu.regs[3]) == (ord("7"), 0x08)
 
 
+def test_display_controls():
+    # "ab", backspace, "c", newline, "x", form feed (clears it, like Logisim's TTY), "d"
+    # DATA R1,0x5C ; COMM OUTADDR,R1 ; then DATA R2,char ; COMM OUTDATA,R2 for each
+    chars = "ab\bc\nx"
+    words = [0x0301, 0x5C, 0x0831]
+    for c in chars:
+        words += [0x0302, ord(c), 0x0822]
+    cpu = run(words + [0x0F00])
+    assert cpu.bus.display.text == "ac\nx"
+    cpu.halted = False
+    cpu.mem.load_rom([0x0301, 0x5C, 0x0831, 0x0302, 0x0C, 0x0822, 0x0302, ord("d"), 0x0822, 0x0F00])
+    cpu.iar = 0
+    cpu.run(20)
+    assert cpu.bus.display.text == "d"
+
+
 def test_rgb_video():
     # DATA R1,0x6C ; COMM OUTADDR,R1 ; DATA R2,pixel ; COMM OUTDATA,R2 ; DATA R2,pixel ; COMM OUTDATA,R2
     # x = 3, y = 5, red; then x = 0x83 (only 7 bits wired: x = 3), y = 6, white

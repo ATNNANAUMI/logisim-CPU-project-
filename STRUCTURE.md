@@ -48,7 +48,7 @@ logisim-CPU-project-/
 │   │   ├── selftest.py       20 checks (incl. building every compiler/examples program)
 │   │   └── asm_grammar.py    generates railroad-diagram HTML of the grammar (needs railroad-diagrams)
 │   ├── src/cc/               C compiler (run as `python compiler/src/cc <cmd>`); imports src/asm's modules
-│   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; run: --keys --steps --stats --trace)
+│   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; build: --exe; run: --keys --steps --stats --trace)
 │   │   ├── lexer.py, preprocessor.py   tokens; #include/#define/#if, macro expansion (hide sets)
 │   │   ├── typesys.py        types (sizes in words), promotions, compatibility
 │   │   ├── nodes.py          syntax tree Node, Obj (variable/function)
@@ -56,7 +56,7 @@ logisim-CPU-project-/
 │   │   ├── regalloc.py       which locals get registers; which a call must keep
 │   │   ├── codegen.py        tree → assembly (Val/Addr model, calls, frames, switch tables)
 │   │   ├── peephole.py       clean-ups per function
-│   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0, link, run in simulator
+│   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0 (ROM or --exe), link, TEX1 .exe, run in simulator
 │   │   ├── cerror.py         CError (file:line:col: error: ...)
 │   │   ├── selftest.py       15 checks (incl. every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
@@ -71,8 +71,14 @@ logisim-CPU-project-/
 │   │   │                     (previous pixel, above, above-left, above-right; gamma lengths), or packed
 │   │   │                     indices when that is smaller (b bits a pixel); encode, decode
 │   │   └── selftest.py       10 checks (incl. gfx_image() on the simulator against codec.decode, video_player.c)
+│   ├── src/disk/             disk images for the --disk device (run as `python compiler/src/disk <cmd> disk.img`)
+│   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
+│   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
+│   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
+│   │   └── selftest.py       13 checks (incl. the C library's files on the simulator against fs.py, spawnv, os/shell.c)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
-│   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod, _Exit), setjmp.asm
+│   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), setjmp.asm,
+│   │                         spawn.c + spawn.asm (spawnv: load a --exe program from the disk, run it, come back)
 │   ├── examples/
 │   │   ├── programs/         hello, print_a-z, count_0-9, sum_1-10, abs_value, stack_reverse, echo (no stdlib); guess, untested (with stdlib)
 │   │   ├── stdlib/stdlib.asm             standard library (I/O, strings, memory, math, conversion)
@@ -84,11 +90,12 @@ logisim-CPU-project-/
 │   │   │                     image_demo (gfx_image) with c/images/: mandelbrot, smiley (.png + the .h made from it)
 │   │   │                     benchmark (twelve square roots, Quake III and Newton, timed and checked against sqrt()), sqrt_benchmark (library sqrt vs the old bit-by-bit one)
 │   │   │                     video_player (plays a video.py .h on time with clock()) with c/videos/demo (.mp4 + .h)
-│   │   │                     game_of_life (64x64 torus, 7 scenes of well-known patterns, checks itself; keys 1-7 n r space s)
+│   │   │                     game_of_life (64x64 torus, 7 scenes of well-known patterns, checks itself; keys 1-7 n r space s q)
 │   │   │                     grapher (graphing calculator: type f(x), Enter; zoom/move/view commands)
-│   │   │                     snake (W/A/S/D, R restarts)
+│   │   │                     snake (W/A/S/D, R restarts, Q quits)
 │   │   │                     qr (QR code encoder: the repo link, then any typed text; checked with zbarimg/qrencode)
-│   │   │                     disk_notes (the disk device: shows the saved text, saves typed lines; --disk FILE)
+│   │   │                     disk_notes (files on the disk: shows /notes.txt, adds typed lines; --disk FILE)
+│   │   │                     loader (runs /bin programs with spawnv), echo (a program for the OS: build --exe)
 │   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
 │   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag),
 │   │                         diag14, diag15 (float division by zero, NaN, INT out of range),
@@ -97,18 +104,24 @@ logisim-CPU-project-/
 │   └── ROM/                  build output (.obj/.rom/.map/.asm), git-ignored, created on first build;
 │                             ROM/libc/ caches the compiled C library
 │
+├── os/                       the OS (simulator only), CP/M / DOS style: one program at a time
+│   ├── shell.c               the OS's ROM: checks the disk, prompts with the current directory; built-ins help ls
+│   │                         cd pwd cat echo rm mv mkdir rmdir df clear halt (> and >> to a file); any other
+│   │                         name runs /bin/NAME (or a path) with spawnv() and waits
+│   └── make_disk.py          os/disk.img (git-ignored): TFS1, the C examples built --exe in /bin, /readme.txt
+│
 └── cpu_sim/
     ├── src/                  simulator (modules import each other by plain name: run as scripts)
     │   ├── config.py         sizes, device addresses, TWEAKS (behaviour switches, marked confirmed/guess)
     │   ├── isa.py            decode(), disassemble(), opcode tables
     │   ├── alu.py            int_op(), float_op() → (R0 value, flags)
     │   ├── memory.py         ROM/RAM banks, v2.0 raw loader
-    │   ├── devices.py        Display (0x5C), Keyboard (0xF0, empty reads 0), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), Disk (0x8C seek/size, 0x8D data; mmap of a file), DeviceBus (+ hex display value, 0x3C)
+    │   ├── devices.py        Display (0x5C; form feed clears it), Keyboard (0xF0, empty reads 0), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), Disk (0x8C seek/size, 0x8D data; mmap of a file), DeviceBus (+ hex display value, 0x3C)
     │   ├── cpu.py            CPU: step() (traced), run() (fast loop), reset(), stack ops, COMM
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG]`
-    │   └── selftest.py       23 checks
+    │   └── selftest.py       24 checks
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -173,7 +186,8 @@ The design follows the "But How Do It Know?" style: a single bus,
   (no jump). `STK SET/GET, RB` = `stack[EBP+RB]`; that sum wraps at the RAM's
   address width, across the whole RAM (EBP=0, RB=-1 → last RAM word
   `0x1FFFFFF`; measured at 16 bits on the circuit, `diag11`/`diag16`).
-* `COMM INDATA|INADDR|OUTDATA|OUTADDR, RB`. Display `0x5C`, number display
+* `COMM INDATA|INADDR|OUTDATA|OUTADDR, RB`. Display `0x5C` (form feed, 12,
+  clears it, as Logisim's TTY does), number display
   `0x3C`, keyboard `0xF0` (empty reads 0). RGB screen: `0x6C` one pixel per
   word (x bits 31–24, y 23–16, RGB565 15–0), `0x6D` clears (simulator only:
   not built on the circuit yet). Pictures: `compiler/src/img` compresses
@@ -184,6 +198,9 @@ The design follows the "But How Do It Know?" style: a single bus,
   Disk (simulator only, `--disk FILE`, 64 MB sparse if missing): `0x8C`
   `OUTDATA` = seek to a word, `INDATA` = size in words; `0x8D` `OUTDATA`/
   `INDATA` = write/read one word and move on. No disk: the ports are empty.
+  Filesystem on it: TFS1 (`compiler/src/disk/fs.py`), made/edited by
+  `python compiler/src/disk`. Programs for the OS (`cc build --exe`) run
+  from RAM at `0x1100000`, loaded by C's `spawnv()`.
   Videos: `compiler/src/img/video.py` -> frames that `video_player.c` draws
   on time (about 350k instructions a 128×96 frame: pypy3 keeps up at 12 fps).
 
@@ -224,6 +241,17 @@ The design follows the "But How Do It Know?" style: a single bus,
   Initialised globals are copied to RAM by per-file `_init_` routines that
   crt0 calls before `main`; malloc's heap runs from `_end` to `0x1FFFFFF`.
 * stdin: a line at a time, echoed, backspace edits, Ctrl-D (0x04) = EOF.
+* Files: `fopen` & co. on the `--disk` image (TFS1, needs `python compiler/src/disk
+  format`); text files packed 4 chars a word, `"b"` files a word per char (a word
+  can equal EOF: use `fread`/`feof`); `dirent.h`, `unistd.h` (mkdir, chdir, getcwd),
+  `sys/statvfs.h` (free space);
+  `fs.c` is linked only into programs that call `fopen`. Paths `/a/b` or relative.
+* Programs for the OS: `cc build --exe` links for RAM at `0x1100000` (code and
+  data together) and writes a TEX1 `.exe` (5-word header + words); `spawnv(path,
+  argv)` loads one from the disk, runs it with argc/argv and returns its exit
+  status (longjmp back). crt0 holds `_Exit` and `_heap_end` (the OS's heap stops
+  at `0x1100000` when `spawnv` is linked). Each program has its own libc copy.
+  `os/shell.c` is the shell that runs them (built-ins + `/bin/NAME`).
 * Tests: `compiler/src/cc/tests/*.c` must print exactly gcc's output
   (`.expected`); `difftest.py` checks with gcc.
 
@@ -239,10 +267,14 @@ python cpu_sim/src/main.py compiler/ROM/prog.rom --disk disk.img            # wi
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom   (jar: $LOGISIM_JAR or the Arch package path)
 python compiler/src/cc run prog.c [--keys $'12\n'] [--stats]      # C: build + run in the simulator
 python compiler/src/cc build prog.c [more.c x.asm] [-o prog.rom]   # C: -> compiler/ROM/prog.rom (+ prog.asm)
+python compiler/src/cc build prog.c --exe                          # C: -> prog.exe, a program for the OS (disk put it)
 python run.py build prog.c                                          # C or asm: build, then open the simulator
 python compiler/src/cc/tests/difftest.py [--update]                # C tests against gcc
 python compiler/src/img pic.png [--colors 16] [--size 64x]         # PNG -> pic.h for gfx_image(x, y, pic)
 python compiler/src/img/video.py clip.mp4 [--fps 10] [--seconds 5]  # video -> clip.h for video_player.c (needs ffmpeg)
+python compiler/src/disk format disk.img; python compiler/src/disk put disk.img notes.txt   # disk images (ls get cat rm mkdir mv df fsck)
+python os/make_disk.py; python compiler/src/cc build os/shell.c                 # the OS: os/disk.img with /bin, the shell's ROM
+python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img             # run it, type help
 pypy3 compiler/src/cc run compiler/examples/c/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
 ```
 

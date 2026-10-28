@@ -84,7 +84,8 @@ The language itself is described in [`c_language.md`](c_language.md).
     start-up code (crt0, generated per build) calls them all, so a reset
     without clearing RAM restarts the program correctly.
 21. **`main` is called as `main(0, {NULL})`; its result goes to `exit`,
-    which halts with the status in R0.** HALT is in a loop so RESUME stops
+    which halts with the status in R0** (a program for the OS gets real
+    arguments and goes back to its caller instead: 38-40). HALT is in a loop so RESUME stops
     again instead of running into whatever follows.
 22. **malloc's heap is everything from `_end` (a label the build puts after
     all RAM data) to the end of RAM.** One-word headers, first fit, free
@@ -114,7 +115,8 @@ The language itself is described in [`c_language.md`](c_language.md).
 27. **`rand` is the C standard's example generator**, not glibc's: tests
     can't compare random numbers with gcc anyway, and this one is small.
 28. **`time()` and `clock()` return -1** (no clock); `getenv` returns NULL;
-    `fopen` fails; `signal` handlers run only for `raise`.
+    `signal` handlers run only for `raise`. (`fopen` failed too until the
+    disk came, 2026-10-27: see 33.)
 29. **math.h:** `sqrt`, `fmod` and the rounding functions are exact; the
     others aim for 1-2 units in the last place; `sin`/`cos`/`tan` use
     Payne-Hanek reduction above 100 so any argument works.
@@ -128,6 +130,89 @@ The language itself is described in [`c_language.md`](c_language.md).
     `asm("...")`, `__attribute__` (ignored), binary constants. Not accepted:
     statement expressions, `?:` with the middle part left out.
 32. **After an error the parser skips to the next statement or declaration** and carries on, up to 20 errors; the code generator only runs when there were none. Errors after the first can be knock-on effects of it, as with gcc.
+
+33. **Files reach `fs.c` through function pointers in `FILE`** (`get`,
+    `put`, `flush`, set by `fopen`). `fputc`, `fgetc`, `fprintf` and
+    `fscanf` call them when they are set, so a program that never calls
+    `fopen` doesn't link the filesystem: `printf` alone grew by 40 words,
+    while a program with files is about 10K words.
+34. **Text files are packed 4 chars a word, binary files are not** (the
+    OS questionnaire, 2026-10-27). C's own text/binary split (`"b"`) picks
+    the kind, so programs stored as words stay unpacked, and the image's
+    bytes read as text on the PC. The kind is fixed when the file is created:
+    a file's flag decides how it is read, not the mode. In a binary file a
+    word can equal `EOF` (`CHAR_BIT` is 32), the problem C has on any machine
+    where `char` is as wide as `int`; `fread` checks `feof`, and so must
+    `fgetc` callers.
+35. **No buffering beyond one word**: a packed file keeps the word being
+    read or written; everything else goes to the disk device at once (it is
+    a file mapped into memory on the PC, so there is nothing to gain).
+    `fopen` registers an `atexit` handler that closes open files, so a
+    program that forgets `fclose` still saves its data.
+
+### Programs for the OS (2026-10-28, OS roadmap Phase 3)
+
+36. **Programs for the OS are linked for a fixed RAM address, `0x1100000`,
+    code and data together** (`cc build --exe`). `CALL` puts absolute return
+    addresses in code and `DATA R0, label` absolute addresses, so code
+    can't move after linking without relocation info; a fixed address
+    (CP/M's `0x100`) needs none. The 1M words below it are for the OS's
+    variables and heap (OS questionnaire Q9).
+37. **Each program links its own copy of the C library** (questionnaire
+    Q10, Q19b): a shared copy in the OS needs a fixed table of entry
+    points and splitting the library's variables (heap, open files,
+    `errno`, the line buffer) between OS and program, for little gain at
+    ~4,500 words a program. Written down as a future plan.
+38. **`spawnv` runs a program and waits (DOS style), it doesn't replace
+    the caller** (`exec`). The caller is the shell, which must come back.
+    The name and the "returns the exit status" behaviour are DOS's
+    `spawnv(P_WAIT, ...)`, without the mode.
+39. **The program gets a block in R1** (argc, argv, the return address, the
+    caller's directory) rather than fixed addresses: nothing about the OS's
+    layout is built into programs. `argv` points into the caller's memory,
+    which stays untouched while the program runs.
+40. **The way back is `setjmp`/`longjmp`.** The program's `_Exit` jumps to
+    `_spawn_return`, which `longjmp`s to `spawnv`, so `exit()` from any
+    depth (and a stack left in any state) gets back. `_Exit` moved from
+    `runtime.asm` into the generated crt0 so the two kinds of program can
+    differ there.
+41. **malloc's heap end is a word in crt0 (`_heap_end`)**: the end of RAM,
+    or `0x1100000` only in a program that links `spawnv`, so no other
+    program loses heap.
+42. **`spawnv` reads the program straight from the disk** (`_fs_read`: one
+    seek a block, then the data port moves on by itself), not through
+    `fread`, which costs about 210 instructions a word: a 10K-word program
+    loads in about 140K instructions instead of 2.1M (measured: 13.7 a word;
+    the loop selects the device again for every word).
+43. **After a program, the caller forgets what it knew about the disk**
+    (`_fs_forget`: the chain cache, the allocation hint, mounted). Its open
+    `FILE`s are not refreshed: a guess that "close files before `spawnv`" is
+    good enough for a shell.
+
+### What the shell needed from the library (2026-10-28, OS roadmap Phase 4)
+
+44. **Free space is POSIX's `statvfs()` in `<sys/statvfs.h>`**, not a
+    made-up `df()`: code written for Linux compiles, and the struct already
+    has the fields `df` needs. It is the first header in a subfolder, so the
+    library cache key now hashes `include/` recursively. Blocks are counted
+    in chars (`f_bsize` 256), as everything in this C is.
+45. **`'\f'` (form feed) clears the text display.** Logisim's `TTY` already
+    does this (read in its code, `TtyState.add`, 4.1.0), and the circuit's
+    `display` subcircuit gives the TTY only 7 data bits and a write strobe,
+    so a character is the only way to clear it there; the simulator's
+    `Display` now does the same. Not run on the circuit: headless Logisim
+    prints the bytes sent to the TTY, not its screen. The same code shows
+    that `'\r'` starts a new line on the TTY, where the simulator clears the
+    line; left as it was (TECHNICAL §8).
+46. **`alloc` reads the FAT in one sweep** (one seek, then the data port
+    moves on by itself), from the hint round to it again, as `fs.py` does:
+    19 instructions a used block instead of about 84 (`% blocks` and a
+    `fat()` call with its own seek each time). It matters because the hint
+    goes back to 0 at every mount and after every program `spawnv` runs: on
+    the demo disk (636 blocks used by `/bin`), the shell's
+    `echo "two  spaces" > /a.txt` went from 93,158 instructions to 50,492.
+    On a full 64 MB disk the first new block would have cost about 5.5
+    million.
 
 ## Measured on the circuit while doing this
 

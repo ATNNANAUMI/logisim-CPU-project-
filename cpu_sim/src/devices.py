@@ -15,7 +15,8 @@ import config as config
 
 
 class Display:
-    """Text console at 0x5C.  Takes ASCII values, 0x0A is a newline."""
+    """Text console at 0x5C.  Takes ASCII values, 0x0A is a newline, 0x0C
+    (form feed) clears it, as Logisim's TTY does."""
 
     def __init__(self):
         self.lines = [""]
@@ -24,6 +25,8 @@ class Display:
         char = value & 0xFF
         if char == 0x0A:
             self.lines.append("")
+        elif char == 0x0C:
+            self.clear()
         elif char == 0x0D:
             self.lines[-1] = ""
         elif char == 0x08:

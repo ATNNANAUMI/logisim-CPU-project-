@@ -13,10 +13,11 @@ DOCS = ["README.md", "STRUCTURE.md", "TECHNICAL.md", "CLAUDE.md",
         "compiler/assembly_syntax.md", "compiler/c_language.md", "compiler/c_decisions.md",
         ".claude/skills/circuit-check/SKILL.md"]
 EXAMPLES = ROOT / "compiler" / "examples"
+OS = ROOT / "os"
 
-# repo paths as the docs write them: compiler/..., cpu_sim/..., logisim/...
+# repo paths as the docs write them: compiler/..., cpu_sim/..., logisim/..., os/...
 # ("logisim/cpu datas/" has a space), .claude/..., run.py, *.md at the root
-PATH = re.compile(r"(?<![\w./-])((?:compiler|cpu_sim|logisim|\.claude)/"
+PATH = re.compile(r"(?<![\w./-])((?:compiler|cpu_sim|logisim|os|\.claude)/"
                   r"(?:cpu datas/?)?[\w./*-]*|run\.py|[A-Z]+\.md)")
 
 
@@ -25,7 +26,12 @@ def generated_or_placeholder(path):
 
 
 def exists(path):
-    return (ROOT / path).exists() or any(ROOT.glob(path))
+    if path.startswith("/"):            # a path on the CPU's disk ("/notes.txt"), not in the repo
+        return False
+    try:
+        return (ROOT / path).exists() or any(ROOT.glob(path))
+    except ValueError:                  # not a usable glob pattern
+        return False
 
 
 def paragraphs(text):
@@ -61,14 +67,14 @@ def check_paths_exist():
 
 
 def check_examples_listed():
-    """Every .asm and .c under compiler/examples/ is listed in TECHNICAL.md (5.2/5.3)."""
+    """Every .asm and .c under compiler/examples/ and os/ is listed in TECHNICAL.md (5.2/5.3, 11)."""
     text = (ROOT / "TECHNICAL.md").read_text()
-    sources = sorted(EXAMPLES.rglob("*.asm")) + sorted(EXAMPLES.rglob("*.c"))
-    unlisted = [str(p.relative_to(EXAMPLES)) for p in sources
-                if f"`{p.relative_to(EXAMPLES)}`" not in text
+    sources = sorted(EXAMPLES.rglob("*.asm")) + sorted(EXAMPLES.rglob("*.c")) + sorted(OS.rglob("*.c"))
+    unlisted = [str(p.relative_to(ROOT)) for p in sources
+                if (EXAMPLES not in p.parents or f"`{p.relative_to(EXAMPLES)}`" not in text)
                 and f"`{p.relative_to(ROOT)}`" not in text
                 and f"{p.name}`" not in text]
-    assert not unlisted, "examples missing from TECHNICAL.md 5.3: " + ", ".join(unlisted)
+    assert not unlisted, "examples missing from TECHNICAL.md: " + ", ".join(unlisted)
 
 
 def check_tweaks_documented():

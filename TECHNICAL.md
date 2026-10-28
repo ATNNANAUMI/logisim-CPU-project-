@@ -13,6 +13,7 @@ file has the details.
 8. [Simulator vs. circuit: open questions](#8-simulator-vs-circuit-open-questions)
 9. [Outdated files and stale information](#9-outdated-files-and-stale-information)
 10. [The C compiler (`compiler/src/cc/`) and the C library (`compiler/libc/`)](#10-the-c-compiler-compilersrccc-and-the-c-library-compilerlibc)
+11. [The OS (`os/`)](#11-the-os-os)
 
 ---
 
@@ -39,6 +40,7 @@ chooses the bank:
 0x0000000 ─ 0x0FFFFFF   ROM  16M × 32   program and constant data, read only
 0x1000000 ─ 0x1003FFF   RAM  stack area (16K words, indexed by ESP/EBP)
 0x1004000 ─ 0x1FFFFFF   RAM  free; the linker puts .ram data here
+0x1100000 ─ 0x1FFFFFF   RAM  (by convention) where spawnv() loads programs for the OS
 ```
 
 **The circuit is still the 16-bit version** (17-bit bus, bit 16 = RAM, 64K
@@ -53,8 +55,9 @@ before it can run these programs, and `logisim/run_rom.py` refuses until then.
   and `EBP` are 14-bit indices into it, so they wrap at 16K. `STK SET/GET`
   addresses are not limited to the stack area: they wrap across the whole
   RAM (see 1.6).
-* The IAR is 25 bits, so the CPU *can* fetch from RAM, but the assembler never
-  puts code there.
+* The IAR is 25 bits, so the CPU *can* fetch from RAM. The linker puts code
+  there only for a program for the OS (`cc build --exe`, 4.6 and 10.4),
+  which `spawnv()` loads from the disk at `0x1100000`.
 
 ### 1.3 Instruction word
 
@@ -209,7 +212,7 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 
 | address | device | behaviour |
 | --- | --- | --- |
-| `0x5C` | text display (TTY) | prints the low 7 bits as ASCII; `0x0A` newline, `0x08` backspace |
+| `0x5C` | text display (TTY) | prints the low 7 bits as ASCII; `0x0A` newline, `0x08` backspace, `0x0C` (form feed) clears it (Logisim's `TTY` does this; read in its code, not run on the circuit) |
 | `0x3C` | number display | latches the 32-bit word and shows it on 8 hex digits (the simulator shows it in the window, and as `HEX DISPLAY:` in headless output) |
 | `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08` |
 | `0x6C` | RGB screen | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; on the 128×128 RGB Video only the low 7 bits of x and y are wired. Write-only |
@@ -239,7 +242,8 @@ only takes the space actually written: a missing file is created as a
 sparse 64 MB file (16M words, `DISK_WORDS`), an existing one keeps its size
 (at most 1G words, 4 GB). One position serves both reads and writes, and
 moving it on after every word makes block copies a loop of `INDATA`s or
-`OUTDATA`s. A reset rewinds it to 0 and keeps the disk.
+`OUTDATA`s. A reset rewinds it to 0 and keeps the disk. The filesystem on
+the disk (TFS1) and the tool that makes images are in 7.6.
 
 Each device compares the 8 low bits of the selected address against its own
 number with a gate decoder (the keyboard: bits 0–3 must be 0, bits 4–7 must
@@ -434,12 +438,12 @@ modules import each other by plain name, so run them as scripts
 | `isa.py` | opcode tables, `decode(word) -> Instr`, `disassemble(word, operand)`. `Instr.takes_operand` says whether a literal word follows |
 | `alu.py` | `int_op(name, a, b)` and `float_op(name, a, b)`, each returning `(R0 value, flag nibble)`; float32 ↔ bits helpers |
 | `memory.py` | `Memory` with two 16M-word banks (Python lists, 128 MB each), `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
-| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
+| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes, `\f` clears it all, so headless output shows only what came after the last `\f`), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()`, `reset()`, `resume()` |
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 23 checks on the core |
+| `selftest.py` | 24 checks on the core |
 
 ### 3.2 Execution model
 
@@ -728,6 +732,13 @@ RAM  0x1000000 stack (never touched by the linker)
 
 The output is a v2.0 raw image (section 6).
 
+**A program for the OS** (`linker.link(..., base=PROGRAM_BASE)`, used by
+`cc build --exe`, 10.4) is linked all in RAM: the entry jump at the base
+(`0x1100000`), the ROM parts after it, then the RAM parts straight after the
+code. Every step above is the same; only the bases move, so the checks on
+`CALL`s and jumps to RAM labels still apply (they look at the label's
+section, not its address). The image must fit below the end of RAM.
+
 ---
 
 ## 5. Calling convention and the standard library
@@ -823,11 +834,13 @@ line is empty (so it can't erase the prompt).
 | `c/benchmark.c` | C: twelve square roots (the old bit-by-bit `sqrt` as the reference, Quake III's inverse square root with two constants, one or two Newton steps or a residual correction, Newton's method from `y = x` or from two bit-based first guesses) timed with `clock()` over 20 000 inputs and checked against the reference: max absolute and relative error, how many results differ. `-D ONLY_ALGORITHM=n` runs one; `-D COUNT_ONLY` drops the timing so `--stats` gives that one's instruction count. Needs `--steps 600000000` with `cc run` |
 | `c/sqrt_benchmark.c` | C: the library's `sqrt()` (Newton from a bit-based guess, then an exact rounding check) against the bit-by-bit one it replaced, 20 000 inputs 5 times: every result the same, about 1.4× faster. Needs `--steps 400000000` with `cc run` |
 | `c/video_player.c` | C: plays a video made by `compiler/src/img/video.py` (7.5) at its own speed, waiting on `clock()` (the timer); prints how many frames were late. Plays `c/videos/demo.h` (from `demo.mp4`, ffmpeg's moving test picture, 4 s); `-I . -D 'VIDEO="clip.h"'` plays `./clip.h` instead. Needs `--steps 2000000000` with `cc run` (waiting runs millions of instructions a second) |
-| `c/game_of_life.c` | C: Conway's Game of Life on the RGB screen, a 64×64 world that wraps around (2×2-pixel cells, only changed cells redrawn). First checks itself on well-known patterns (24 checks: still lifes, oscillators' periods, spaceships' moves, the diehard dying at 130, the glider gun), then shows seven scenes in turn: Gosper glider gun + eater, oscillators and still lifes, spaceships, R-pentomino, diehard, acorn, random soup. Keys `1`–`7` pick a scene, `n` next, `r` restart, space pause, `s` one step; the hex display shows the generation. `-D SCENE=n` starts at scene n, `-D FULL_TEST` also checks that the first three scenes repeat. 100 000–330 000 instructions a generation |
+| `c/game_of_life.c` | C: Conway's Game of Life on the RGB screen, a 64×64 world that wraps around (2×2-pixel cells, only changed cells redrawn). First checks itself on well-known patterns (24 checks: still lifes, oscillators' periods, spaceships' moves, the diehard dying at 130, the glider gun), then shows seven scenes in turn: Gosper glider gun + eater, oscillators and still lifes, spaceships, R-pentomino, diehard, acorn, random soup. Keys `1`–`7` pick a scene, `n` next, `r` restart, space pause, `s` one step, `q` quit; the hex display shows the generation. `-D SCENE=n` starts at scene n, `-D FULL_TEST` also checks that the first three scenes repeat. 100 000–330 000 instructions a generation |
 | `c/grapher.c` | C: a graphing calculator on the RGB screen. Type a function of x on the bottom line (`+ - * / ^`, implied products like `2x`, `\|x\|`, `sin cos tan sqrt ln log exp ...`, `pi`, `e`) and Enter: it is parsed into a small stack program and drawn, up to six functions in different colours, two pixels thick, over a grid with numbers on the axes; gaps where the value is not a number, jumps like tan's left unjoined. Commands `clear`, `reset`, `zoom f`, `in`, `out`, `move dx dy`, `view x0 x1 y0 y1`, `demo`, `help` (the list of what can be typed, also on the screen at the start). 100–200 ms a function in the simulator |
 | `c/qr.c` | C: a QR code encoder written from the standard, drawn on the RGB screen as big as it fits. Starts with this project's GitHub link; type any text and Enter for a new code (an empty line goes back to the link). Byte mode, versions 1–10, levels L/M/Q/H (`-D LEVEL=n`, M by default), Reed-Solomon over GF(256) with the blocks interleaved, and all eight masks scored by the standard's penalty rules (`-D MASK=n` forces one). `-D TEXT="..."` the first text, `-D DARK=c` the module colour. Every version and level decodes with `zbarimg` and matches `qrencode` module for module with the same mask. About 2.6 million instructions for the link (0.9 s in the simulator) |
-| `c/snake.c` | C: Snake on the RGB screen, a 16×14 grid of 8×8 cells under a score panel; `W`/`A`/`S`/`D` steer, `R` restarts after a game over (`key_pressed()`, `wait_ms()`) |
-| `c/disk_notes.c` | C: the disk device (simulator only, `--disk FILE`): prints the text saved on the disk, then saves each typed line (`!show`, `!clear`, `!quit`), so the next run shows it again |
+| `c/snake.c` | C: Snake on the RGB screen, a 16×14 grid of 8×8 cells under a score panel; `W`/`A`/`S`/`D` steer, `R` restarts after a game over, `Q` quits (`key_pressed()`, `wait_ms()`) |
+| `c/loader.c` | C: runs programs from the disk (simulator only): type a name and arguments, it runs `/bin/<name>` with `spawnv()` and shows the exit status; an empty line lists `/bin`. The first step towards the OS's shell, `os/shell.c` (11) |
+| `c/echo.c` | C: a program for the OS (`cc build --exe`, then `disk put` into `/bin`): prints its arguments, like Unix `echo` |
+| `c/disk_notes.c` | C: files on the disk (simulator only, `--disk FILE` on a disk made by `python compiler/src/disk format`): prints `/notes.txt`, then adds each typed line to it (`!help` lists the commands: `!show`, `!ls`, `!clear`, `!quit`), so the next run shows them again |
 | `c/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, `~` on registers, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
 | `tests/diag10.asm` | `INT` on floats below 1 (diagnostic, resolved: they give 0) |
 | `tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x1004000`; they are also printed in hex |
@@ -928,9 +941,10 @@ python compiler/src/asm/selftest.py   # 20 checks: encodings, values, strings, j
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 23 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 24 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
-                                      # floats, FCMP flags, keyboard, backspace, ADDR/JMRB,
+                                      # floats, FCMP flags, keyboard, backspace, the display's
+                                      # backspace and form feed, ADDR/JMRB,
                                       # float specials, float SHL, run() against step()
                                       # on random code, run() stopping at breakpoints,
                                       # the top of both 16M-word banks, the timer,
@@ -950,9 +964,21 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
+python compiler/src/disk/selftest.py  # 13 checks: format (sparse, the superblock), text and
+                                      # binary round trips (block edges), overwriting frees
+                                      # blocks, a directory past one block (entries reused),
+                                      # subdirectories, . and .., mv, name rules, disk full, CLI,
+                                      # fsck, and the C library on the simulator against fs.py
+                                      # (each reads what the other wrote; fsck clean after),
+                                      # and spawnv(): a --exe program put on the disk, run
+                                      # three times (arguments, exit status, fresh variables,
+                                      # the caller's directory and heap, load errors), and
+                                      # os/shell.c on a disk from os/make_disk.py: a session
+                                      # of every built-in, > and >>, quotes, a /bin program's
+                                      # arguments and exit status, the error messages
 python check_docs.py                  # 3 checks on the docs: every repo path they name
-                                      # exists, every example (.asm, .c) is listed in
-                                      # 5.3, every TWEAKS switch is in 3.4
+                                      # exists, every example (.asm, .c) and os/*.c is
+                                      # listed (5.3, 11), every TWEAKS switch is in 3.4
 ```
 
 `check_docs.py` checks only mechanical facts. It skips build output under
@@ -1075,6 +1101,43 @@ walking their pixels would be the next speed-up.
 
 ---
 
+### 7.6 Disk images (`compiler/src/disk/`)
+
+The disk device (1.7) is a file of words; the TFS1 filesystem on it is
+written down in `compiler/src/disk/fs.py` (the docstring is the reference;
+the C library's `fs.c` reads and writes the same format, `c_language.md`
+§7). In words, with 256-word blocks:
+
+| where | what |
+| --- | --- |
+| block 0 | superblock: `0x31534654` ("TFS1" as bytes), version 1, block size 256, block count N, FAT start block (1), FAT block count F = ceil(N / 256), the root directory's first block and length |
+| blocks 1 … F | the FAT, one word per block: 0 free, `0xFFFFFFFF` the last block of a chain, else the next block. Blocks 0 … F are marked used |
+| block F + 1 … | the root directory's first block, then data |
+
+A file is a chain of blocks; a directory is a file of 132-word entries
+(name: 128 words, one char per word, 0-terminated, 1–127 chars, no `/`,
+spaces or control characters; first block, 0 = empty; length; flags: 1 in
+use, 2 directory, 4 packed text; a reserved word). Deleted entries (flags 0)
+are reused; directories never shrink; `.` and `..` are resolved in the
+path. A text file holds 4 chars a word, char k in bits 8(k mod 4) of word
+k / 4, so the image's bytes read as plain text on the PC, and its length
+counts chars; a binary file's length counts words. A 64 MB disk has 65,536
+blocks (256 for the FAT) and 65,278 free when new.
+
+```
+python compiler/src/disk format disk.img [--size MB] [--force]   # new disk (64 MB, sparse); --force wipes one
+python compiler/src/disk ls disk.img [PATH]                      # a directory: size (chars/words) and name
+python compiler/src/disk put disk.img HOST [PATH] [--binary]     # copy in (text unless --binary, or a TEX1
+                                                                 # program from cc build --exe); PATH: a
+                                                                 # name or a directory, default /HOST's name
+python compiler/src/disk get disk.img PATH [HOST|-]              # copy out (- = the terminal)
+python compiler/src/disk cat disk.img PATH
+python compiler/src/disk rm|mkdir|rmdir disk.img PATH            # rmdir: empty directories only
+python compiler/src/disk mv disk.img OLD NEW                     # rename or move (files and directories)
+python compiler/src/disk df disk.img                             # blocks used and free
+python compiler/src/disk fsck disk.img                           # every block in exactly one file?
+```
+
 ## 8. Simulator vs. circuit: open questions
 
 The simulator is the reference for the tools, but it was written from the
@@ -1095,6 +1158,7 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | number display `0x3C` | shows the last word sent (window and headless output) | 8 hex digits in `PC` |
 | RGB screen `0x6C`/`0x6D` | 128×128 RGB565, the "RGB screen" tab, `--screen` | `RGB_Display` → RGB Video in `PC` (2026-10-22); the `0x6D` clear isn't built |
 | disk `0x8C`/`0x8D` | a file, `--disk` or the window's `disk` button | none (Logisim's RAM can't save itself) |
+| text display `0x5C`: control characters | `\n` new line, `\r` clears the line, `\b` deletes, `\f` clears it all; others are printed | the `display` subcircuit gives the TTY 7 data bits and a write strobe (its clear pin isn't wired). Logisim 4.1.0's `TTY` (read in its code, `TtyState.add`, not run): `\n` and `\r` both start a new line, `\b` deletes, `\f` clears; other control characters are dropped. **`\r` differs**; nothing in the toolchain prints it |
 | timing | one instruction per step | several clock cycles per instruction (stepper) |
 
 ---
@@ -1139,7 +1203,7 @@ how the compiler works.
 
 ```
 python compiler/src/cc compile prog.c [-o prog.asm]                 # C -> assembly
-python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map] [--no-libc] [--lib x.asm]
+python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map] [--no-libc] [--lib x.asm] [--exe]
 python compiler/src/cc run   prog.c [...] [--keys TEXT] [--steps N] [--stats] [--trace] [--screen FILE.png] [--disk FILE]
         common options: -I dir, -D NAME[=value], -w (no warnings)
 ```
@@ -1150,7 +1214,8 @@ written. `build` and `run` also write `<name>.asm` for each `.c` next to the
 `.rom`; `build` always writes the `.map` too (with the C source lines, for
 the simulator window's C view; `.loc` directives carry them). `run` builds, runs the image in the simulator without a window and
 prints the display; it exits with 2 if the program doesn't halt within
-`--steps` (default 50 million).
+`--steps` (default 50 million). `build --exe` writes `<name>.exe` instead,
+a program for the OS (10.4) for `python compiler/src/disk put`.
 
 ### 10.2 Modules
 
@@ -1261,10 +1326,29 @@ leads to after an unconditional jump.
   copies its starting values from the `_T_<file>` template in ROM, and
   clears the rest. `driver.crt0_source` writes the start-up code for each
   build: `start` calls every linked `_init_` routine, then
-  `main(0, {NULL})`, then `exit` with main's result. The build links, in
-  order: crt0, the given files, the library files they need, and a last
-  object whose `.ram` label `_end` marks the end of all variables (where
-  malloc's heap starts).
+  `main(0, {NULL})`, then `exit` with main's result. crt0 also holds
+  `_Exit` (HALT, in a loop) and `_heap_end`, the word where malloc's heap
+  ends: the end of RAM, or `0x1100000` when `spawnv` is linked (the build
+  then also checks that the program's variables end below it). The build
+  links, in order: crt0, the given files, the library files they need, and
+  a last object whose `.ram` label `_end` marks the end of all variables
+  (where malloc's heap starts).
+* **Programs for the OS** (`build --exe`) are linked at `0x1100000` (4.6)
+  and saved as a TEX1 executable: a 5-word header (`0x31584554` "TEX1",
+  load address, n, entry, words to zero after the image) and the n words,
+  little-endian, so `disk put` stores it as a binary file (it spots the
+  magic). `spawnv()` (`spawn.c`) checks the header, copies the words with
+  `_fs_read` (one seek a block, about 14 instructions a word), zeroes the
+  variables, and jumps to the entry with R1 = a block: argc, argv, the
+  address to go back to, its current directory. That crt0 keeps the block,
+  calls the `_init_` routines and `_fs_inherit(cwd)` (when `fs.c` is linked),
+  then `main(argc, argv)`; its `_Exit` jumps back to `spawn.asm`'s
+  `_spawn_return` with R0 = the status, which `longjmp`s to the stack
+  `spawnv()` had, so `exit()` works at any depth. The program has its own
+  copy of the library (its own heap, from its `_end` to the end of RAM, and
+  its own open files); afterwards `spawnv()` calls `_fs_forget()` so the
+  caller re-reads the disk. A `--exe` program can't link `spawnv` (it would
+  load over itself).
 * Labels: C names as they are (or `_X` + name, 5 in `c_language.md`);
   compiler labels `_K<n>` (code), `_L<n>` (statements), `_S<n>` (strings),
   `_F<n>` (`__func__`), `_V<n>_<name>` (static locals), `_C<n>`, `_G<n>`.
@@ -1274,14 +1358,16 @@ leads to after an unconditional jump.
 `compiler/libc/` holds the headers (`include/`), the library in C (one file
 per group of functions: `printf.c`, `format.c`, `fdigits.c`, `scanf.c`,
 `string.c`, `malloc.c`, `math.c`, `gfx.c`, `gfx_text.c` and `gfx_image.c` for the RGB
-screen, ...), `local.h` (shared by the library
-files only) and two assembly files: `runtime.asm` (`_pow2`, `_udiv`,
-`_umod`, `_Exit`) and `setjmp.asm`.
+screen, `fs.c` (files on the disk, TFS1 as in 7.6, and `statvfs`) and `dir.c`
+(directories), ...), `local.h` (shared by the library
+files only) and three assembly files: `runtime.asm` (`_pow2`, `_udiv`,
+`_umod`), `setjmp.asm`, and `spawn.asm` (the jumps of `spawn.c`'s `spawnv`,
+10.4). `_Exit` is in the generated crt0.
 
 * The driver compiles each library file the first time it is needed and
   keeps the `.obj` (and the `.asm`, for reading) in `compiler/ROM/libc/`,
-  with a key made from the file, the compiler's sources and the headers: a
-  change to any of them rebuilds it.
+  with a key made from the file, the compiler's sources and the headers
+  (`include/sys/` too): a change to any of them rebuilds it.
 * `driver.select_library` links a library file only when it defines a name
   that is still missing, repeating until nothing is: like a static library,
   so a program's own `puts` wins. The chosen files are then linked as
@@ -1289,6 +1375,10 @@ files only) and two assembly files: `runtime.asm` (`_pow2`, `_udiv`,
   object, so only the functions and data actually used go in.
 * `runtime.asm`'s helpers are called with `DATA R14, back` / `RJMP _udiv`
   and return with `JMRB R14`; they change only R0, R13, R14, R15.
+* `FILE` (in `local.h`) carries `get`/`put`/`flush` pointers that `fopen`
+  sets; `file.c`, `getchar.c`, `format.c` and `scanf.c` call them for
+  files on the disk, so `fs.c` is linked only into programs that call
+  `fopen` or `statvfs` (c_decisions 33–35).
 * `format.c` prints floats exactly: `fdigits.c` turns the float's exact
   value into decimal digits (base-10000 pieces for big integer parts, a
   160-bit binary fraction for the rest) and rounds ties to even.
@@ -1319,3 +1409,67 @@ files only) and two assembly files: `runtime.asm` (`_pow2`, `_udiv`,
   `jumps`, `preproc`, `arrays`, `features`, `globals`, `structs`,
   `control`) also ran on the circuit and printed exactly their
   `.expected` (gcc's) output.
+
+---
+
+## 11. The OS (`os/`)
+
+Simulator only (it needs the disk, 1.7 and 7.6). One program at a time,
+like CP/M or MS-DOS: there are no interrupts and no memory protection, so
+no multitasking.
+
+| file | what it is |
+| --- | --- |
+| `os/shell.c` | the OS's ROM: a command shell, built like any C program (17,833 words of ROM, 2,923 of RAM) |
+| `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples, 2.8K–17.4K words each, in under a second |
+
+```
+python os/make_disk.py [IMG] [--new] [--size MB]
+python compiler/src/cc build os/shell.c
+python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img
+python compiler/src/cc run os/shell.c --disk os/disk.img --keys $'ls /bin\nprimes\nhalt\n'
+```
+
+At start the shell prints a line and checks for a formatted disk
+(`opendir("/")`). Without one it says how to attach one and goes on: the
+commands that need no disk still work, the others say `No such device`.
+Then it prompts with the current directory (`/docs> `), reads a line with
+`fgets` (the C library echoes it and handles backspace), splits it into
+words at spaces (`"..."` and `'...'` keep spaces in one word; the quotes go)
+and takes out `> FILE` or `>> FILE`. The first word picks the command.
+
+Built-in commands (the `commands[]` table, which `help` also prints):
+
+| command | what it does |
+| --- | --- |
+| `help` | the commands, then the programs in `/bin` |
+| `ls [-l] [path...]` | the names (directories end in `/`), two spaces apart, wrapped at 64 columns (the circuit's TTY); `-l`: one a line with its size (chars for a text file, words for a binary one) or `<dir>`. A file's path prints its name |
+| `cd [dir]`, `pwd` | `chdir` (no argument: `/`), `getcwd` |
+| `cat [file...]` | the files; it stops at a char over 255, which only a binary file has ("a binary file (a program?)"). With no file, the keyboard up to Ctrl-D, then `clearerr(stdin)` so the prompt reads again: `cat > notes.txt` writes a file |
+| `echo [word...]` | the words, one space apart |
+| `rm path...` | `remove`: files and empty directories |
+| `mv from to` | `rename`; into `to` when that is a directory |
+| `mkdir dir...`, `rmdir dir...` | |
+| `df` | `statvfs("/")`: 1 KB blocks, used, free (it reads the whole FAT: 0.9 million instructions on 64 MB) |
+| `clear` | a form feed (12) to the text display, `gfx_clear()` for the RGB screen |
+| `halt` | `exit(0)`: the CPU halts. Ctrl-D at the prompt does the same |
+
+A built-in writes to `out`: the display, or the file after `>` (`fopen`
+`"w"`, a text file) or `>>` (`"a"`), closed after the command. Error
+messages always go to the display. A command with the wrong arguments
+prints its usage.
+
+Any other first word is a program: a word with a `/` is a path (relative
+ones start at the current directory), else `/bin/NAME`. `spawnv(path,
+words)` (10.4) loads it at `0x1100000` and runs it in the current
+directory with the words as `argv`; the shell's variables and heap stay
+below `0x1100000`. When it ends, the shell prints `[NAME: exit status N]`
+if N isn't 0. If it can't be loaded the shell says `NAME: no such command`
+(a plain name not in `/bin`) or the path and `strerror` (`Exec format
+error` for a text file, `Is a directory`). `>` after a program is refused:
+the program has its own copy of the C library, whose `stdout` is the
+display.
+
+A program that never ends keeps the CPU: nothing can stop it from the
+outside. The examples `make_disk.py` puts in `/bin` end by themselves, on
+Ctrl-D (`grapher`, `qr`) or on `q` (`snake`, `game_of_life`).

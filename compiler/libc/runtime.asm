@@ -8,14 +8,15 @@
 ;                   (call them with  DATA R14, back / RJMP _udiv ; back:
 ;                   they return with JMRB R14 and change only R0, R13,
 ;                   R14, R15 and the flags)
-;   _Exit(status)   C's _Exit: stop the CPU with R0 = status; RESUME
-;                   stops it again
+;
+; C's _Exit is in the start-up code the build generates (driver.py's crt0):
+; it stops the CPU, or goes back to the OS in a program for the OS.
 ;
 ; Part of the C library: the C compiler's build command links it in when
 ; a program needs it.
 ; ==================================================================
 
-        .global _pow2, _udiv, _umod, _Exit
+        .global _pow2, _udiv, _umod
 
 _pow2:
         .word 1, 2, 4, 8, 16, 32, 64, 128
@@ -110,13 +111,3 @@ umd_fixed:
         CPY R0, R1
         CPY R15, R0
         JMRB R14
-
-; ------------------------------------------------------------------
-; _Exit(status): stop with R0 = status
-; ------------------------------------------------------------------
-_Exit:
-        DATA R1, -2
-        STK GET, R1
-_Exit_halt:
-        HALT
-        RJMP _Exit_halt

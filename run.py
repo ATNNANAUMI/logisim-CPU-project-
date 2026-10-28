@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parent
 ASM = ROOT / "compiler" / "src" / "asm"
 CC = ROOT / "compiler" / "src" / "cc"
 IMG = ROOT / "compiler" / "src" / "img"
+DISK = ROOT / "compiler" / "src" / "disk"
 VIDEO = IMG / "video.py"
 VIDEO_TYPES = ("*.mp4", "*.mkv", "*.webm", "*.mov", "*.avi", "*.gif")
 SIM = ROOT / "cpu_sim" / "src"
@@ -16,7 +17,7 @@ MENU = """what do you want to run?
   1) asm    assemble (or compile C) only
   2) sim    open the simulator
   3) build  assemble (or compile C), then open the simulator
-  4) test   self-checks (assembler, simulator, C compiler, image tool) + docs check
+  4) test   self-checks (assembler, simulator, C compiler, image tool, disk tool) + docs check
   5) img    convert a PNG into a compressed picture (.h) for gfx_image()
   6) video  convert a video into compressed frames (.h) for video_player.c
 """
@@ -107,6 +108,7 @@ def do(cmd, args):
         run(SIM / "selftest.py")
         run(CC / "selftest.py")
         run(IMG / "selftest.py")
+        run(DISK / "selftest.py")
         run(ROOT / "check_docs.py")
     elif cmd == "img":
         run(IMG, *args)

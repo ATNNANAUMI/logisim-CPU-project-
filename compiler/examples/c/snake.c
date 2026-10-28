@@ -11,7 +11,8 @@
  *     compiler/ROM/snake.rom in the simulator window (the "RGB screen" tab)
  *
  * Grid: 16 x 14 cells, each 8 x 8 pixels. The top 16 pixels are reserved for the score panel.
- * Controls: W/A/S/D. Press R to restart after game over.
+ * Controls: W/A/S/D. Press R to restart after game over, Q to quit (back to
+ * the OS's shell when it was run from there: os/shell.c).
  */
 
 #define GRID_W 16
@@ -36,6 +37,7 @@ static int food_x;
 static int food_y;
 static int score;
 static int game_over;
+static int quit;
 
 static void draw_cell(int x, int y, unsigned color)
 {
@@ -161,7 +163,9 @@ static void read_input(void)
     if (key >= 'A' && key <= 'Z')
         key += 'a' - 'A';
 
-    if (key == 'w' && dir_y != 1) {
+    if (key == 'q')
+        quit = 1;
+    else if (key == 'w' && dir_y != 1) {
         dir_x = 0;
         dir_y = -1;
     } else if (key == 's' && dir_y != -1) {
@@ -256,6 +260,7 @@ static void draw_game_over(void)
     }
 
     gfx_text(18, 76, "PRESS R TO RESTART", COLOR_TEXT, GFX_NONE);
+    gfx_text(37, 84, "Q TO QUIT", COLOR_TEXT, GFX_NONE);
 }
 
 int main(void)
@@ -263,7 +268,7 @@ int main(void)
     srand((unsigned)clock());
     reset_game();
 
-    while (1) {
+    while (!quit) {
         if (game_over) {
             int key;
 
@@ -272,8 +277,10 @@ int main(void)
                 key = wait_key();
                 if (key >= 'A' && key <= 'Z')
                     key += 'a' - 'A';
-            } while (key != 'r');
+            } while (key != 'r' && key != 'q');
 
+            if (key == 'q')
+                break;
             reset_game();
         }
 

@@ -24,7 +24,10 @@ IEEE-754 float ALUs, and I/O through a single `COMM` instruction: a text
 display at `0x5C`, a hex number display at `0x3C` and a keyboard at `0xF0`
 (plus a 128×128 RGB screen at `0x6C`, drawn on from C with `gfx.h`, and a
 millisecond timer at `0x7C`, wiring planned, which C's `clock()` reads,
-and, in the simulator only, a disk kept in a file at `0x8C`/`0x8D`).
+and, in the simulator only, a disk kept in a file at `0x8C`/`0x8D`, with a
+filesystem that C's `fopen` reads and writes and `compiler/src/disk` edits
+from the PC, and programs that C's `spawnv` loads from it into RAM and runs;
+`os/shell.c` is a small OS for it: a command shell in ROM).
 Every ALU result goes to **R0**.
 
 ## Requirements
@@ -40,7 +43,7 @@ Everything can be driven from `run.py` at the project root:
 
 ```
 python run.py                     # interactive menu
-python run.py test                # assembler, simulator, C compiler and image tool self-checks, docs check
+python run.py test                # assembler, simulator, C compiler, image and disk tool self-checks, docs check
 python run.py asm   prog.asm lib.asm            # -> compiler/ROM/prog.rom
 python run.py sim   compiler/ROM/prog.rom
 python run.py build prog.asm lib.asm            # assemble, then open the simulator
@@ -71,6 +74,7 @@ C programs go through the C compiler, which links the C library on its own:
 ```
 python compiler/src/cc run compiler/examples/c/hello.c          # build + run in the simulator, print the display
 python compiler/src/cc build compiler/examples/c/primes.c       # -> compiler/ROM/primes.rom (+ primes.asm to read)
+python compiler/src/cc build compiler/examples/c/echo.c --exe   # -> echo.exe, a program for the disk (see c/loader.c)
 python run.py build compiler/examples/c/guess.c                 # build, then open the simulator window
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/primes.rom
 ```
@@ -81,8 +85,17 @@ smaller than one word per pixel):
 ```
 python compiler/src/img picture.png             # -> picture.h; #include it, then gfx_image(x, y, picture)
 python compiler/src/img/video.py clip.mp4           # -> clip.h next to it (needs ffmpeg)
+python compiler/src/disk format disk.img            # an empty disk for --disk; then put/get/ls/cat/rm/mkdir/mv/df
 pypy3 compiler/src/cc run compiler/examples/c/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
 python compiler/src/cc run compiler/examples/c/image_demo.c --screen out.png
+```
+
+The OS (simulator only): a shell in ROM that runs the programs on the disk:
+
+```
+python os/make_disk.py                          # os/disk.img: the C examples in /bin, built --exe
+python compiler/src/cc build os/shell.c
+python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img   # type help, ls /bin, primes, snake ...
 ```
 
 ## A taste of the assembly
@@ -127,8 +140,10 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 | `logisim/run_rom.py` | load a ROM into the circuit and run Logisim headless |
 | `compiler/src/asm/` | assembler, linker, self-checks |
 | `compiler/src/cc/` | C compiler, self-checks, test programs compared with gcc (`tests/`) |
+| `compiler/src/disk/` | disk tool: makes and edits disk images (TFS1 filesystem) for the simulator's `--disk` |
 | `compiler/src/img/` | image converter: PNG -> compressed picture for `gfx_image()` (`gfx.h`); `video.py`: a video -> frames for `video_player.c` |
 | `compiler/libc/` | the C library: headers (`include/`), C and assembly sources |
+| `os/` | the OS (simulator only): `shell.c`, a command shell in ROM that runs programs from the disk; `make_disk.py`, a disk with the C examples in `/bin` |
 | `compiler/examples/` | example programs (assembly, and C in `c/`), the standard library (`stdlib/stdlib.asm`), circuit diagnostics |
 | `compiler/ROM/` | build output for ROM images (ignored by git) |
 | `compiler/assembly_syntax.md` | full assembly language reference |

@@ -25,6 +25,7 @@ Run from the project root:
 python compiler/src/cc run prog.c                  # build, then run in the simulator (no window)
 python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map]
 python compiler/src/cc compile prog.c [-o prog.asm]   # C to assembly only
+python compiler/src/cc build prog.c --exe          # a program for the OS: prog.exe, for the disk
 python run.py build prog.c                         # build, then open the simulator window
 ```
 
@@ -46,6 +47,10 @@ python run.py build prog.c                         # build, then open the simula
   (the program then needs its own `start`), `--lib FILE` links an assembly
   (or `.obj`) library, keeping only the functions the program uses (like the
   assembler's `--lib`).
+* `build --exe` makes a **program for the OS**: `compiler/ROM/prog.exe`, to
+  copy to the disk (`python compiler/src/disk put disk.img
+  compiler/ROM/prog.exe /bin/prog`) and run with `spawnv()` (section 4).
+  Any C program works; it gets `argc`/`argv` from its caller.
 * On the circuit: `python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom`.
   The circuit runs about 160 instructions a second, so keep circuit runs
   small: `hello.c` takes 1 400 instructions, a `printf` with a float a few
@@ -143,7 +148,8 @@ ROM  0x00000   RJMP start (from the linker)
                and the starting values of initialised globals
 RAM  0x1000000 the stack (16K words), grows upward
      0x1004000 global and static variables
-     _end      the heap (malloc) up to 0x1FFFFFF
+     _end      the heap (malloc) up to 0x1FFFFFF (up to 0x10FFFFF in a
+               program that calls spawnv: programs are loaded from 0x1100000)
 ```
 
 * `start` (in the generated start-up code, crt0) calls each file's
@@ -155,6 +161,15 @@ RAM  0x1000000 the stack (16K words), grows upward
   RESUME halts it again.
 * Each call takes 2 words of stack plus its arguments and its locals; deep
   recursion can run past the 16K words of stack (it wraps, nothing checks).
+* **A program for the OS** (`build --exe`) lives all in RAM: its code,
+  constants and variables from `0x1100000`, its heap after them up to
+  `0x1FFFFFF`. `spawnv(path, argv)` loads it from the disk and calls
+  `main(argc, argv)`; `exit()` or the end of `main` goes back to the caller
+  with the status (`spawnv`'s result) instead of halting. Its variables
+  start fresh on every run, it starts in the caller's current directory,
+  and it shares the stack with the caller (above the caller's frame). It
+  has its own copy of the library: open files, `errno`, the heap and
+  `atexit` are its own. Nothing protects the caller's memory from it.
 
 
 ## 5. Calling convention and mixing with assembly
@@ -274,10 +289,11 @@ by `<stdarg.h>` and `<stddef.h>`), `__builtin_expect(e, c)`,
 
 ## 7. The C library
 
-Headers: `assert.h`, `cpu.h`, `ctype.h`, `errno.h`, `float.h`, `gfx.h`,
-`inttypes.h`, `iso646.h`, `limits.h`, `locale.h`, `math.h`, `setjmp.h`,
-`signal.h`, `stdalign.h`, `stdarg.h`, `stdbool.h`, `stddef.h`, `stdint.h`,
-`stdio.h`, `stdlib.h`, `stdnoreturn.h`, `string.h`, `time.h`.
+Headers: `assert.h`, `cpu.h`, `ctype.h`, `dirent.h`, `errno.h`, `float.h`,
+`gfx.h`, `inttypes.h`, `iso646.h`, `limits.h`, `locale.h`, `math.h`,
+`setjmp.h`, `signal.h`, `stdalign.h`, `stdarg.h`, `stdbool.h`, `stddef.h`,
+`stdint.h`, `stdio.h`, `stdlib.h`, `stdnoreturn.h`, `string.h`, `sys/statvfs.h`,
+`time.h`, `unistd.h`.
 
 Only the library files a program uses are linked in, and a program may
 define its own function with a library name (it is used instead).
@@ -286,22 +302,60 @@ define its own function with a library name (it is used instead).
 
 * Output: `printf`, `fprintf`, `sprintf`, `snprintf`, `vprintf` and the
   other `v` forms, `puts`, `putchar`, `fputs`, `fputc`/`putc`, `fwrite`.
-  `stdout` and `stderr` both go to the display. `printf` supports
+  `stdout` and `stderr` both go to the display (`'\f'` clears it). `printf` supports
   `%d %i %u %o %x %X %c %s %p %f %F %e %E %g %G %n %%` with flags, width and
   precision; length modifiers are accepted and change nothing. Floats are
   printed exactly (the decimal digits of the float's exact value, rounded
   to nearest with ties to even), so `printf("%.2f", x)` gives the same
   digits as glibc for the same float.
 * Input: `getchar`, `fgetc`/`getc`, `ungetc`, `fgets`, `fread`, `scanf`,
-  `sscanf`, `vscanf`, `vsscanf`, `fscanf`. The keyboard is read a line at
+  `sscanf`, `vscanf`, `vsscanf`, `fscanf`, `vfscanf`. The keyboard is read a line at
   a time, like a terminal: keys are shown as they are typed, backspace
   removes the last one, and the program gets the line after Enter.
   **Ctrl-D** (`0x04`) at the start of a line is end of file. `scanf`
   supports `%d %i %u %o %x %c %s %[...] %f %e %g %n` with `*` and widths.
-* There are no files: `fopen` returns `NULL`, `remove`/`rename` fail.
+* **Files** are on the disk (simulator only: `cc run --disk FILE` or the
+  window's `disk` button, on an image made with `python compiler/src/disk
+  format FILE`; TECHNICAL §7.6 has the TFS1 format). `fopen` (modes `r w a`,
+  `+`, `b`), `fclose`, `fflush`, `fseek`/`ftell`/`rewind` (`SEEK_SET`,
+  `SEEK_CUR`, `SEEK_END`), `remove` (files and empty directories),
+  `rename` (also into another directory; fails if the new name exists),
+  and every function above on a `FILE *`. A **text** file (no `b`) holds 4
+  chars a word, so only the low 8 bits of a char are kept and the image
+  reads as plain text on the PC; a **binary** file (`b`) holds one whole
+  word per char, so `fgetc` can return a word equal to `EOF` (`feof` tells
+  them apart; `fread` already does). Which kind a file is is fixed when it
+  is created (or emptied by `w`). Paths start at the root (`/a/b`) or at
+  the current directory; names are 1-127 chars, no `/`, spaces or control
+  characters. At most 8 files are open at once; open files are saved by
+  `fclose`, `fflush`, `exit` and the end of `main`. Without a formatted
+  disk `fopen` returns `NULL` with `errno` `ENODEV`.
+
+**unistd.h, dirent.h:** `chdir`, `getcwd`, `mkdir(path, ...)` (a mode is
+ignored; POSIX puts `mkdir` in `sys/stat.h`), `rmdir` (empty directories);
+`opendir`, `readdir` (`d_name`, `d_type` `DT_DIR`/`DT_REG`, and `d_size`, not
+standard: chars for a text file, words otherwise; `.` and `..` aren't
+listed), `closedir`, at most 4 open. Errors set `errno`: `ENOENT`,
+`EEXIST`, `ENOTDIR`, `EISDIR`, `ENOTEMPTY`, `ENOSPC`, `ENODEV`, `EMFILE`,
+`ENAMETOOLONG`, `EINVAL`, `EBUSY` (the root), with Linux's numbers;
+`strerror` and `perror` print them.
+
+**sys/statvfs.h:** `statvfs(path, &s)` gives the disk's size and free
+space in blocks of `f_bsize` (256) chars: `f_blocks`, `f_bfree` (=
+`f_bavail`), `f_namemax` (127); `f_files` and friends are 0. It reads the
+whole FAT (14 instructions a block, 0.9 million on a 64 MB disk).
+
+**unistd.h: `spawnv(path, argv)`** runs the program in the file `path` (made
+with `cc build --exe`) with `argv[0]`, `argv[1]`, ... up to a `NULL`, waits
+for it and returns its exit status (like DOS's `spawnv(P_WAIT, ...)`), or
+-1 with `errno` set when it can't be loaded: `ENOENT`, `EISDIR`, or
+`ENOEXEC` (not a program). It starts in the current directory. Close the
+files you have open first: the caller's open `FILE`s don't see the
+program's changes. A `--exe` program can't call `spawnv` (the build
+refuses). `os/shell.c` (TECHNICAL §11) is a shell built on it.
 
 **stdlib.h:** `malloc`, `calloc`, `realloc`, `free` (first fit, from
-`_end` to the end of RAM); `exit`, `atexit`, `_Exit`, `abort`; `abs`,
+`_end` to the end of RAM, or to `0x1100000` with `spawnv`); `exit`, `atexit`, `_Exit`, `abort`; `abs`,
 `labs`, `div`, `ldiv`; `atoi`, `atol`, `atof`, `strtol`, `strtoul`, `strtod`,
 `strtof`; `rand` (0..32767, the generator from the C standard's example, so
 not the same numbers as glibc), `srand`; `qsort`, `bsearch`; `getenv`

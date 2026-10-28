@@ -1,4 +1,4 @@
-/* fprintf, vfprintf: formatted output to stdout or stderr (the display) */
+/* fprintf, vfprintf: formatted output to stdout, stderr (the display) or a file */
 #include <stdio.h>
 #include "local.h"
 
@@ -9,6 +9,7 @@ int vfprintf(FILE *stream, const char *fmt, va_list ap)
         stream->error = 1;
         return -1;
     }
+    out.file = stream->put ? stream : 0;
     out.buf = 0;
     out.size = 0;
     out.len = 0;
