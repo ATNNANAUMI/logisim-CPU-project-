@@ -16,16 +16,23 @@
  *                        program). It starts in the current directory. Like
  *                        DOS's spawnv(P_WAIT, ...). Not in a program built
  *                        with --exe itself.
+ *   spawnv_to(path, argv, out)   the same, with the program's stdout (what
+ *                        printf, putchar and puts write) going to the open
+ *                        FILE out instead of the display; out is the
+ *                        caller's, still open when the program ends. The
+ *                        program should not rewrite that file itself.
  */
 #ifndef _UNISTD_H
 #define _UNISTD_H
 
 #include <stddef.h>
+#include <stdio.h>
 
 int chdir(const char *path);
 char *getcwd(char *buf, size_t size);
 int mkdir(const char *path, ...);
 int rmdir(const char *path);
 int spawnv(const char *path, char *const argv[]);
+int spawnv_to(const char *path, char *const argv[], FILE *out);
 
 #endif

@@ -527,7 +527,10 @@ SHELL_KEYS = ("help\n"
               "cat /b.txt\n"
               "/a.txt\n"
               "nope\n"
-              "primes > p.txt\n"
+              "/bin/echo r1 r2 > /p.txt\n"
+              "/bin/echo r3 >> /p.txt\n"
+              "/bin/echo > /q.txt\n"
+              "cat /p.txt /q.txt\n"
               "cd ..\n"
               "cat > typed.txt\n"
               "line 1\n"
@@ -577,8 +580,14 @@ more
 /a.txt: Exec format error
 /docs> nope
 nope: no such command (help lists them)
-/docs> primes > p.txt
-> works only for the built-in commands
+/docs> /bin/echo r1 r2 > /p.txt
+/docs> /bin/echo r3 >> /p.txt
+/docs> /bin/echo > /q.txt
+[/bin/echo: exit status 1]
+/docs> cat /p.txt /q.txt
+r1 r2
+r3
+/bin/echo: no arguments (argc = 1)
 /docs> cd ..
 /> cat > typed.txt
 line 1
@@ -586,7 +595,7 @@ line 1
 line 1
 /> rmdir docs
 /> ls
-bin/  readme.txt  a.txt  b.txt  e2  typed.txt
+bin/  readme.txt  a.txt  b.txt  e2  p.txt  q.txt  typed.txt
 /> df
 {df}
 /> halt
@@ -619,6 +628,7 @@ def check_shell():
               f"{disk.free_blocks()} free ({(used * 100 + disk.blocks - 1) // disk.blocks}% used)")
         got = help_text.partition("/> help\n")[0] + sep + rest
         assert got == SHELL_OUTPUT.format(df=df, readme=len(make_disk.README)), got
+        assert disk.get("/p.txt") == b"r1 r2\nr3\n"       # a program's output, > and >>
         assert disk.get("/a.txt") == b"two  spaces\nmore\n" == disk.get("/b.txt")
         assert disk.lookup("/e2").length == sizes["echo"] + 5 and not disk.lookup("/e2").packed
         assert disk.get("/typed.txt") == b"line 1\n"

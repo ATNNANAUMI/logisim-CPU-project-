@@ -15,8 +15,9 @@
  * A program that can't be loaded gives a message and the shell goes on.
  *
  * Words are split at spaces; "..." or '...' keep spaces inside one word.
- * A built-in's output can go to a file: `echo hi > a.txt`, `ls >> list.txt`
- * (a program's can't: it has its own copy of the C library). `cat` with no
+ * Output can go to a file: `echo hi > a.txt`, `ls >> list.txt`, and a
+ * program's too: `primes > p.txt` (what it prints with printf, putchar and
+ * puts; its input is still the keyboard, and its own errors the display). `cat` with no
  * file copies the keyboard up to Ctrl-D, so `cat > notes.txt` writes a
  * file. Ctrl-D at the prompt, or `halt`, stops the CPU.
  */
@@ -340,12 +341,17 @@ static int cmd_help(int argc, char **argv)
 static int run_program(int argc, char **argv)
 {
     int status;
+    FILE *to = 0;
     if (strchr(argv[0], '/'))
         strcpy(path, argv[0]);
     else
         sprintf(path, "/bin/%s", argv[0]);
+    if (redirect && (to = fopen(redirect, append ? "a" : "w")) == 0)
+        return fail(argv[0], redirect);
     errno = 0;                          /* the program's own errno is another variable */
-    status = spawnv(path, argv);
+    status = spawnv_to(path, argv, to);
+    if (to)
+        fclose(to);                     /* after the program: spawnv forgot what the disk held */
     if (status == -1 && errno) {
         if (errno == ENOENT && !strchr(argv[0], '/'))
             printf("%s: no such command (help lists them)\n", argv[0]);
@@ -433,10 +439,7 @@ static void run_line(char *s)
         if (strcmp(args[0], commands[i].name) == 0)
             break;
     if (i == N_COMMANDS) {
-        if (redirect)
-            printf("> works only for the built-in commands\n");
-        else
-            run_program(argc, args);
+        run_program(argc, args);
         return;
     }
     out = stdout;
