@@ -964,11 +964,12 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 14 checks: format (sparse, the superblock), text and
+python compiler/src/disk/selftest.py  # 15 checks: format (sparse, the superblock), text and
                                       # binary round trips (block edges), overwriting frees
                                       # blocks, a directory past one block (entries reused),
                                       # subdirectories, . and .., mv, name rules, disk full, CLI,
                                       # fsck, the C library on the simulator against fs.py, `stat()` against fs.py,
+                                      # the shell and the `ed` editor run on a disk,
                                       # (each reads what the other wrote; fsck clean after),
                                       # and spawnv(): a --exe program put on the disk, run
                                       # three times (arguments, exit status, fresh variables,
@@ -1422,7 +1423,8 @@ no multitasking.
 | file | what it is |
 | --- | --- |
 | `os/shell.c` | the OS's ROM: a command shell, built like any C program (18,684 words of ROM, 2,923 of RAM) |
-| `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples, 2.8K–17.4K words each, in under a second |
+| `os/ed.c` | a line editor for text files, a program for `/bin` (15.8K words; section 11.1) |
+| `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `os/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples and `ed`, 2.8K–17.4K words each, in under a second |
 
 ```
 python os/make_disk.py [IMG] [--new] [--size MB]
@@ -1475,3 +1477,34 @@ display.
 A program that never ends keeps the CPU: nothing can stop it from the
 outside. The examples `make_disk.py` puts in `/bin` end by themselves, on
 Ctrl-D (`grapher`, `qr`) or on `q` (`snake`, `game_of_life`).
+
+### 11.1 The editor: `ed` (`os/ed.c`)
+
+A line editor in the style of Unix's `ed`, a program in `/bin` (the text
+display is a teletype: append only, no cursor positioning, so a screen
+editor needs the RGB screen instead). `ed notes.txt` loads the file into
+memory a line at a time (`malloc`), the commands change that copy and `w`
+writes it back. A missing file starts empty and `w` makes it; a binary file
+(`stat()` without `S_ISTEXT`, 10.5) is refused, so a program can't be damaged
+by saving it as text.
+
+| command | what it does |
+| --- | --- |
+| `p [range]` | lines with numbers (no range: all); the last one becomes the current line |
+| `n` | the current line number, the line count, the file name |
+| `a [n]`, `i [n]` | type lines after / before line `n` (default: the current), end with a line holding only `.` or Ctrl-D |
+| `c [range]` | replace the lines with typed ones |
+| `d [range]` | delete the lines |
+| `[range]s/old/new/` | replace the first plain-text `old` in each line (the delimiter can be any char) |
+| `/text` | the next line containing `text`, wrapping round |
+| `N` | go to line `N` and print it |
+| `w [file]` | save (to `file`, which becomes the name), prints the chars written |
+| `q` | quit; with unsaved changes it warns once and a second `q` quits. Ctrl-D at the prompt does the same |
+| `h` | the list |
+
+A range is `N`, `N,M`, `.` (the current line), `$` (the last), or `,`
+(everything). Unlike ed's `?`, an error says what is wrong (`no such line`,
+`not found: x`). Lines are at most 255 chars (the same limit as the shell's
+line). The self-check `editor` (disk suite) drives it through the shell and
+reads the file back with `fs.py`.
+
