@@ -28,7 +28,7 @@ DEFAULT_IMAGE = ROOT / "os" / "disk.img"
 # compiler/examples/c/*/NAME.c -> /bin/NAME. Each one ends by itself, on
 # Ctrl-D or on q, so the shell gets the CPU back.
 PROGRAMS = ["echo", "hello", "primes", "structs", "guess", "gfx_demo", "image_demo",
-            "snake", "game_of_life", "grapher", "qr", "disk_notes", "ed"]
+            "snake", "game_of_life", "grapher", "qr", "disk_notes", "ed", "edit"]
 
 README = """\
 This disk was made by os/make_disk.py for the shell in os/shell.c.
@@ -39,6 +39,7 @@ This disk was made by os/make_disk.py for the shell in os/shell.c.
   cat > todo.txt   type lines, then Ctrl-D: a new text file
   disk_notes       shows /notes.txt and adds the lines you type
   ed notes.txt     edit a text file by lines (h lists its commands)
+  edit notes.txt   full-screen editor on the RGB screen (^G lists the keys)
   cp from to       copy a file, text or program
 
 On the RGB screen (the simulator window's tab): snake and

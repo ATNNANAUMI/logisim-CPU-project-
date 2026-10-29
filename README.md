@@ -143,7 +143,7 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 | `compiler/src/disk/` | disk tool: makes and edits disk images (TFS1 filesystem) for the simulator's `--disk` |
 | `compiler/src/img/` | image converter: PNG -> compressed picture for `gfx_image()` (`gfx.h`); `video.py`: a video -> frames for `video_player.c` |
 | `compiler/libc/` | the C library: headers (`include/`), C and assembly sources |
-| `os/` | the OS, Tynix (simulator only): `shell.c`, a command shell in ROM that runs programs from the disk; `ed.c`, a line editor; `make_disk.py`, a disk with `ed` and the C examples in `/bin` |
+| `os/` | the OS, Tynix (simulator only): `shell.c`, a command shell in ROM that runs programs from the disk; `ed.c`, a line editor; `edit.c`, a full-screen editor on the RGB screen; `make_disk.py`, a disk with `ed`, `edit` and the C examples in `/bin` |
 | `compiler/examples/` | example programs: `asm/` (programs, the standard library `stdlib/stdlib.asm`, `tests/` circuit diagnostics) and `c/` in folders by kind (`basics/`, `games/`, `graphics/`, `tests/`, `os/`) |
 | `compiler/ROM/` | build output for ROM images (ignored by git) |
 | `compiler/assembly_syntax.md` | full assembly language reference |

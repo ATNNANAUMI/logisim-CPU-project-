@@ -966,12 +966,12 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 15 checks: format (sparse, the superblock), text and
+python compiler/src/disk/selftest.py  # 16 checks: format (sparse, the superblock), text and
                                       # binary round trips (block edges), overwriting frees
                                       # blocks, a directory past one block (entries reused),
                                       # subdirectories, . and .., mv, name rules, disk full, CLI,
                                       # fsck, the C library on the simulator against fs.py, `stat()` against fs.py,
-                                      # the shell and the `ed` editor run on a disk,
+                                      # the shell and the `ed` and `edit` editors run on a disk,
                                       # (each reads what the other wrote; fsck clean after),
                                       # and spawnv(): a --exe program put on the disk, run
                                       # three times (arguments, exit status, fresh variables,
@@ -1430,7 +1430,8 @@ no multitasking.
 | --- | --- |
 | `os/shell.c` | the OS's ROM: a command shell, built like any C program (18,793 words of ROM, 2,925 of RAM) |
 | `os/ed.c` | a line editor for text files, a program for `/bin` (15.8K words; section 11.1) |
-| `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `os/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples and `ed`, 2.8K–17.4K words each, in under a second |
+| `os/edit.c` | a full-screen editor on the RGB screen, a program for `/bin` (section 11.2) |
+| `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `os/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples, `ed` and `edit`, 2.8K–17.4K words each, in under a second |
 
 ```
 python os/make_disk.py [IMG] [--new] [--size MB]
@@ -1517,4 +1518,25 @@ A range is `N`, `N,M`, `.` (the current line), `$` (the last), or `,`
 `not found: x`). Lines are at most 255 chars (the same limit as the shell's
 line). The self-check `editor` (disk suite) drives it through the shell and
 reads the file back with `fs.py`.
+
+### 11.2 The full-screen editor: `edit` (`os/edit.c`)
+
+`edit notes.txt` shows the text on the RGB screen (128 x 128, 6 x 8 cells:
+21 columns, 15 text lines and a status line in inverted colours with the
+name, `*` when unsaved and `line:column`, or the last message). Keys come
+from the keyboard device (arrows 28-31 and Ctrl-A..Z 1..26, simulator only,
+8): printable keys insert, Enter splits, Backspace deletes or joins lines,
+arrows move (up/down keep the column), Ctrl-A / Ctrl-E start / end of line,
+Ctrl-B / Ctrl-F a page, Ctrl-K deletes the line, Ctrl-S saves, Ctrl-Q quits
+(unsaved: a warning, a second Ctrl-Q quits), Ctrl-G lists them. The same
+rules as `ed`: a missing file is made by saving, a binary file is refused,
+lines are at most 255 chars. Ctrl-D is left alone (it is the shell's end of
+input). The page is not redrawn on every key: `shown[][]` remembers what
+each cell displays and `refresh()` calls `gfx_char` only for cells that
+differ (the cursor is a cell drawn inverted), so a typed char costs a few
+cells. The screen can't be read back, which is why the cells are
+remembered. The text is scrolled by `top` and `left` to keep the cursor
+visible. The self-check `screen_editor` (disk suite) types a session
+through the shell, reads the file back with `fs.py`, and checks the screen
+holds text while it runs and is blank after.
 

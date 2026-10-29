@@ -727,6 +727,55 @@ def check_editor():
     return f"{cpu.instructions} instructions"
 
 
+def _a(n):
+    return chr(n)
+
+
+SCREEN_KEYS = ("edit /s.txt\n"
+               "abc\ndef\nghi"                    # three lines
+               + _a(30) + _a(30) + _a(30) + "X"   # left x3 -> start of "ghi"... then insert
+               + _a(28) + _a(5) + "\n"            # up, end of "def", Enter splits (empty line)
+               + "k"                              # new line "k"
+               + _a(8) + _a(8)                    # Backspace twice: removes k, then joins up
+               + _a(11)                           # Ctrl-K deletes the line "def"
+               + _a(19)                           # Ctrl-S
+               + _a(17)                           # Ctrl-Q (saved, so it quits at once)
+               + "cat /s.txt\n"
+               "edit /s.txt\n" "Z" + _a(17)      # unsaved: warns, a second ^Q quits
+               + _a(17) + "cat /s.txt\n"
+               "edit /bin/echo\n"
+               "halt\n")
+
+
+def check_screen_editor():
+    """os/edit.c as a program from /bin: insert, arrows, Enter, Backspace
+    (also joining lines), Ctrl-K, Ctrl-S, the unsaved-changes warning, a
+    binary file refused; the file read back with fs.py, text drawn on the
+    RGB screen while it runs and the screen blank after it quits."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "os"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # os/
+
+    image = os.path.join(TMP.name, "screen_editor.img")
+    make_disk.make(image, programs=["echo", "edit"], new=True, size_mb=1, log=lambda _: None)
+    shell, _ = driver.build([str(root / "os" / "shell.c")])
+    # while it runs: stop inside the editor and look at the screen
+    cpu, _ = driver.run_in_simulator(shell.rom, "edit /s.txt\nabc\ndef", 12_000_000, disk=image)
+    assert not cpu.halted and any(cpu.bus.video.pixels), "nothing drawn"
+    cpu, text = driver.run_in_simulator(shell.rom, SCREEN_KEYS, 80_000_000, disk=image)
+    assert cpu.halted, text
+    assert text.count("abc\nXghi\n") == 2 and "Z" not in text, text
+    assert "/bin/echo: not a text file" in text, text
+    assert not any(cpu.bus.video.pixels), "screen not blank after quitting"
+    with FileSystem(image) as disk:
+        assert disk.get("/s.txt") == b"abc\nXghi\n", disk.get("/s.txt")
+        assert disk.check() == [], disk.check()
+    return f"{cpu.instructions} instructions"
+
+
 CHECKS = [
     check_format,
     check_text_round_trip,
@@ -743,6 +792,7 @@ CHECKS = [
     check_spawn,
     check_shell,
     check_editor,
+    check_screen_editor,
 ]
 
 

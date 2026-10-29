@@ -241,6 +241,17 @@ The language itself is described in [`c_language.md`](c_language.md).
     RAM 33 → 358 (the three `FILE`s of `file.c`). The program's `stderr`
     and the echo of keys it reads (`getchar.c`) stay on the display.
 
+### The full-screen editor (2026-10-29, OS roadmap Phase 5 B)
+
+50. **`edit` draws only the cells that changed.** The RGB screen can't be
+    read back, so the program keeps `shown[][]` (21 x 16 chars plus an
+    inverted bit) and `gfx_char`s only the cells that differ from what it
+    wants. The cursor is a cell drawn inverted, not a separate overlay.
+    Keys: Ctrl-S / Ctrl-Q like most editors; Ctrl-D stays unused because it
+    ends the shell's input. Guess: the circuit's keyboard may not buffer
+    control codes (see TECHNICAL 8), so on the circuit only the arrow-less,
+    printable part would work.
+
 ## Measured on the circuit while doing this
 
 * `diag12`/`diag13`: the carry flag is a *borrow* for `SUB`, and `CMP`,
