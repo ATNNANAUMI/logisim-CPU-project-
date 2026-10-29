@@ -224,7 +224,7 @@ power function is `ipow`, so it doesn't clash with C's `pow`.)
 | | |
 | --- | --- |
 | `show_hex(v)` | shows v on the 8-digit hex display (device `0x3C`) |
-| `key_pressed()` | the next key if one was typed, else 0: no waiting, no echo |
+| `key_pressed()` | the next key if one was typed, else 0: no waiting, no echo. Besides printable ASCII, `'\n'` and `'\b'`: `KEY_UP`, `KEY_DOWN`, `KEY_LEFT`, `KEY_RIGHT` (28–31) and Ctrl-A … Ctrl-Z as 1 … 26 (`KEY_CTRL('s')`); simulator only so far |
 | `wait_key()` | waits for one key and returns it, no echo |
 | `wait_ms(ms)` | does nothing for `ms` milliseconds (the timer, device `0x7C`) |
 | `device_out(d, v)` / `device_in(d)` | raw `COMM` to any device (`__builtin_out`, `__builtin_in`) |
@@ -312,7 +312,8 @@ define its own function with a library name (it is used instead).
   `sscanf`, `vscanf`, `vsscanf`, `fscanf`, `vfscanf`. The keyboard is read a line at
   a time, like a terminal: keys are shown as they are typed, backspace
   removes the last one, and the program gets the line after Enter.
-  **Ctrl-D** (`0x04`) at the start of a line is end of file. `scanf`
+  **Ctrl-D** (`0x04`) at the start of a line is end of file; the other
+  control keys (arrows, Ctrl-letters) are ignored by line input. `scanf`
   supports `%d %i %u %o %x %c %s %[...] %f %e %g %n` with `*` and widths.
 * **Files** are on the disk (simulator only: `cc run --disk FILE` or the
   window's `disk` button, on an image made with `python compiler/src/disk

@@ -214,7 +214,7 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 | --- | --- | --- |
 | `0x5C` | text display (TTY) | prints the low 7 bits as ASCII; `0x0A` newline, `0x08` backspace, `0x0C` (form feed) clears it (Logisim's `TTY` does this; read in its code, not run on the circuit) |
 | `0x3C` | number display | latches the 32-bit word and shows it on 8 hex digits (the simulator shows it in the window, and as `HEX DISPLAY:` in headless output) |
-| `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08` |
+| `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08`, printable ASCII as itself; simulator only so far: arrows up/down/left/right = 28/29/30/31, Ctrl-A … Ctrl-Z = 1 … 26 (Ctrl-D = 4; Ctrl-H, Ctrl-J, Ctrl-M are Backspace and Enter; Ctrl-C and Ctrl-V stay with the window) |
 | `0x6C` | RGB screen | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; on the 128×128 RGB Video only the low 7 bits of x and y are wired. Write-only |
 | `0x6D` | RGB screen clear (*simulator only*) | any word pulses the RGB Video's reset: all black. Not built on the circuit yet, where it does nothing |
 | `0x7C` | timer (*planned*) | `INDATA` reads the milliseconds since reset, wrapping at 32 bits; C's `clock()` |
@@ -443,7 +443,7 @@ modules import each other by plain name, so run them as scripts
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 24 checks on the core |
+| `selftest.py` | 25 checks on the core |
 
 ### 3.2 Execution model
 
@@ -517,7 +517,7 @@ the end (lines in a deeper frame, EBP above the current one, don't count),
 `debuginfo.py`.
 
 The keyboard field is read-only: every key goes straight into the buffer
-(Enter as `0x0A`, Backspace as `0x08`, other printable ASCII as itself).
+(Enter as `0x0A`, Backspace as `0x08`, printable ASCII as itself, the arrows as 28–31, Ctrl+letter as 1–26; `key_code()` in `devices.py`).
 Pasting types the clipboard one key at a time. The field shows the keys still
 waiting to be read.
 
@@ -941,9 +941,9 @@ python compiler/src/asm/selftest.py   # 20 checks: encodings, values, strings, j
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 24 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 25 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
-                                      # floats, FCMP flags, keyboard, backspace, the display's
+                                      # floats, FCMP flags, keyboard, backspace, key codes (arrows, Ctrl), the display's
                                       # backspace and form feed, ADDR/JMRB,
                                       # float specials, float SHL, run() against step()
                                       # on random code, run() stopping at breakpoints,
@@ -1146,6 +1146,7 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 
 | topic | simulator | circuit |
 | --- | --- | --- |
+| keyboard codes 28–31 (arrows) and 1–26 (Ctrl+letter) | buffered (`devices.key_code`) | **not measured**: the Logisim `Keyboard` gives 7-bit ASCII, but whether it buffers control characters, or arrow keys at all, is unknown (a diagnostic that echoes `INDATA` as hex would tell) |
 | `A` signed, `SHR` logical, `DIV`/`MOD` truncate, stack wraps | as in 3.4 | confirmed (2026-10-02) |
 | `INT` (float → int) | truncates toward zero | confirmed: truncates (`diag10.asm`, `diag11.asm`) |
 | `STK SET/GET`: where `EBP + RB` lands | wraps at 16 bits, across all of RAM | confirmed (`diag11.asm`, `diag16.asm`, 2026-10-13). The simulator used to wrap it at 14 bits, inside the stack area; it now matches the circuit |

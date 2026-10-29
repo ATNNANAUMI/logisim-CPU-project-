@@ -39,6 +39,8 @@ static void read_line(void)
         }
         if (c == '\r')
             c = '\n';
+        if (c < ' ' && c != '\b' && c != '\n')
+            continue;                   /* arrows, Ctrl keys: for programs that read keys */
         if (c == '\b' || c == 127) {
             if (len > 0) {
                 len--;

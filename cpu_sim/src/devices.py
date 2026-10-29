@@ -55,6 +55,39 @@ class Display:
         self.col = 0
 
 
+KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT = 28, 29, 30, 31
+ARROW_KEYS = {"Up": KEY_UP, "Down": KEY_DOWN, "Left": KEY_LEFT, "Right": KEY_RIGHT}
+# Ctrl+C and Ctrl+V stay with Tk (copy, paste); Tab and Esc are not keys of the buffer
+TK_CTRL_KEYS = (0x03, 0x16)
+
+
+def key_code(keysym: str, char: str) -> int | None:
+    """What the keyboard buffer gets for a key, or None to ignore it (Tk keeps it).
+
+    Printable ASCII is itself; Enter 0x0A, Backspace 0x08; the arrows 28 (up),
+    29 (down), 30 (left), 31 (right); Ctrl+letter its ASCII code (Ctrl-A 1 ...
+    Ctrl-Z 26, so Ctrl-D is 4, Ctrl-H is Backspace and Ctrl-J, Ctrl-M are
+    Enter), except Ctrl-C and Ctrl-V.  Tab, Esc, Delete, function keys and the
+    rest give nothing.  Simulator only: whether the circuit's Keyboard
+    component buffers control codes is not measured (TECHNICAL 8).
+    """
+    if keysym in ("Return", "KP_Enter"):
+        return 0x0A
+    if keysym == "BackSpace":
+        return 0x08
+    if keysym in ARROW_KEYS:
+        return ARROW_KEYS[keysym]
+    if keysym in ("Tab", "ISO_Left_Tab", "Escape", "Delete"):
+        return None
+    if len(char) == 1:
+        code = ord(char)
+        if 32 <= code < 127:
+            return code
+        if 1 <= code <= 26 and code not in TK_CTRL_KEYS:
+            return 0x0A if code == 0x0D else code
+    return None
+
+
 class Keyboard:
     """Buffer at 0xF0, like Logisim's Keyboard component.
 
