@@ -75,7 +75,7 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       13 checks (incl. the C library's files on the simulator against fs.py, spawnv, os/shell.c)
+│   │   └── selftest.py       15 checks (incl. the C library's files on the simulator against fs.py, stat, spawnv, os/shell.c, os/ed.c)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), setjmp.asm,
 │   │                         spawn.c + spawn.asm (spawnv: load a --exe program from the disk, run it, come back)
@@ -106,9 +106,10 @@ logisim-CPU-project-/
 │
 ├── os/                       the OS, Tynix (simulator only), CP/M / DOS style: one program at a time
 │   ├── shell.c               the OS's ROM: checks the disk, prompts with the current directory; built-ins help ls
-│   │                         cd pwd cat echo rm mv mkdir rmdir df clear halt (> and >> to a file); any other
+│   │                         cd pwd cat echo rm mv cp mkdir rmdir df clear halt (> and >> to a file); any other
 │   │                         name runs /bin/NAME (or a path) with spawnv() and waits
-│   └── make_disk.py          os/disk.img (git-ignored): TFS1, the C examples built --exe in /bin, /readme.txt
+│   ├── ed.c                  a line editor for text files (a program for /bin: a, i, c, d, p, s, /find, w, q)
+│   └── make_disk.py          os/disk.img (git-ignored): TFS1, ed and the C examples built --exe in /bin, /readme.txt
 │
 └── cpu_sim/
     ├── src/                  simulator (modules import each other by plain name: run as scripts)
@@ -116,12 +117,12 @@ logisim-CPU-project-/
     │   ├── isa.py            decode(), disassemble(), opcode tables
     │   ├── alu.py            int_op(), float_op() → (R0 value, flags)
     │   ├── memory.py         ROM/RAM banks, v2.0 raw loader
-    │   ├── devices.py        Display (0x5C; form feed clears it), Keyboard (0xF0, empty reads 0), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), Disk (0x8C seek/size, 0x8D data; mmap of a file), DeviceBus (+ hex display value, 0x3C)
+    │   ├── devices.py        Display (0x5C; form feed clears it), Keyboard (0xF0, empty reads 0; `key_code()`: arrows 28–31, Ctrl+letter 1–26), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), Disk (0x8C seek/size, 0x8D data; mmap of a file), DeviceBus (+ hex display value, 0x3C)
     │   ├── cpu.py            CPU: step() (traced), run() (fast loop), reset(), stack ops, COMM
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG]`
-    │   └── selftest.py       24 checks
+    │   └── selftest.py       25 checks
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -244,7 +245,7 @@ The design follows the "But How Do It Know?" style: a single bus,
 * Files: `fopen` & co. on the `--disk` image (TFS1, needs `python compiler/src/disk
   format`); text files packed 4 chars a word, `"b"` files a word per char (a word
   can equal EOF: use `fread`/`feof`); `dirent.h`, `unistd.h` (mkdir, chdir, getcwd),
-  `sys/statvfs.h` (free space);
+  `sys/statvfs.h` (free space), `sys/stat.h` (`stat`: type, text or binary, size);
   `fs.c` is linked only into programs that call `fopen`. Paths `/a/b` or relative.
 * Programs for the OS: `cc build --exe` links for RAM at `0x1100000` (code and
   data together) and writes a TEX1 `.exe` (5-word header + words); `spawnv(path,

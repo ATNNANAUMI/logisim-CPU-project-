@@ -224,7 +224,7 @@ power function is `ipow`, so it doesn't clash with C's `pow`.)
 | | |
 | --- | --- |
 | `show_hex(v)` | shows v on the 8-digit hex display (device `0x3C`) |
-| `key_pressed()` | the next key if one was typed, else 0: no waiting, no echo |
+| `key_pressed()` | the next key if one was typed, else 0: no waiting, no echo. Besides printable ASCII, `'\n'` and `'\b'`: `KEY_UP`, `KEY_DOWN`, `KEY_LEFT`, `KEY_RIGHT` (28–31) and Ctrl-A … Ctrl-Z as 1 … 26 (`KEY_CTRL('s')`); simulator only so far |
 | `wait_key()` | waits for one key and returns it, no echo |
 | `wait_ms(ms)` | does nothing for `ms` milliseconds (the timer, device `0x7C`) |
 | `device_out(d, v)` / `device_in(d)` | raw `COMM` to any device (`__builtin_out`, `__builtin_in`) |
@@ -292,7 +292,7 @@ by `<stdarg.h>` and `<stddef.h>`), `__builtin_expect(e, c)`,
 Headers: `assert.h`, `cpu.h`, `ctype.h`, `dirent.h`, `errno.h`, `float.h`,
 `gfx.h`, `inttypes.h`, `iso646.h`, `limits.h`, `locale.h`, `math.h`,
 `setjmp.h`, `signal.h`, `stdalign.h`, `stdarg.h`, `stdbool.h`, `stddef.h`,
-`stdint.h`, `stdio.h`, `stdlib.h`, `stdnoreturn.h`, `string.h`, `sys/statvfs.h`,
+`stdint.h`, `stdio.h`, `stdlib.h`, `stdnoreturn.h`, `string.h`, `sys/stat.h`, `sys/statvfs.h`,
 `time.h`, `unistd.h`.
 
 Only the library files a program uses are linked in, and a program may
@@ -312,7 +312,8 @@ define its own function with a library name (it is used instead).
   `sscanf`, `vscanf`, `vsscanf`, `fscanf`, `vfscanf`. The keyboard is read a line at
   a time, like a terminal: keys are shown as they are typed, backspace
   removes the last one, and the program gets the line after Enter.
-  **Ctrl-D** (`0x04`) at the start of a line is end of file. `scanf`
+  **Ctrl-D** (`0x04`) at the start of a line is end of file; the other
+  control keys (arrows, Ctrl-letters) are ignored by line input. `scanf`
   supports `%d %i %u %o %x %c %s %[...] %f %e %g %n` with `*` and widths.
 * **Files** are on the disk (simulator only: `cc run --disk FILE` or the
   window's `disk` button, on an image made with `python compiler/src/disk
@@ -340,6 +341,12 @@ listed), `closedir`, at most 4 open. Errors set `errno`: `ENOENT`,
 `ENAMETOOLONG`, `EINVAL`, `EBUSY` (the root), with Linux's numbers;
 `strerror` and `perror` print them.
 
+**sys/stat.h:** `stat(path, &st)` gives `st_mode` (`S_ISDIR`, `S_ISREG`, and
+the non-standard `S_ISTEXT`: a text file, packed 4 chars a word, as opposed to
+a binary one), `st_size` (chars for a text file, words for a binary one, the
+words of the entries for a directory), `st_ino` (the first block), `st_blocks`,
+`st_nlink` (1) and `st_blksize` (256). No times, owners or permissions.
+
 **sys/statvfs.h:** `statvfs(path, &s)` gives the disk's size and free
 space in blocks of `f_bsize` (256) chars: `f_blocks`, `f_bfree` (=
 `f_bavail`), `f_namemax` (127); `f_files` and friends are 0. It reads the
@@ -351,7 +358,10 @@ for it and returns its exit status (like DOS's `spawnv(P_WAIT, ...)`), or
 -1 with `errno` set when it can't be loaded: `ENOENT`, `EISDIR`, or
 `ENOEXEC` (not a program). It starts in the current directory. Close the
 files you have open first: the caller's open `FILE`s don't see the
-program's changes. A `--exe` program can't call `spawnv` (the build
+program's changes. `spawnv_to(path, argv, out)` is the same with the
+program's `stdout` (what `printf`, `putchar` and `puts` write) going to the
+open `FILE` `out` instead of the display (the shell's `>`); `stderr` and the
+keyboard echo stay on the display. A `--exe` program can't call `spawnv` (the build
 refuses). `os/shell.c` (TECHNICAL §11) is a shell built on it.
 
 **stdlib.h:** `malloc`, `calloc`, `realloc`, `free` (first fit, from
@@ -399,7 +409,7 @@ On the circuit every instruction counts (about 160 a second). The compiler:
 
 Things that help: use local variables for loop counters and pointers (not
 globals, not variables whose address is taken); avoid `printf` in loops
-(`putchar`/`puts` are much cheaper); prefer `int` to `float` when you can.
+(`putchar`/`puts` are cheaper); prefer `int` to `float` when you can.
 A call costs about 20-30 instructions. Unsigned division by a variable
 calls a helper; signed division is one instruction.
 

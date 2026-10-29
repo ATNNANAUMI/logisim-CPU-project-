@@ -27,6 +27,15 @@
 #define DISK_SEEK_DEVICE 0x8C
 #define DISK_DATA_DEVICE 0x8D
 
+/* what key_pressed() and wait_key() return besides printable ASCII, '\n'
+   (Enter) and '\b' (Backspace): the arrows, and Ctrl-A ... Ctrl-Z as 1 ... 26
+   (Ctrl-D is 4). Simulator only so far; getchar and scanf ignore them. */
+#define KEY_UP 28
+#define KEY_DOWN 29
+#define KEY_LEFT 30
+#define KEY_RIGHT 31
+#define KEY_CTRL(letter) ((letter) & 0x1F)      /* KEY_CTRL('s') is 19 */
+
 #define device_out(d, v) __builtin_out((d), (v))
 #define device_in(d) __builtin_in(d)
 #define halt() __builtin_trap()

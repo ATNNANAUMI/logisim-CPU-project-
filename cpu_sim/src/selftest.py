@@ -173,6 +173,21 @@ def test_keyboard_backspace_is_a_key():
     assert (cpu.regs[2], cpu.regs[3]) == (ord("7"), 0x08)
 
 
+def test_key_codes():
+    from devices import key_code
+    assert key_code("a", "a") == ord("a") and key_code("space", " ") == 32 and key_code("asciitilde", "~") == 126
+    assert key_code("Return", "\r") == 10 and key_code("KP_Enter", "\r") == 10 and key_code("BackSpace", "\x08") == 8
+    assert [key_code(k, "") for k in ("Up", "Down", "Left", "Right")] == [28, 29, 30, 31]
+    assert key_code("d", "\x04") == 4 and key_code("s", "\x13") == 19 and key_code("z", "\x1a") == 26
+    assert key_code("h", "\x08") == 8 and key_code("j", "\n") == 10 and key_code("m", "\r") == 10
+    for keysym, char in (("c", "\x03"), ("v", "\x16"), ("Tab", "\t"), ("Escape", "\x1b"),
+                         ("Delete", "\x7f"), ("F1", ""), ("Home", ""), ("e", "\xe9")):
+        assert key_code(keysym, char) is None, (keysym, char)
+    # a program sees the arrow as 30, then 0 (empty buffer)
+    cpu = run([0x0301, 0xF0, 0x0811, 0x0802, 0x0803, 0x0F00], keys=chr(30))
+    assert (cpu.regs[2], cpu.regs[3]) == (30, 0)
+
+
 def test_display_controls():
     # "ab", backspace, "c", newline, "x", form feed (clears it, like Logisim's TTY), "d"
     # DATA R1,0x5C ; COMM OUTADDR,R1 ; then DATA R2,char ; COMM OUTDATA,R2 for each

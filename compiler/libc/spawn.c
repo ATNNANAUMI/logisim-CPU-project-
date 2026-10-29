@@ -12,8 +12,9 @@
  *   then the n words, which go to the load address
  *
  * spawnv() copies the program there and jumps to its entry with R1 = a
- * block of four words: argc, argv, the address its _Exit jumps back to
- * (with R0 = the status), and the caller's current directory. The program's
+ * block of five words: argc, argv, the address its _Exit jumps back to
+ * (with R0 = the status), the caller's current directory, and a put
+ * function for stdout (0: the display; see spawnv_to). The program's
  * start-up code (driver.py's crt0 for --exe) reads them; it has its own
  * copy of the C library, and the stack is the caller's, above its frame.
  * The program's exit(), or the end of its main(), comes back here through
@@ -23,6 +24,7 @@
  * for the OS can't call spawnv() itself (the build refuses), and the caller
  * keeps its own variables and heap below PROGRAM_BASE (crt0's _heap_end).
  */
+#include <stdio.h>
 #include <string.h>
 #include <errno.h>
 #include <setjmp.h>
@@ -39,9 +41,22 @@ int _spawn_status;
 void _spawn_jump(unsigned entry, unsigned *block);     /* spawn.asm */
 void _spawn_return(void);
 
-static unsigned block[4];
+static unsigned block[5];
+static FILE *spawn_out;
+
+/* what the program's stdout calls when spawnv_to() was given a file: the
+   caller's own fputc, the caller's file */
+static int spawn_put(int c, FILE *unused)
+{
+    return fputc(c, spawn_out);
+}
 
 int spawnv(const char *path, char *const argv[])
+{
+    return spawnv_to(path, argv, 0);
+}
+
+int spawnv_to(const char *path, char *const argv[], FILE *out)
 {
     unsigned head[EXE_HEADER], load, n, zero;
     int argc = 0;
@@ -74,6 +89,8 @@ int spawnv(const char *path, char *const argv[])
     block[1] = (unsigned)argv;
     block[2] = (unsigned)_spawn_return;
     block[3] = (unsigned)_fs_cwd;
+    spawn_out = out;
+    block[4] = out ? (unsigned)spawn_put : 0;
     if (setjmp(_spawn_back) == 0)
         _spawn_jump(head[3], block);
     _fs_forget();               /* the program may have changed the disk */

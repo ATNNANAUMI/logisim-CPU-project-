@@ -10,6 +10,7 @@ import alu as alu
 import config as config
 from cpu import CPU
 from debuginfo import DebugInfo, step_line, step_out
+from devices import key_code
 from isa import decode, disassemble
 from memory import load_image
 
@@ -44,29 +45,11 @@ def parse_word(text: str) -> int:
     return int(text, 0) & config.WORD_MASK
 
 
-def key_code(keysym: str, char: str) -> int | None:
-    """What Logisim's Keyboard would buffer for a key, or None to ignore it.
-
-    Enter gives 0x0A, Backspace 0x08 and Ctrl-D 0x04 (end of input for
-    getchar() and the programs in the OS's /bin); any other key counts only
-    if it types a printable ASCII character (Tab, arrows, other Ctrl+... are
-    ignored).
-    """
-    if keysym in ("Return", "KP_Enter"):
-        return 0x0A
-    if keysym == "BackSpace":
-        return 0x08
-    if char == "\x04":
-        return 0x04
-    if len(char) == 1 and 32 <= ord(char) < 127:
-        return ord(char)
-    return None
-
-
 def buffer_text(codes) -> str:
     """The keys waiting in the buffer, with Enter and Backspace made visible."""
-    shown = {0x0A: "⏎", 0x08: "⌫"}
-    return "".join(shown.get(c, chr(c) if 32 <= c < 127 else "·") for c in codes)
+    shown = {0x0A: "⏎", 0x08: "⌫", 28: "↑", 29: "↓", 30: "←", 31: "→"}
+    return "".join(shown.get(c, chr(c) if 32 <= c < 127 else "^" + chr(c + 64) if 0 < c < 27 else "·")
+                   for c in codes)
 
 
 class MemoryPane(ttk.Frame):

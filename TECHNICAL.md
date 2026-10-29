@@ -214,7 +214,7 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 | --- | --- | --- |
 | `0x5C` | text display (TTY) | prints the low 7 bits as ASCII; `0x0A` newline, `0x08` backspace, `0x0C` (form feed) clears it (Logisim's `TTY` does this; read in its code, not run on the circuit) |
 | `0x3C` | number display | latches the 32-bit word and shows it on 8 hex digits (the simulator shows it in the window, and as `HEX DISPLAY:` in headless output) |
-| `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08` |
+| `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08`, printable ASCII as itself; simulator only so far: arrows up/down/left/right = 28/29/30/31, Ctrl-A … Ctrl-Z = 1 … 26 (Ctrl-D = 4; Ctrl-H, Ctrl-J, Ctrl-M are Backspace and Enter; Ctrl-C and Ctrl-V stay with the window) |
 | `0x6C` | RGB screen | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; on the 128×128 RGB Video only the low 7 bits of x and y are wired. Write-only |
 | `0x6D` | RGB screen clear (*simulator only*) | any word pulses the RGB Video's reset: all black. Not built on the circuit yet, where it does nothing |
 | `0x7C` | timer (*planned*) | `INDATA` reads the milliseconds since reset, wrapping at 32 bits; C's `clock()` |
@@ -443,7 +443,7 @@ modules import each other by plain name, so run them as scripts
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 24 checks on the core |
+| `selftest.py` | 25 checks on the core |
 
 ### 3.2 Execution model
 
@@ -517,7 +517,7 @@ the end (lines in a deeper frame, EBP above the current one, don't count),
 `debuginfo.py`.
 
 The keyboard field is read-only: every key goes straight into the buffer
-(Enter as `0x0A`, Backspace as `0x08`, other printable ASCII as itself).
+(Enter as `0x0A`, Backspace as `0x08`, printable ASCII as itself, the arrows as 28–31, Ctrl+letter as 1–26; `key_code()` in `devices.py`).
 Pasting types the clipboard one key at a time. The field shows the keys still
 waiting to be read.
 
@@ -941,9 +941,9 @@ python compiler/src/asm/selftest.py   # 20 checks: encodings, values, strings, j
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 24 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 25 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
-                                      # floats, FCMP flags, keyboard, backspace, the display's
+                                      # floats, FCMP flags, keyboard, backspace, key codes (arrows, Ctrl), the display's
                                       # backspace and form feed, ADDR/JMRB,
                                       # float specials, float SHL, run() against step()
                                       # on random code, run() stopping at breakpoints,
@@ -964,11 +964,12 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 13 checks: format (sparse, the superblock), text and
+python compiler/src/disk/selftest.py  # 15 checks: format (sparse, the superblock), text and
                                       # binary round trips (block edges), overwriting frees
                                       # blocks, a directory past one block (entries reused),
                                       # subdirectories, . and .., mv, name rules, disk full, CLI,
-                                      # fsck, and the C library on the simulator against fs.py
+                                      # fsck, the C library on the simulator against fs.py, `stat()` against fs.py,
+                                      # the shell and the `ed` editor run on a disk,
                                       # (each reads what the other wrote; fsck clean after),
                                       # and spawnv(): a --exe program put on the disk, run
                                       # three times (arguments, exit status, fresh variables,
@@ -1145,6 +1146,7 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 
 | topic | simulator | circuit |
 | --- | --- | --- |
+| keyboard codes 28–31 (arrows) and 1–26 (Ctrl+letter) | buffered (`devices.key_code`) | **not measured**: the Logisim `Keyboard` gives 7-bit ASCII, but whether it buffers control characters, or arrow keys at all, is unknown (a diagnostic that echoes `INDATA` as hex would tell) |
 | `A` signed, `SHR` logical, `DIV`/`MOD` truncate, stack wraps | as in 3.4 | confirmed (2026-10-02) |
 | `INT` (float → int) | truncates toward zero | confirmed: truncates (`diag10.asm`, `diag11.asm`) |
 | `STK SET/GET`: where `EBP + RB` lands | wraps at 16 bits, across all of RAM | confirmed (`diag11.asm`, `diag16.asm`, 2026-10-13). The simulator used to wrap it at 14 bits, inside the stack area; it now matches the circuit |
@@ -1340,9 +1342,12 @@ leads to after an unconditional jump.
   magic). `spawnv()` (`spawn.c`) checks the header, copies the words with
   `_fs_read` (one seek a block, about 14 instructions a word), zeroes the
   variables, and jumps to the entry with R1 = a block: argc, argv, the
-  address to go back to, its current directory. That crt0 keeps the block,
-  calls the `_init_` routines and `_fs_inherit(cwd)` (when `fs.c` is linked),
-  then `main(argc, argv)`; its `_Exit` jumps back to `spawn.asm`'s
+  address to go back to, its current directory, and a `put` function for
+  stdout (0: the display; `spawnv_to(path, argv, out)` gives one that writes
+  to the caller's open `FILE`, which is how the shell's `>` works for
+  programs). That crt0 keeps the block, calls the `_init_` routines,
+  `_fs_inherit(cwd)` (when `fs.c` is linked) and `_set_stdout(put)` (when
+  `file.c` is), then `main(argc, argv)`; its `_Exit` jumps back to `spawn.asm`'s
   `_spawn_return` with R0 = the status, which `longjmp`s to the stack
   `spawnv()` had, so `exit()` works at any depth. The program has its own
   copy of the library (its own heap, from its `_end` to the end of RAM, and
@@ -1358,7 +1363,7 @@ leads to after an unconditional jump.
 `compiler/libc/` holds the headers (`include/`), the library in C (one file
 per group of functions: `printf.c`, `format.c`, `fdigits.c`, `scanf.c`,
 `string.c`, `malloc.c`, `math.c`, `gfx.c`, `gfx_text.c` and `gfx_image.c` for the RGB
-screen, `fs.c` (files on the disk, TFS1 as in 7.6, and `statvfs`) and `dir.c`
+screen, `fs.c` (files on the disk, TFS1 as in 7.6, `stat` and `statvfs`) and `dir.c`
 (directories), ...), `local.h` (shared by the library
 files only) and three assembly files: `runtime.asm` (`_pow2`, `_udiv`,
 `_umod`), `setjmp.asm`, and `spawn.asm` (the jumps of `spawn.c`'s `spawnv`,
@@ -1378,7 +1383,7 @@ files only) and three assembly files: `runtime.asm` (`_pow2`, `_udiv`,
 * `FILE` (in `local.h`) carries `get`/`put`/`flush` pointers that `fopen`
   sets; `file.c`, `getchar.c`, `format.c` and `scanf.c` call them for
   files on the disk, so `fs.c` is linked only into programs that call
-  `fopen` or `statvfs` (c_decisions 33–35).
+  `fopen`, `stat` or `statvfs` (c_decisions 33–35).
 * `format.c` prints floats exactly: `fdigits.c` turns the float's exact
   value into decimal digits (base-10000 pieces for big integer parts, a
   160-bit binary fraction for the rest) and rounds ties to even.
@@ -1421,8 +1426,9 @@ no multitasking.
 
 | file | what it is |
 | --- | --- |
-| `os/shell.c` | the OS's ROM: a command shell, built like any C program (17,833 words of ROM, 2,923 of RAM) |
-| `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples, 2.8K–17.4K words each, in under a second |
+| `os/shell.c` | the OS's ROM: a command shell, built like any C program (18,793 words of ROM, 2,925 of RAM) |
+| `os/ed.c` | a line editor for text files, a program for `/bin` (15.8K words; section 11.1) |
+| `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `os/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples and `ed`, 2.8K–17.4K words each, in under a second |
 
 ```
 python os/make_disk.py [IMG] [--new] [--size MB]
@@ -1450,6 +1456,7 @@ Built-in commands (the `commands[]` table, which `help` also prints):
 | `echo [word...]` | the words, one space apart |
 | `rm path...` | `remove`: files and empty directories |
 | `mv from to` | `rename`; into `to` when that is a directory |
+| `cp from to` | a copy; into `to` when that is a directory. `stat()` says whether the source is a text file or binary (`fopen` `"r"`/`"w"` or `"rb"`/`"wb"`), so a program in `/bin` copies and still runs. Not a directory |
 | `mkdir dir...`, `rmdir dir...` | |
 | `df` | `statvfs("/")`: 1 KB blocks, used, free (it reads the whole FAT: 0.9 million instructions on 64 MB) |
 | `clear` | a form feed (12) to the text display, `gfx_clear()` for the RGB screen |
@@ -1467,10 +1474,45 @@ directory with the words as `argv`; the shell's variables and heap stay
 below `0x1100000`. When it ends, the shell prints `[NAME: exit status N]`
 if N isn't 0. If it can't be loaded the shell says `NAME: no such command`
 (a plain name not in `/bin`) or the path and `strerror` (`Exec format
-error` for a text file, `Is a directory`). `>` after a program is refused:
-the program has its own copy of the C library, whose `stdout` is the
-display.
+error` for a text file, `Is a directory`). `>` and `>>` work after a
+program too: the shell opens the file and passes it to `spawnv_to()`, and
+whatever the program writes to `stdout` (`printf`, `putchar`, `puts`,
+`fputs(stdout)`) goes to the file; its errors (`stderr`) and the echo of the
+keys it reads stay on the display. The program must not rewrite that file
+itself (the shell's `FILE` would not see it). If the program can't be
+loaded the file has been made (empty) anyway, as in a Unix shell.
 
 A program that never ends keeps the CPU: nothing can stop it from the
 outside. The examples `make_disk.py` puts in `/bin` end by themselves, on
 Ctrl-D (`grapher`, `qr`) or on `q` (`snake`, `game_of_life`).
+
+### 11.1 The editor: `ed` (`os/ed.c`)
+
+A line editor in the style of Unix's `ed`, a program in `/bin` (the text
+display is a teletype: append only, no cursor positioning, so a screen
+editor needs the RGB screen instead). `ed notes.txt` loads the file into
+memory a line at a time (`malloc`), the commands change that copy and `w`
+writes it back. A missing file starts empty and `w` makes it; a binary file
+(`stat()` without `S_ISTEXT`, 10.5) is refused, so a program can't be damaged
+by saving it as text.
+
+| command | what it does |
+| --- | --- |
+| `p [range]` | lines with numbers (no range: all); the last one becomes the current line |
+| `n` | the current line number, the line count, the file name |
+| `a [n]`, `i [n]` | type lines after / before line `n` (default: the current), end with a line holding only `.` or Ctrl-D |
+| `c [range]` | replace the lines with typed ones |
+| `d [range]` | delete the lines |
+| `[range]s/old/new/` | replace the first plain-text `old` in each line (the delimiter can be any char) |
+| `/text` | the next line containing `text`, wrapping round |
+| `N` | go to line `N` and print it |
+| `w [file]` | save (to `file`, which becomes the name), prints the chars written |
+| `q` | quit; with unsaved changes it warns once and a second `q` quits. Ctrl-D at the prompt does the same |
+| `h` | the list |
+
+A range is `N`, `N,M`, `.` (the current line), `$` (the last), or `,`
+(everything). Unlike ed's `?`, an error says what is wrong (`no such line`,
+`not found: x`). Lines are at most 255 chars (the same limit as the shell's
+line). The self-check `editor` (disk suite) drives it through the shell and
+reads the file back with `fs.py`.
+

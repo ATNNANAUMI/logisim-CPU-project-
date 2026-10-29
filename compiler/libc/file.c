@@ -14,6 +14,13 @@ FILE *stdin = &in_file;
 FILE *stdout = &out_file;
 FILE *stderr = &err_file;
 
+/* crt0 of a program for the OS, with the word the shell passed in the block:
+   put (or 0) is where the program's stdout goes (spawn.c, spawnv_to) */
+void _set_stdout(int (*put)(int, FILE *))
+{
+    out_file.put = put;
+}
+
 int fputc(int c, FILE *stream)
 {
     if (stream->put)

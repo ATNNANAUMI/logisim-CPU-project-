@@ -214,6 +214,33 @@ The language itself is described in [`c_language.md`](c_language.md).
     On a full 64 MB disk the first new block would have cost about 5.5
     million.
 
+### What the editor and `cp` needed (2026-10-28, OS roadmap Phase 5)
+
+47. **`stat()` is POSIX's, in `<sys/stat.h>`, plus one non-standard bit.**
+    The directory entry already tells a text file (packed, 4 chars a word)
+    from a binary one, and nothing in C could ask, so `S_ISTEXT(st_mode)`
+    (`S_ITEXT`, outside `S_IFMT`) says it. Not `S_ISTXT`: that is BSD's
+    sticky bit. `st_size` is the entry's length in its own unit (chars or
+    words), as `dirent`'s `d_size`. No times, owners or permissions: TFS1
+    keeps none. `cp` and the editor use it to open a file as it was made.
+48. **A binary word of -1 is `EOF`.** `fputc` returns the word it wrote, so
+    copying a program with `while (fputc(c, to) != EOF)` stops at the first
+    `0xFFFFFFFF`; `cp` checks `ferror` after the loop instead (the bug showed
+    when `cp /bin/echo /e2` made a file that wouldn't load).
+49. **A program's `>` is a `put` function in the block, not an `fopen` in
+    its crt0.** The shell opens the file and `spawnv_to(path, argv, out)`
+    puts the address of a `put` function in the block's fifth word; the
+    program's crt0 calls `_set_stdout(put)`, which sets `stdout`'s `put`, the
+    hook `fputc`/`fputs`/`fwrite` already follow for files. That function is
+    the *shell's*, in ROM at a fixed address, and writes to the shell's
+    `FILE`. The alternative (crt0 `fopen`s the path itself) would link `fs.c`
+    (about 4K words) into every program; this costs `file.c` instead.
+    `printf`, `putchar` and `puts` used to write to the display device
+    directly and now follow `stdout->put`. Measured on `echo`, `primes` and
+    `hello`: 4698/4811/4569 words before, 4905/4994/4776 after (+207 words),
+    RAM 33 → 358 (the three `FILE`s of `file.c`). The program's `stderr`
+    and the echo of keys it reads (`getchar.c`) stay on the display.
+
 ## Measured on the circuit while doing this
 
 * `diag12`/`diag13`: the carry flag is a *borrow* for `SUB`, and `CMP`,
