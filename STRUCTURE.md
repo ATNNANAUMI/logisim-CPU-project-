@@ -79,28 +79,29 @@ logisim-CPU-project-/
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), setjmp.asm,
 │   │                         spawn.c + spawn.asm (spawnv: load a --exe program from the disk, run it, come back)
-│   ├── examples/
-│   │   ├── programs/         hello, print_a-z, count_0-9, sum_1-10, abs_value, stack_reverse, echo (no stdlib); guess, untested (with stdlib)
-│   │   ├── stdlib/stdlib.asm             standard library (I/O, strings, memory, math, conversion)
-│   │   ├── stdlib/stdlib_demo.asm        uses every stdlib function except input
-│   │   ├── stdlib/stdlib_input_demo.asm  read_line / read_int / read_float / read_char
-│   │   ├── stdlib/stdlib_more_demo.asm   the functions added 2026-10-03 (no typing, no hex display)
-│   │   ├── two_files/main.asm, lib.asm   multi-file linking example
-│   │   ├── c/                C examples: hello, primes, structs, guess (input), gfx_demo (RGB screen); circuit_test (self-checking, for the circuit)
-│   │   │                     image_demo (gfx_image) with c/images/: mandelbrot, smiley (.png + the .h made from it)
-│   │   │                     benchmark (twelve square roots, Quake III and Newton, timed and checked against sqrt()), sqrt_benchmark (library sqrt vs the old bit-by-bit one)
-│   │   │                     video_player (plays a video.py .h on time with clock()) with c/videos/demo (.mp4 + .h)
-│   │   │                     game_of_life (64x64 torus, 7 scenes of well-known patterns, checks itself; keys 1-7 n r space s q)
-│   │   │                     grapher (graphing calculator: type f(x), Enter; zoom/move/view commands)
-│   │   │                     snake (W/A/S/D, R restarts, Q quits)
-│   │   │                     qr (QR code encoder: the repo link, then any typed text; checked with zbarimg/qrencode)
-│   │   │                     disk_notes (files on the disk: shows /notes.txt, adds typed lines; --disk FILE)
-│   │   │                     loader (runs /bin programs with spawnv), echo (a program for the OS: build --exe)
-│   │   └── tests/            io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
-│   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag),
-│   │                         diag14, diag15 (float division by zero, NaN, INT out of range),
-│   │                         diag16, diag17 (STK SET/GET wrap, NOT, MOD by 0, float opcodes, rounding),
-│   │                         diag18 (flags after OR/XOR, NOT as assembled now)
+│   ├── examples/             example programs, in folders by kind (asm/ and c/)
+│   │   ├── asm/              assembly
+│   │   │   ├── programs/     hello, print_a-z, count_0-9, sum_1-10, abs_value, stack_reverse, echo (no stdlib); guess, untested (with stdlib)
+│   │   │   ├── stdlib/       stdlib.asm (standard library: I/O, strings, memory, math, conversion); stdlib_demo (every function but input),
+│   │   │   │                 stdlib_input_demo (read_line / read_int / read_float / read_char), stdlib_more_demo (the functions added 2026-10-03)
+│   │   │   ├── two_files/    main.asm, lib.asm: multi-file linking example
+│   │   │   └── tests/        circuit diagnostics: io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
+│   │   │                     diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag),
+│   │   │                     diag14, diag15 (float division by zero, NaN, INT out of range),
+│   │   │                     diag16, diag17 (STK SET/GET wrap, NOT, MOD by 0, float opcodes, rounding),
+│   │   │                     diag18 (flags after OR/XOR, NOT as assembled now)
+│   │   └── c/                C
+│   │       ├── basics/       hello, primes (sieve + hex display), structs (structs, qsort, malloc)
+│   │       ├── games/        guess (keyboard input), snake (W/A/S/D, R restarts, Q quits),
+│   │       │                 game_of_life (64x64 torus, 7 scenes of well-known patterns, checks itself; keys 1-7 n r space s q)
+│   │       ├── graphics/     the RGB screen: gfx_demo; image_demo (gfx_image) with images/: mandelbrot, smiley (.png + the .h made from it);
+│   │       │                 video_player (plays a video.py .h on time with clock()) with videos/demo (.mp4 + .h);
+│   │       │                 grapher (graphing calculator: type f(x), Enter; zoom/move/view commands);
+│   │       │                 qr (QR code encoder: the repo link, then any typed text; checked with zbarimg/qrencode)
+│   │       ├── tests/        circuit_test (self-checking, for the circuit); benchmark (twelve square roots, Quake III and Newton,
+│   │       │                 timed and checked against sqrt()); sqrt_benchmark (library sqrt vs the old bit-by-bit one)
+│   │       └── os/           programs for the disk and the OS: loader (runs /bin programs with spawnv), echo (build --exe),
+│   │                         disk_notes (files on the disk: shows /notes.txt, adds typed lines; --disk FILE)
 │   └── ROM/                  build output (.obj/.rom/.map/.asm), git-ignored, created on first build;
 │                             ROM/libc/ caches the compiled C library
 │
@@ -260,8 +261,8 @@ The design follows the "But How Do It Know?" style: a single bus,
 
 ```
 python run.py test
-python compiler/src/asm build prog.asm compiler/examples/stdlib/stdlib.asm [--map]   # -> compiler/ROM/prog.rom
-python compiler/src/asm build prog.asm --lib compiler/examples/stdlib/stdlib.asm       # only the stdlib functions used
+python compiler/src/asm build prog.asm compiler/examples/asm/stdlib/stdlib.asm [--map]   # -> compiler/ROM/prog.rom
+python compiler/src/asm build prog.asm --lib compiler/examples/asm/stdlib/stdlib.asm       # only the stdlib functions used
 python cpu_sim/src/main.py compiler/ROM/prog.rom                       # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 --keys $'text\n'
 python cpu_sim/src/main.py compiler/ROM/prog.rom --disk disk.img            # with a disk (cc run --disk too)
@@ -276,7 +277,7 @@ python compiler/src/img/video.py clip.mp4 [--fps 10] [--seconds 5]  # video -> c
 python compiler/src/disk format disk.img; python compiler/src/disk put disk.img notes.txt   # disk images (ls get cat rm mkdir mv df fsck)
 python os/make_disk.py; python compiler/src/cc build os/shell.c                 # the OS: os/disk.img with /bin, the shell's ROM
 python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img             # run it, type help
-pypy3 compiler/src/cc run compiler/examples/c/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
+pypy3 compiler/src/cc run compiler/examples/c/graphics/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
 ```
 
 ## Open questions / gotchas
@@ -299,6 +300,6 @@ pypy3 compiler/src/cc run compiler/examples/c/video_player.c -I . -D 'VIDEO="cli
   itself. Deleting `compiler/ROM/` is always safe.
 * The circuit runs about 160 instructions a second: a C program for the
   circuit should avoid `printf` in loops (a float `printf` costs thousands of
-  instructions). `compiler/examples/c/circuit_test.c` takes about 15 000.
+  instructions). `compiler/examples/c/tests/circuit_test.c` takes about 15 000.
 * Outdated notes: `logisim/cpu datas/` (see TECHNICAL.md §9). The old
   hand-assembled programs were removed on 2026-10-06 (still in git history).

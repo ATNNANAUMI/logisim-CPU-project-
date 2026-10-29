@@ -174,7 +174,7 @@ RAM  0x1000000 the stack (16K words), grows upward
 
 ## 5. Calling convention and mixing with assembly
 
-C functions use the same convention as `compiler/examples/stdlib/stdlib.asm`
+C functions use the same convention as `compiler/examples/asm/stdlib/stdlib.asm`
 (`TECHNICAL.md` 5.1), so C and assembly can call each other:
 
 * the caller pushes the arguments first to last and uses `CALL f, N`; the
@@ -198,7 +198,7 @@ int twice(int n);              /* in twice.asm, .global twice */
 
 `compiler/src/cc/selftest.py` (`check_mixed_with_assembly`) has a complete
 example in both directions. The assembly standard library
-(`compiler/examples/stdlib/stdlib.asm`) is not linked into C programs: the
+(`compiler/examples/asm/stdlib/stdlib.asm`) is not linked into C programs: the
 C library has its own functions with the standard names. It can still be
 used: declare the functions you need and give the file with `--lib`, so only
 those are linked:
@@ -209,7 +209,7 @@ int ipow(int base, int exp);
 ```
 
 ```
-python compiler/src/cc run prog.c --lib compiler/examples/stdlib/stdlib.asm
+python compiler/src/cc run prog.c --lib compiler/examples/asm/stdlib/stdlib.asm
 ```
 
 Some of its names (`abs`, `rand`, `malloc`, ...) are also C library names;
@@ -276,7 +276,7 @@ more colours are reduced (`--colors N` for fewer and smaller, `--dither`);
 bigger ones are shrunk to fit the screen (`--size WxH` to choose);
 transparent pixels (PNG alpha) are left out when drawing. At most 256
 pixels wide. Drawing costs 32–50 instructions a pixel. More in TECHNICAL.md
-7.4; see `compiler/examples/c/image_demo.c`.
+7.4; see `compiler/examples/c/graphics/image_demo.c`.
 
 `cc run --screen out.png` saves the screen after the run; the simulator
 window shows it in its "RGB screen" tab.
@@ -423,5 +423,5 @@ python compiler/src/cc/tests/difftest.py --update   # rewrite the .expected file
 python compiler/src/cc/tests/fuzz.py --count 50     # random programs, gcc against tiny C (needs gcc)
 ```
 
-`compiler/examples/c/circuit_test.c` checks the compiler's tricky code
+`compiler/examples/c/tests/circuit_test.c` checks the compiler's tricky code
 paths on the circuit itself: every line must say `ok`.

@@ -564,10 +564,10 @@ final address, and (when the code has `.loc` lines, as C code does) a
 # labels in t.rom
 # address  section  label                     file
 00000      rom      (entry: RJMP start)
-00002      rom      start                     compiler/examples/two_files/main.asm  (global)
-0001d      rom      print_newline             compiler/examples/two_files/lib.asm  (global)
+00002      rom      start                     compiler/examples/asm/two_files/main.asm  (global)
+0001d      rom      print_newline             compiler/examples/asm/two_files/lib.asm  (global)
 ...
-14000      ram      dashes                    compiler/examples/two_files/main.asm
+14000      ram      dashes                    compiler/examples/asm/two_files/main.asm
 ```
 
 Every input is processed even after a failure, so one run reports the
@@ -670,7 +670,7 @@ the parts of its ROM; an older file without it is one part.)
 
 
 JSON, written by hand so it stays readable. Here is
-`compiler/examples/two_files/main.asm` assembled on its own (words the linker
+`compiler/examples/asm/two_files/main.asm` assembled on its own (words the linker
 fills in hold 0):
 
 ```json
@@ -777,18 +777,18 @@ print_char:
         RET
 ```
 
-### 5.2 `stdlib.asm` (`compiler/examples/stdlib/`)
+### 5.2 `stdlib.asm` (`compiler/examples/asm/stdlib/`)
 
 Build it together with the program, and declare the functions the program
 uses with `.extern`:
 
 ```
-python compiler/src/asm build prog.asm compiler/examples/stdlib/stdlib.asm -o prog.rom
-python compiler/src/asm build prog.asm --lib compiler/examples/stdlib/stdlib.asm   # only what prog uses
+python compiler/src/asm build prog.asm compiler/examples/asm/stdlib/stdlib.asm -o prog.rom
+python compiler/src/asm build prog.asm --lib compiler/examples/asm/stdlib/stdlib.asm   # only what prog uses
 ```
 
 With `--lib`, only the functions the program calls (and the ones they call)
-are linked: `programs/guess.asm` takes 556 words instead of 1669.
+are linked: `asm/programs/guess.asm` takes 556 words instead of 1669.
 
 | group | functions |
 | --- | --- |
@@ -809,48 +809,50 @@ line is empty (so it can't erase the prompt).
 
 ### 5.3 Example programs (`compiler/examples/`)
 
+Assembly is under `asm/` (`programs/`, `stdlib/`, `two_files/`, `tests/` for circuit diagnostics); C is under `c/` in folders by kind: `basics/`, `games/`, `graphics/` (with `images/` and `videos/`), `tests/` and `os/` (programs for the disk). `os/make_disk.py` finds a program by name in any of them.
+
 | path | what it shows |
 | --- | --- |
-| `programs/hello.asm` | prints a `.string` from ROM with `ALD` (`hello, world`) |
-| `programs/print_a-z.asm` | the alphabet with a `CMP`/`RJNF` loop |
-| `programs/count_0-9.asm` | digits with an immediate `ADD` |
-| `programs/sum_1-10.asm` | a loop plus `DIV`/`MOD` to print `55` |
-| `programs/abs_value.asm` | `TEST`, `RJNF N`, `NEG` (prints `5`) |
-| `programs/stack_reverse.asm` | `STK PUSH`/`POP` to reverse a word (`kcats`) |
-| `programs/echo.asm` | keyboard → display until Enter (backspace is echoed too) |
-| `stdlib/stdlib_demo.asm` | every stdlib function except input; the expected output is in its header |
-| `stdlib/stdlib_input_demo.asm` | `read_line`, `read_int`, `read_float`, `read_char` |
-| `stdlib/stdlib_more_demo.asm` | the stdlib functions added on 2026-10-03 that need no typing and no hex display; the expected output is in its header |
-| `programs/guess.asm` | guess-the-number game with the stdlib (needs typing) |
-| `programs/untested.asm` | `show_hex` and `try_read_char`, the two stdlib functions not yet run on the circuit (needs typing) |
-| `two_files/main.asm`, `lib.asm` | two files, `.extern`/`.global`, `CALL` inside a call, a RAM variable |
-| `tests/io_test.asm` | minimal keyboard → display loop for probing the circuit |
-| `c/hello.c` | C: `printf("hello, world\n")` |
-| `c/primes.c` | C: a sieve, `printf` with a width, the hex display (`cpu.h`) |
-| `c/gfx_demo.c` | C: the RGB screen with `gfx.h`: gradient, text, shapes, a sine wave (`--screen` saves the picture) |
-| `c/image_demo.c` | C: compressed pictures with `gfx_image` (7.4): a 128×128 Mandelbrot picture and a transparent 16×16 sprite from `c/images/` (the PNGs and the `.h` files made from them), clipped at the edges |
-| `c/structs.c` | C: an array of structs, `qsort`, `malloc`, `printf("%.2f")` |
-| `c/guess.c` | C: guess the number with `scanf`; seeded by how long the first key takes (`key_pressed`); the header has a transcript |
-| `c/benchmark.c` | C: twelve square roots (the old bit-by-bit `sqrt` as the reference, Quake III's inverse square root with two constants, one or two Newton steps or a residual correction, Newton's method from `y = x` or from two bit-based first guesses) timed with `clock()` over 20 000 inputs and checked against the reference: max absolute and relative error, how many results differ. `-D ONLY_ALGORITHM=n` runs one; `-D COUNT_ONLY` drops the timing so `--stats` gives that one's instruction count. Needs `--steps 600000000` with `cc run` |
-| `c/sqrt_benchmark.c` | C: the library's `sqrt()` (Newton from a bit-based guess, then an exact rounding check) against the bit-by-bit one it replaced, 20 000 inputs 5 times: every result the same, about 1.4× faster. Needs `--steps 400000000` with `cc run` |
-| `c/video_player.c` | C: plays a video made by `compiler/src/img/video.py` (7.5) at its own speed, waiting on `clock()` (the timer); prints how many frames were late. Plays `c/videos/demo.h` (from `demo.mp4`, ffmpeg's moving test picture, 4 s); `-I . -D 'VIDEO="clip.h"'` plays `./clip.h` instead. Needs `--steps 2000000000` with `cc run` (waiting runs millions of instructions a second) |
-| `c/game_of_life.c` | C: Conway's Game of Life on the RGB screen, a 64×64 world that wraps around (2×2-pixel cells, only changed cells redrawn). First checks itself on well-known patterns (24 checks: still lifes, oscillators' periods, spaceships' moves, the diehard dying at 130, the glider gun), then shows seven scenes in turn: Gosper glider gun + eater, oscillators and still lifes, spaceships, R-pentomino, diehard, acorn, random soup. Keys `1`–`7` pick a scene, `n` next, `r` restart, space pause, `s` one step, `q` quit; the hex display shows the generation. `-D SCENE=n` starts at scene n, `-D FULL_TEST` also checks that the first three scenes repeat. 100 000–330 000 instructions a generation |
-| `c/grapher.c` | C: a graphing calculator on the RGB screen. Type a function of x on the bottom line (`+ - * / ^`, implied products like `2x`, `\|x\|`, `sin cos tan sqrt ln log exp ...`, `pi`, `e`) and Enter: it is parsed into a small stack program and drawn, up to six functions in different colours, two pixels thick, over a grid with numbers on the axes; gaps where the value is not a number, jumps like tan's left unjoined. Commands `clear`, `reset`, `zoom f`, `in`, `out`, `move dx dy`, `view x0 x1 y0 y1`, `demo`, `help` (the list of what can be typed, also on the screen at the start). 100–200 ms a function in the simulator |
-| `c/qr.c` | C: a QR code encoder written from the standard, drawn on the RGB screen as big as it fits. Starts with this project's GitHub link; type any text and Enter for a new code (an empty line goes back to the link). Byte mode, versions 1–10, levels L/M/Q/H (`-D LEVEL=n`, M by default), Reed-Solomon over GF(256) with the blocks interleaved, and all eight masks scored by the standard's penalty rules (`-D MASK=n` forces one). `-D TEXT="..."` the first text, `-D DARK=c` the module colour. Every version and level decodes with `zbarimg` and matches `qrencode` module for module with the same mask. About 2.6 million instructions for the link (0.9 s in the simulator) |
-| `c/snake.c` | C: Snake on the RGB screen, a 16×14 grid of 8×8 cells under a score panel; `W`/`A`/`S`/`D` steer, `R` restarts after a game over, `Q` quits (`key_pressed()`, `wait_ms()`) |
-| `c/loader.c` | C: runs programs from the disk (simulator only): type a name and arguments, it runs `/bin/<name>` with `spawnv()` and shows the exit status; an empty line lists `/bin`. The first step towards the OS's shell, `os/shell.c` (11) |
-| `c/echo.c` | C: a program for the OS (`cc build --exe`, then `disk put` into `/bin`): prints its arguments, like Unix `echo` |
-| `c/disk_notes.c` | C: files on the disk (simulator only, `--disk FILE` on a disk made by `python compiler/src/disk format`): prints `/notes.txt`, then adds each typed line to it (`!help` lists the commands: `!show`, `!ls`, `!clear`, `!quit`), so the next run shows them again |
-| `c/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, `~` on registers, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
-| `tests/diag10.asm` | `INT` on floats below 1 (diagnostic, resolved: they give 0) |
-| `tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x1004000`; they are also printed in hex |
-| `tests/diag12.asm` | what the C compiler relies on: reading and setting `ESP`/`EBP` with `STK CALL`/`STK RET`, stack slot `i` being RAM word `i` (address `0x1000000 + i` now, `0x10000 + i` on the 16-bit circuit), the carry flag after `CMP`/`SUB`/`ADD`, the `A` flag after `FCMP` (a float compare), `MULT`'s low 32 bits, `DIV` by `0x80000000`. Link it first; 30 results from `0x1004000`, also printed |
-| `tests/diag13.asm` | the carry flag (and A N Z) after `SUB`, `--`, `++`, `NEG`, `SHL`, `SHR`, `MULT`, `ADD`, `AND`, `TEST`: on the circuit `SUB` sets C on a borrow and `CMP`/`--`/`NEG`/`MULT` never set it. Link it first; 24 results from `0x1004000`, also printed |
-| `tests/diag14.asm` | float special cases: division by ±0, NaN, infinity, `INT` out of range, overflow, subnormals. Link it first; 22 results from `0x1004000`, also printed |
-| `tests/diag15.asm` | more of the same after diag14: `INT` of -infinity and of large values, the remaining divisions by zero. Link it first; 15 results from `0x1004000`, also printed |
-| `tests/diag16.asm` | where `STK SET/GET` put `EBP + RB` (on the 16-bit circuit it wraps at 16 bits, across all of RAM), R0 and flags after `DIV`, `MOD` and `NOT` (`MOD` by 0 gives 0; `NOT` inverts RA), the float opcodes with no defined result, float rounding (to nearest, ties to even). Link it first; 52 results from `0x1004000`, also printed |
-| `tests/diag17.asm` | follow-up to diag16: `NOT` encoded with RA and RB both set (it inverts RA, not RB), `DIV`/`MOD` by 0 and `0x80000000` by -1, float opcodes 4, 5, B, C with other inputs (4 doubles RB). Link it first; 30 results from `0x1004000`, also printed |
-| `tests/diag18.asm` | the flags after `OR` and `XOR`, and `NOT` as the assembler writes it now (register in both fields: `~Rx`, `A` = 0); all as the simulator. Link it first; 16 results from `0x1004000`, also printed |
+| `asm/programs/hello.asm` | prints a `.string` from ROM with `ALD` (`hello, world`) |
+| `asm/programs/print_a-z.asm` | the alphabet with a `CMP`/`RJNF` loop |
+| `asm/programs/count_0-9.asm` | digits with an immediate `ADD` |
+| `asm/programs/sum_1-10.asm` | a loop plus `DIV`/`MOD` to print `55` |
+| `asm/programs/abs_value.asm` | `TEST`, `RJNF N`, `NEG` (prints `5`) |
+| `asm/programs/stack_reverse.asm` | `STK PUSH`/`POP` to reverse a word (`kcats`) |
+| `asm/programs/echo.asm` | keyboard → display until Enter (backspace is echoed too) |
+| `asm/stdlib/stdlib_demo.asm` | every stdlib function except input; the expected output is in its header |
+| `asm/stdlib/stdlib_input_demo.asm` | `read_line`, `read_int`, `read_float`, `read_char` |
+| `asm/stdlib/stdlib_more_demo.asm` | the stdlib functions added on 2026-10-03 that need no typing and no hex display; the expected output is in its header |
+| `asm/programs/guess.asm` | guess-the-number game with the stdlib (needs typing) |
+| `asm/programs/untested.asm` | `show_hex` and `try_read_char`, the two stdlib functions not yet run on the circuit (needs typing) |
+| `asm/two_files/main.asm`, `lib.asm` | two files, `.extern`/`.global`, `CALL` inside a call, a RAM variable |
+| `asm/tests/io_test.asm` | minimal keyboard → display loop for probing the circuit |
+| `c/basics/hello.c` | C: `printf("hello, world\n")` |
+| `c/basics/primes.c` | C: a sieve, `printf` with a width, the hex display (`cpu.h`) |
+| `c/graphics/gfx_demo.c` | C: the RGB screen with `gfx.h`: gradient, text, shapes, a sine wave (`--screen` saves the picture) |
+| `c/graphics/image_demo.c` | C: compressed pictures with `gfx_image` (7.4): a 128×128 Mandelbrot picture and a transparent 16×16 sprite from `c/graphics/images/` (the PNGs and the `.h` files made from them), clipped at the edges |
+| `c/basics/structs.c` | C: an array of structs, `qsort`, `malloc`, `printf("%.2f")` |
+| `c/games/guess.c` | C: guess the number with `scanf`; seeded by how long the first key takes (`key_pressed`); the header has a transcript |
+| `c/tests/benchmark.c` | C: twelve square roots (the old bit-by-bit `sqrt` as the reference, Quake III's inverse square root with two constants, one or two Newton steps or a residual correction, Newton's method from `y = x` or from two bit-based first guesses) timed with `clock()` over 20 000 inputs and checked against the reference: max absolute and relative error, how many results differ. `-D ONLY_ALGORITHM=n` runs one; `-D COUNT_ONLY` drops the timing so `--stats` gives that one's instruction count. Needs `--steps 600000000` with `cc run` |
+| `c/tests/sqrt_benchmark.c` | C: the library's `sqrt()` (Newton from a bit-based guess, then an exact rounding check) against the bit-by-bit one it replaced, 20 000 inputs 5 times: every result the same, about 1.4× faster. Needs `--steps 400000000` with `cc run` |
+| `c/graphics/video_player.c` | C: plays a video made by `compiler/src/img/video.py` (7.5) at its own speed, waiting on `clock()` (the timer); prints how many frames were late. Plays `c/graphics/videos/demo.h` (from `demo.mp4`, ffmpeg's moving test picture, 4 s); `-I . -D 'VIDEO="clip.h"'` plays `./clip.h` instead. Needs `--steps 2000000000` with `cc run` (waiting runs millions of instructions a second) |
+| `c/games/game_of_life.c` | C: Conway's Game of Life on the RGB screen, a 64×64 world that wraps around (2×2-pixel cells, only changed cells redrawn). First checks itself on well-known patterns (24 checks: still lifes, oscillators' periods, spaceships' moves, the diehard dying at 130, the glider gun), then shows seven scenes in turn: Gosper glider gun + eater, oscillators and still lifes, spaceships, R-pentomino, diehard, acorn, random soup. Keys `1`–`7` pick a scene, `n` next, `r` restart, space pause, `s` one step, `q` quit; the hex display shows the generation. `-D SCENE=n` starts at scene n, `-D FULL_TEST` also checks that the first three scenes repeat. 100 000–330 000 instructions a generation |
+| `c/graphics/grapher.c` | C: a graphing calculator on the RGB screen. Type a function of x on the bottom line (`+ - * / ^`, implied products like `2x`, `\|x\|`, `sin cos tan sqrt ln log exp ...`, `pi`, `e`) and Enter: it is parsed into a small stack program and drawn, up to six functions in different colours, two pixels thick, over a grid with numbers on the axes; gaps where the value is not a number, jumps like tan's left unjoined. Commands `clear`, `reset`, `zoom f`, `in`, `out`, `move dx dy`, `view x0 x1 y0 y1`, `demo`, `help` (the list of what can be typed, also on the screen at the start). 100–200 ms a function in the simulator |
+| `c/graphics/qr.c` | C: a QR code encoder written from the standard, drawn on the RGB screen as big as it fits. Starts with this project's GitHub link; type any text and Enter for a new code (an empty line goes back to the link). Byte mode, versions 1–10, levels L/M/Q/H (`-D LEVEL=n`, M by default), Reed-Solomon over GF(256) with the blocks interleaved, and all eight masks scored by the standard's penalty rules (`-D MASK=n` forces one). `-D TEXT="..."` the first text, `-D DARK=c` the module colour. Every version and level decodes with `zbarimg` and matches `qrencode` module for module with the same mask. About 2.6 million instructions for the link (0.9 s in the simulator) |
+| `c/games/snake.c` | C: Snake on the RGB screen, a 16×14 grid of 8×8 cells under a score panel; `W`/`A`/`S`/`D` steer, `R` restarts after a game over, `Q` quits (`key_pressed()`, `wait_ms()`) |
+| `c/os/loader.c` | C: runs programs from the disk (simulator only): type a name and arguments, it runs `/bin/<name>` with `spawnv()` and shows the exit status; an empty line lists `/bin`. The first step towards the OS's shell, `os/shell.c` (11) |
+| `c/os/echo.c` | C: a program for the OS (`cc build --exe`, then `disk put` into `/bin`): prints its arguments, like Unix `echo` |
+| `c/os/disk_notes.c` | C: files on the disk (simulator only, `--disk FILE` on a disk made by `python compiler/src/disk format`): prints `/notes.txt`, then adds each typed line to it (`!help` lists the commands: `!show`, `!ls`, `!clear`, `!quit`), so the next run shows them again |
+| `c/tests/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, `~` on registers, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
+| `asm/tests/diag10.asm` | `INT` on floats below 1 (diagnostic, resolved: they give 0) |
+| `asm/tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x1004000`; they are also printed in hex |
+| `asm/tests/diag12.asm` | what the C compiler relies on: reading and setting `ESP`/`EBP` with `STK CALL`/`STK RET`, stack slot `i` being RAM word `i` (address `0x1000000 + i` now, `0x10000 + i` on the 16-bit circuit), the carry flag after `CMP`/`SUB`/`ADD`, the `A` flag after `FCMP` (a float compare), `MULT`'s low 32 bits, `DIV` by `0x80000000`. Link it first; 30 results from `0x1004000`, also printed |
+| `asm/tests/diag13.asm` | the carry flag (and A N Z) after `SUB`, `--`, `++`, `NEG`, `SHL`, `SHR`, `MULT`, `ADD`, `AND`, `TEST`: on the circuit `SUB` sets C on a borrow and `CMP`/`--`/`NEG`/`MULT` never set it. Link it first; 24 results from `0x1004000`, also printed |
+| `asm/tests/diag14.asm` | float special cases: division by ±0, NaN, infinity, `INT` out of range, overflow, subnormals. Link it first; 22 results from `0x1004000`, also printed |
+| `asm/tests/diag15.asm` | more of the same after diag14: `INT` of -infinity and of large values, the remaining divisions by zero. Link it first; 15 results from `0x1004000`, also printed |
+| `asm/tests/diag16.asm` | where `STK SET/GET` put `EBP + RB` (on the 16-bit circuit it wraps at 16 bits, across all of RAM), R0 and flags after `DIV`, `MOD` and `NOT` (`MOD` by 0 gives 0; `NOT` inverts RA), the float opcodes with no defined result, float rounding (to nearest, ties to even). Link it first; 52 results from `0x1004000`, also printed |
+| `asm/tests/diag17.asm` | follow-up to diag16: `NOT` encoded with RA and RB both set (it inverts RA, not RB), `DIV`/`MOD` by 0 and `0x80000000` by -1, float opcodes 4, 5, B, C with other inputs (4 doubles RB). Link it first; 30 results from `0x1004000`, also printed |
+| `asm/tests/diag18.asm` | the flags after `OR` and `XOR`, and `NOT` as the assembler writes it now (register in both fields: `~Rx`, `A` = 0); all as the simulator. Link it first; 16 results from `0x1004000`, also printed |
 
 All of these build and run correctly in the simulator. The `c/` programs
 are C: build them with `python compiler/src/cc build <file>` (or `run`,
@@ -1054,7 +1056,7 @@ python compiler/src/img/video.py frames/ ...      (a folder of PNGs, in name ord
 ```
 
 turns a video into a `.h` of compressed frames that
-`compiler/examples/c/video_player.c` plays at the video's speed. `ffmpeg`
+`compiler/examples/c/graphics/video_player.c` plays at the video's speed. `ffmpeg`
 and `ffprobe` read the video (they must be installed; a folder of PNG frames
 needs neither): `--fps` frames a second (1–60), shrunk to fit 128×128 unless
 `--size` says otherwise, `--start`/`--seconds` take a part.
@@ -1406,7 +1408,7 @@ files only) and three assembly files: `runtime.asm` (`_pow2`, `_udiv`,
   compiler and compares their output; programs gcc's sanitizer objects to
   are skipped, one that differs is saved in `compiler/ROM/fuzz/`. 246
   programs with floats and pointers agreed on 2026-10-11.
-* `compiler/examples/c/circuit_test.c` runs the compiler's tricky code
+* `compiler/examples/c/tests/circuit_test.c` runs the compiler's tricky code
   paths on the circuit (all lines `ok` on 2026-10-10, again on 2026-10-11
   after the call changes, and on 2026-10-13 with the new "bitwise not of a
   register" line, which says FAIL on the circuit when `NOT` is encoded the

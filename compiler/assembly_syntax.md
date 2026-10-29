@@ -395,7 +395,7 @@ way as `python cpu_sim/src/main.py` does for the simulator.
 Build a program in one step (assemble every file, then link):
 
 ```
-python compiler/src/asm build compiler/examples/programs/hello.asm
+python compiler/src/asm build compiler/examples/asm/programs/hello.asm
 python compiler/src/asm build main.asm lib.asm -o program.rom
 ```
 
@@ -421,7 +421,7 @@ Link only the functions you use from a library with `--lib` (repeatable;
 libraries go after the other files):
 
 ```
-python compiler/src/asm build prog.asm --lib compiler/examples/stdlib/stdlib.asm
+python compiler/src/asm build prog.asm --lib compiler/examples/asm/stdlib/stdlib.asm
 ```
 
 Add `--map` to `build` or `link` to also write a `.map` file (next to the `.rom`) listing every
