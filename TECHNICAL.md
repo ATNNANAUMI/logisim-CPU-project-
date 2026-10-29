@@ -1534,7 +1534,9 @@ lines are at most 255 chars. Ctrl-D is left alone (it is the shell's end of
 input). The page is not redrawn on every key: `shown[][]` remembers what
 each cell displays and `refresh()` calls `gfx_char` only for cells that
 differ (the cursor is a cell drawn inverted), so a typed char costs a few
-cells. The screen can't be read back, which is why the cells are
+cells, and it does that at most every 33 ms (30 fps, `clock()`): keys are
+polled with `key_pressed()` and the screen is redrawn when something
+changed and a frame has passed. The screen can't be read back, which is why the cells are
 remembered. The text is scrolled by `top` and `left` to keep the cursor
 visible. The self-check `screen_editor` (disk suite) types a session
 through the shell, reads the file back with `fs.py`, and checks the screen

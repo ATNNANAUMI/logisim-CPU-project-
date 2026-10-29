@@ -16,8 +16,9 @@
  *   Ctrl-S          save              Ctrl-Q  quit (unsaved: warns, a second Ctrl-Q quits)
  *   Ctrl-G          lists these keys on the status line
  *
- * Only the cells of the screen that changed are redrawn: typing a char
- * redraws a few cells and the status line, not the page. Ctrl-D is not used
+ * The screen is redrawn at most 30 times a second, however fast keys come,
+ * and only the cells that changed (a typed char redraws a few cells and the
+ * status line, not the page). Ctrl-D is not used
  * (it is Tynix's end of input).
  */
 #include <stdio.h>
@@ -25,9 +26,11 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <cpu.h>
 #include <gfx.h>
 
+#define FRAME_MS 33             /* the screen is redrawn at most every 33 ms (30 fps) */
 #define LINE_MAX 255            /* chars in a line */
 #define COLS (GFX_WIDTH / GFX_CHAR_WIDTH)               /* 21 */
 #define ROWS (GFX_HEIGHT / GFX_CHAR_HEIGHT - 1)         /* 15 text lines + the status line */
@@ -342,7 +345,8 @@ static const char *HELP[] = {"^S save  ^Q quit", "^K del line ^A ^E", "^B ^F pag
 
 int main(int argc, char **argv)
 {
-    int k, quit = 0, help = 0;
+    int k, quit = 0, help = 0, stale = 1;
+    unsigned int last = 0;
     if (argc != 2) {
         printf("usage: edit FILE\n");
         return 1;
@@ -353,8 +357,15 @@ int main(int argc, char **argv)
     blank_screen();
     message = "^G keys";
     while (!quit) {
-        refresh();
-        k = wait_key();
+        if ((k = key_pressed()) == 0) {         /* no key: redraw if something changed and a frame has passed */
+            if (stale && (unsigned int)clock() - last >= FRAME_MS) {
+                refresh();
+                last = clock();
+                stale = 0;
+            }
+            continue;
+        }
+        stale = 1;
         message = 0;
         if (k != KEY_CTRL('q'))
             warned = 0;

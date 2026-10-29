@@ -247,6 +247,9 @@ The language itself is described in [`c_language.md`](c_language.md).
     read back, so the program keeps `shown[][]` (21 x 16 chars plus an
     inverted bit) and `gfx_char`s only the cells that differ from what it
     wants. The cursor is a cell drawn inverted, not a separate overlay.
+    The redraw runs at most every 33 ms (30 fps): the loop polls
+    `key_pressed()`, handles every key waiting, and redraws only when
+    something changed and `clock()` says a frame has passed.
     Keys: Ctrl-S / Ctrl-Q like most editors; Ctrl-D stays unused because it
     ends the shell's input. Guess: the circuit's keyboard may not buffer
     control codes (see TECHNICAL 8), so on the circuit only the arrow-less,
