@@ -1,5 +1,5 @@
 """Video converter: a video (or a folder of PNG frames) -> a .h holding every
-frame compressed for gfx_image(), which compiler/examples/c/video_player.c
+frame compressed for gfx_image(), which compiler/examples/c/graphics/video_player.c
 plays at the video's own speed (it waits on clock(), the timer). Run it from
 the project root:
 
@@ -168,7 +168,7 @@ def header_text(filename, source, command, width, height, fps, palette, words, s
         f" * {frames} frames of {width} x {height} at {fps} a second ({frames / fps:.1f} s),",
         f" * {len(palette)} colours: {len(words)} words, {len(words) / frames:.0f} a frame",
         f" * (one word per pixel would be {width * height} a frame). Play it with",
-        " * compiler/examples/c/video_player.c (#include this file there).",
+        " * compiler/examples/c/graphics/video_player.c (#include this file there).",
         " */",
         f"#define VIDEO_FRAMES {frames}",
         f"#define VIDEO_FPS {fps}",

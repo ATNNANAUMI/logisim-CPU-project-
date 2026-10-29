@@ -13,7 +13,7 @@ file next to the .rom, listing every label's final address.
 --lib FILE (link and build, repeatable) links FILE as a library: only the
 functions the program uses (and what they use) go in, after the other files:
 
-    python compiler/src/asm build prog.asm --lib compiler/examples/stdlib/stdlib.asm
+    python compiler/src/asm build prog.asm --lib compiler/examples/asm/stdlib/stdlib.asm
 """
 
 import argparse

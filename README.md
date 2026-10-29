@@ -55,9 +55,9 @@ Or call the tools directly:
 
 ```
 # assemble + link a program with the standard library
-python compiler/src/asm build compiler/examples/stdlib/stdlib_demo.asm \
-                              compiler/examples/stdlib/stdlib.asm -o demo.rom
-# (--lib compiler/examples/stdlib/stdlib.asm instead links only the functions used)
+python compiler/src/asm build compiler/examples/asm/stdlib/stdlib_demo.asm \
+                              compiler/examples/asm/stdlib/stdlib.asm -o demo.rom
+# (--lib compiler/examples/asm/stdlib/stdlib.asm instead links only the functions used)
 # (written to compiler/ROM/demo.rom; an -o with a folder, like ./demo.rom, is used as is)
 
 # run it in the simulator (window, or terminal only)
@@ -72,10 +72,10 @@ python logisim/run_rom.py logisim/CPU.circ compiler/ROM/demo.rom
 C programs go through the C compiler, which links the C library on its own:
 
 ```
-python compiler/src/cc run compiler/examples/c/hello.c          # build + run in the simulator, print the display
-python compiler/src/cc build compiler/examples/c/primes.c       # -> compiler/ROM/primes.rom (+ primes.asm to read)
-python compiler/src/cc build compiler/examples/c/echo.c --exe   # -> echo.exe, a program for the disk (see c/loader.c)
-python run.py build compiler/examples/c/guess.c                 # build, then open the simulator window
+python compiler/src/cc run compiler/examples/c/basics/hello.c          # build + run in the simulator, print the display
+python compiler/src/cc build compiler/examples/c/basics/primes.c       # -> compiler/ROM/primes.rom (+ primes.asm to read)
+python compiler/src/cc build compiler/examples/c/os/echo.c --exe   # -> echo.exe, a program for the disk (see c/os/loader.c)
+python run.py build compiler/examples/c/games/guess.c                 # build, then open the simulator window
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/primes.rom
 ```
 
@@ -86,8 +86,8 @@ smaller than one word per pixel):
 python compiler/src/img picture.png             # -> picture.h; #include it, then gfx_image(x, y, picture)
 python compiler/src/img/video.py clip.mp4           # -> clip.h next to it (needs ffmpeg)
 python compiler/src/disk format disk.img            # an empty disk for --disk; then put/get/ls/cat/rm/mkdir/mv/df
-pypy3 compiler/src/cc run compiler/examples/c/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
-python compiler/src/cc run compiler/examples/c/image_demo.c --screen out.png
+pypy3 compiler/src/cc run compiler/examples/c/graphics/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
+python compiler/src/cc run compiler/examples/c/graphics/image_demo.c --screen out.png
 ```
 
 The OS, Tynix (simulator only): a shell in ROM that runs the programs on the disk:
@@ -115,7 +115,7 @@ loop:   COMM OUTDATA, R1
         HALT
 ```
 
-More in `compiler/examples/programs/`. And in C:
+More in `compiler/examples/asm/programs/`. And in C:
 
 ```c
 #include <stdio.h>
@@ -144,7 +144,7 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 | `compiler/src/img/` | image converter: PNG -> compressed picture for `gfx_image()` (`gfx.h`); `video.py`: a video -> frames for `video_player.c` |
 | `compiler/libc/` | the C library: headers (`include/`), C and assembly sources |
 | `os/` | the OS, Tynix (simulator only): `shell.c`, a command shell in ROM that runs programs from the disk; `ed.c`, a line editor; `make_disk.py`, a disk with `ed` and the C examples in `/bin` |
-| `compiler/examples/` | example programs (assembly, and C in `c/`), the standard library (`stdlib/stdlib.asm`), circuit diagnostics |
+| `compiler/examples/` | example programs: `asm/` (programs, the standard library `stdlib/stdlib.asm`, `tests/` circuit diagnostics) and `c/` in folders by kind (`basics/`, `games/`, `graphics/`, `tests/`, `os/`) |
 | `compiler/ROM/` | build output for ROM images (ignored by git) |
 | `compiler/assembly_syntax.md` | full assembly language reference |
 | `compiler/c_language.md` | the C language and library reference |

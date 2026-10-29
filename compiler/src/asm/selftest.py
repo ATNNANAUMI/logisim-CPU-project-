@@ -475,12 +475,12 @@ def check_command_line():
 
 
 def check_examples_build():
-    """Every example under compiler/examples/ assembles and links.
+    """Every assembly example under compiler/examples/asm/ assembles and links.
 
     two_files/ is linked as its pair; every other .asm is linked together with
-    stdlib/stdlib.asm, which works whether or not it uses the library.
+    asm/stdlib/stdlib.asm, which works whether or not it uses the library.
     """
-    root = Path(__file__).resolve().parent.parent.parent / "examples"   # compiler/examples
+    root = Path(__file__).resolve().parent.parent.parent / "examples" / "asm"   # compiler/examples/asm
     if not root.is_dir():
         return "skipped, no examples folder"
 

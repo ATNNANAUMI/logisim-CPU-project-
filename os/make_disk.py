@@ -21,11 +21,11 @@ sys.path.insert(0, str(ROOT / "compiler" / "src" / "cc"))
 import fs                               # compiler/src/disk
 import driver                           # compiler/src/cc
 
-EXAMPLES = ROOT / "compiler" / "examples" / "c"
+EXAMPLES = ROOT / "compiler" / "examples" / "c"      # in folders by kind (games/, os/, ...)
 OS_DIR = ROOT / "os"
 DEFAULT_IMAGE = ROOT / "os" / "disk.img"
 
-# compiler/examples/c/NAME.c -> /bin/NAME. Each one ends by itself, on
+# compiler/examples/c/*/NAME.c -> /bin/NAME. Each one ends by itself, on
 # Ctrl-D or on q, so the shell gets the CPU back.
 PROGRAMS = ["echo", "hello", "primes", "structs", "guess", "gfx_demo", "image_demo",
             "snake", "game_of_life", "grapher", "qr", "disk_notes", "ed"]
@@ -60,7 +60,10 @@ def make(image=DEFAULT_IMAGE, programs=PROGRAMS, new=False, size_mb=64, log=prin
         for name in programs:
             source = OS_DIR / f"{name}.c"           # the OS's own programs
             if not source.exists():
-                source = EXAMPLES / f"{name}.c"
+                found = sorted(EXAMPLES.rglob(f"{name}.c"))
+                if len(found) != 1:
+                    raise fs.FsError(f"{name}.c: found {len(found)} times under compiler/examples/c")
+                source = found[0]
             program, _ = driver.build([str(source)], exe=True)
             disk.put(f"/bin/{name}", driver.exe_bytes(program), binary=True)
             sizes[name] = len(program.rom)
