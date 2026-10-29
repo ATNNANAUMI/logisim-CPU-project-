@@ -82,9 +82,10 @@ static int sorted(const int *a, int n)
     return 1;
 }
 
-static int checksum(const int *a, int n)
+static unsigned checksum(const int *a, int n)
 {
-    int i, s = 0;
+    int i;
+    unsigned s = 0;
     for (i = 0; i < n; i++)
         s = s * 31 + a[i];
     return s;
@@ -102,6 +103,6 @@ int main(void)
     heap_sort(c, N);
     printf("sorted: %d %d %d\n", sorted(a, N), sorted(b, N), sorted(c, N));
     printf("same: %d %d\n", memcmp(a, b, sizeof a) == 0, memcmp(a, c, sizeof a) == 0);
-    printf("min %d max %d checksum %d\n", a[0], a[N - 1], checksum(a, N));
+    printf("min %d max %d checksum %u\n", a[0], a[N - 1], checksum(a, N));
     return 0;
 }
