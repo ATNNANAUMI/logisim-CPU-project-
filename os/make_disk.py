@@ -22,12 +22,13 @@ import fs                               # compiler/src/disk
 import driver                           # compiler/src/cc
 
 EXAMPLES = ROOT / "compiler" / "examples" / "c"
+OS_DIR = ROOT / "os"
 DEFAULT_IMAGE = ROOT / "os" / "disk.img"
 
 # compiler/examples/c/NAME.c -> /bin/NAME. Each one ends by itself, on
 # Ctrl-D or on q, so the shell gets the CPU back.
 PROGRAMS = ["echo", "hello", "primes", "structs", "guess", "gfx_demo", "image_demo",
-            "snake", "game_of_life", "grapher", "qr", "disk_notes"]
+            "snake", "game_of_life", "grapher", "qr", "disk_notes", "ed"]
 
 README = """\
 This disk was made by os/make_disk.py for the shell in os/shell.c.
@@ -37,6 +38,8 @@ This disk was made by os/make_disk.py for the shell in os/shell.c.
   primes           runs /bin/primes; its exit status comes back
   cat > todo.txt   type lines, then Ctrl-D: a new text file
   disk_notes       shows /notes.txt and adds the lines you type
+  ed notes.txt     edit a text file by lines (h lists its commands)
+  cp from to       copy a file, text or program
 
 On the RGB screen (the simulator window's tab): snake and
 game_of_life (q quits), gfx_demo, image_demo, grapher and qr
@@ -55,7 +58,10 @@ def make(image=DEFAULT_IMAGE, programs=PROGRAMS, new=False, size_mb=64, log=prin
         if disk.lookup("/bin") is None:
             disk.mkdir("/bin")
         for name in programs:
-            program, _ = driver.build([str(EXAMPLES / f"{name}.c")], exe=True)
+            source = OS_DIR / f"{name}.c"           # the OS's own programs
+            if not source.exists():
+                source = EXAMPLES / f"{name}.c"
+            program, _ = driver.build([str(source)], exe=True)
             disk.put(f"/bin/{name}", driver.exe_bytes(program), binary=True)
             sizes[name] = len(program.rom)
             log(f"/bin/{name}: {len(program.rom)} words")

@@ -627,6 +627,96 @@ def check_shell():
     return f"{cpu.instructions} instructions"
 
 
+EDITOR_KEYS = ("ed /a.txt\n"
+               "a\n"
+               "one x\n"
+               "two x\n"
+               "three\n"
+               ".\n"
+               "2d\n"
+               "1s/x/Y/\n"
+               "/thr\n"
+               "1i\n"
+               "zero\n"
+               ".\n"
+               "q\n"
+               "w\n"
+               "q\n"
+               "cat /a.txt\n"
+               "ed /bin/echo\n"
+               "ed /a.txt\n"
+               "$d\n"
+               "\x04"
+               "\x04"
+               "cat /a.txt\n"
+               "halt\n")
+
+EDITOR_OUTPUT = """\
+Tynix shell: help lists the commands
+/> ed /a.txt
+/a.txt: new file
+*a
+one x
+two x
+three
+.
+*2d
+*1s/x/Y/
+   1  one Y
+*/thr
+   2  three
+*1i
+zero
+.
+*q
+unsaved changes (w saves, q again quits)
+*w
+17 chars
+*q
+/> cat /a.txt
+zero
+one Y
+three
+/> ed /bin/echo
+/bin/echo: not a text file
+[ed: exit status 1]
+/> ed /a.txt
+17 chars, 3 lines
+*$d
+*
+unsaved changes (w saves, Ctrl-D again quits)
+*
+/> cat /a.txt
+zero
+one Y
+three
+/> halt
+CPU halted
+"""
+
+
+def check_editor():
+    """os/ed.c as a program from /bin, started by the shell: add, delete,
+    substitute, find, insert, the unsaved-changes warning (q and Ctrl-D), a
+    binary file refused, and the file on the disk read back with fs.py."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "os"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # os/
+
+    image = os.path.join(TMP.name, "editor.img")
+    make_disk.make(image, programs=["echo", "ed"], new=True, size_mb=1, log=lambda _: None)
+    shell, _ = driver.build([str(root / "os" / "shell.c")])
+    cpu, text = driver.run_in_simulator(shell.rom, EDITOR_KEYS, 80_000_000, disk=image)
+    assert cpu.halted and text == EDITOR_OUTPUT, text
+    with FileSystem(image) as disk:
+        assert disk.get("/a.txt") == b"zero\none Y\nthree\n"
+        assert disk.check() == [], disk.check()
+    return f"{cpu.instructions} instructions"
+
+
 CHECKS = [
     check_format,
     check_text_round_trip,
@@ -642,6 +732,7 @@ CHECKS = [
     check_stat,
     check_spawn,
     check_shell,
+    check_editor,
 ]
 
 

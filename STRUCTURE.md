@@ -75,7 +75,7 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       14 checks (incl. the C library's files on the simulator against fs.py, stat, spawnv, os/shell.c)
+│   │   └── selftest.py       15 checks (incl. the C library's files on the simulator against fs.py, stat, spawnv, os/shell.c, os/ed.c)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), setjmp.asm,
 │   │                         spawn.c + spawn.asm (spawnv: load a --exe program from the disk, run it, come back)
@@ -106,9 +106,10 @@ logisim-CPU-project-/
 │
 ├── os/                       the OS, Tynix (simulator only), CP/M / DOS style: one program at a time
 │   ├── shell.c               the OS's ROM: checks the disk, prompts with the current directory; built-ins help ls
-│   │                         cd pwd cat echo rm mv mkdir rmdir df clear halt (> and >> to a file); any other
+│   │                         cd pwd cat echo rm mv cp mkdir rmdir df clear halt (> and >> to a file); any other
 │   │                         name runs /bin/NAME (or a path) with spawnv() and waits
-│   └── make_disk.py          os/disk.img (git-ignored): TFS1, the C examples built --exe in /bin, /readme.txt
+│   ├── ed.c                  a line editor for text files (a program for /bin: a, i, c, d, p, s, /find, w, q)
+│   └── make_disk.py          os/disk.img (git-ignored): TFS1, ed and the C examples built --exe in /bin, /readme.txt
 │
 └── cpu_sim/
     ├── src/                  simulator (modules import each other by plain name: run as scripts)
