@@ -90,7 +90,7 @@ pypy3 compiler/src/cc run compiler/examples/c/video_player.c -I . -D 'VIDEO="cli
 python compiler/src/cc run compiler/examples/c/image_demo.c --screen out.png
 ```
 
-The OS (simulator only): a shell in ROM that runs the programs on the disk:
+The OS, Tynix (simulator only): a shell in ROM that runs the programs on the disk:
 
 ```
 python os/make_disk.py                          # os/disk.img: the C examples in /bin, built --exe
@@ -143,7 +143,7 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 | `compiler/src/disk/` | disk tool: makes and edits disk images (TFS1 filesystem) for the simulator's `--disk` |
 | `compiler/src/img/` | image converter: PNG -> compressed picture for `gfx_image()` (`gfx.h`); `video.py`: a video -> frames for `video_player.c` |
 | `compiler/libc/` | the C library: headers (`include/`), C and assembly sources |
-| `os/` | the OS (simulator only): `shell.c`, a command shell in ROM that runs programs from the disk; `make_disk.py`, a disk with the C examples in `/bin` |
+| `os/` | the OS, Tynix (simulator only): `shell.c`, a command shell in ROM that runs programs from the disk; `make_disk.py`, a disk with the C examples in `/bin` |
 | `compiler/examples/` | example programs (assembly, and C in `c/`), the standard library (`stdlib/stdlib.asm`), circuit diagnostics |
 | `compiler/ROM/` | build output for ROM images (ignored by git) |
 | `compiler/assembly_syntax.md` | full assembly language reference |

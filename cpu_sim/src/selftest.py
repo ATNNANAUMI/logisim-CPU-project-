@@ -187,6 +187,11 @@ def test_display_controls():
     cpu.iar = 0
     cpu.run(20)
     assert cpu.bus.display.text == "d"
+    # carriage return: back to the start of the line, then overwrite (not the TTY's new line)
+    display = cpu.bus.display
+    for c in "\n 50%\r100%\nhello\rJ\nab\r\b":
+        display.write(ord(c))
+    assert display.text == "d\n100%\nJello\nab"
 
 
 def test_rgb_video():

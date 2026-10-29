@@ -1,4 +1,4 @@
-/* shell.c - the OS: a command shell in ROM for the files and programs on
+/* shell.c - the OS (Tynix): a command shell in ROM for the files and programs on
  * the disk (simulator only)
  *
  *   python os/make_disk.py                (once: os/disk.img, the examples in /bin)
@@ -412,7 +412,7 @@ static void run_line(char *s)
 
 int main(void)
 {
-    printf("tiny OS shell: help lists the commands\n");
+    printf("Tynix shell: help lists the commands\n");
     if (!is_dir("/")) {
         if (errno == ENODEV)
             printf("no disk, or not formatted: start the simulator with --disk FILE\n"

@@ -104,7 +104,7 @@ logisim-CPU-project-/
 │   └── ROM/                  build output (.obj/.rom/.map/.asm), git-ignored, created on first build;
 │                             ROM/libc/ caches the compiled C library
 │
-├── os/                       the OS (simulator only), CP/M / DOS style: one program at a time
+├── os/                       the OS, Tynix (simulator only), CP/M / DOS style: one program at a time
 │   ├── shell.c               the OS's ROM: checks the disk, prompts with the current directory; built-ins help ls
 │   │                         cd pwd cat echo rm mv mkdir rmdir df clear halt (> and >> to a file); any other
 │   │                         name runs /bin/NAME (or a path) with spawnv() and waits

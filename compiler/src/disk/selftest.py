@@ -468,7 +468,7 @@ SHELL_KEYS = ("help\n"
               "halt\n")
 
 SHELL_OUTPUT = """\
-tiny OS shell: help lists the commands
+Tynix shell: help lists the commands
 /> mkdir docs
 /> echo "two  spaces" > docs/a.txt
 /> echo more >> docs/a.txt
@@ -529,7 +529,7 @@ def check_shell():
     cpu, text = driver.run_in_simulator(shell.rom, SHELL_KEYS, 50_000_000, disk=image)
     assert cpu.halted, text
     help_text, sep, rest = text.partition("/> mkdir docs\n")
-    assert help_text.startswith("tiny OS shell: help lists the commands\n/> help\n  help ") and \
+    assert help_text.startswith("Tynix shell: help lists the commands\n/> help\n  help ") and \
         help_text.endswith("programs in /bin (type the name):\n  echo\n"), help_text
     with FileSystem(image) as disk:
         used = disk.blocks - disk.free_blocks()
