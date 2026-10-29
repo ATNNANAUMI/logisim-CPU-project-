@@ -11,7 +11,7 @@
 ; ESP and EBP can't be written directly; two STK RETs set them:
 ;   stack[EBP] = Y; STK RET  ->  ESP = EBP, EBP = Y
 ;   stack[Y]   = V; STK RET  ->  ESP = Y,   EBP = V
-; (measured on the circuit with compiler/examples/tests/diag12.asm)
+; (measured on the circuit with compiler/examples/asm/tests/diag12.asm)
 ; ==================================================================
 
         .global setjmp, longjmp

@@ -354,7 +354,7 @@ def check_video():
     shades = [to888(c) for c in palette]
     assert screens[-1] == [palette[nearest(shades, to888(c))] for c in frames[-1]]
 
-    player = HERE.parent.parent / "examples" / "c" / "video_player.c"
+    player = HERE.parent.parent / "examples" / "c" / "graphics" / "video_player.c"
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         (tmp / "frames").mkdir()
