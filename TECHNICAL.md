@@ -438,7 +438,7 @@ modules import each other by plain name, so run them as scripts
 | `isa.py` | opcode tables, `decode(word) -> Instr`, `disassemble(word, operand)`. `Instr.takes_operand` says whether a literal word follows |
 | `alu.py` | `int_op(name, a, b)` and `float_op(name, a, b)`, each returning `(R0 value, flag nibble)`; float32 ↔ bits helpers |
 | `memory.py` | `Memory` with two 16M-word banks (Python lists, 128 MB each), `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
-| `devices.py` | `Display` (lines of text; `\n` new line, `\r` clears the line, `\b` deletes, `\f` clears it all, so headless output shows only what came after the last `\f`), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
+| `devices.py` | `Display` (lines of text; `\n` new line, `\r` back to the start of the line (what follows overwrites it), `\b` deletes, `\f` clears it all, so headless output shows only what came after the last `\f`), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()`, `reset()`, `resume()` |
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
@@ -1158,7 +1158,7 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | number display `0x3C` | shows the last word sent (window and headless output) | 8 hex digits in `PC` |
 | RGB screen `0x6C`/`0x6D` | 128×128 RGB565, the "RGB screen" tab, `--screen` | `RGB_Display` → RGB Video in `PC` (2026-10-22); the `0x6D` clear isn't built |
 | disk `0x8C`/`0x8D` | a file, `--disk` or the window's `disk` button | none (Logisim's RAM can't save itself) |
-| text display `0x5C`: control characters | `\n` new line, `\r` clears the line, `\b` deletes, `\f` clears it all; others are printed | the `display` subcircuit gives the TTY 7 data bits and a write strobe (its clear pin isn't wired). Logisim 4.1.0's `TTY` (read in its code, `TtyState.add`, not run): `\n` and `\r` both start a new line, `\b` deletes, `\f` clears; other control characters are dropped. **`\r` differs**; nothing in the toolchain prints it |
+| text display `0x5C`: control characters | `\n` new line, `\r` a carriage return (back to the start of the line; what follows overwrites it), `\b` deletes at the end of a line (after `\r` it moves back one), `\f` clears it all; others are printed | the `display` subcircuit gives the TTY 7 data bits and a write strobe (its clear pin isn't wired). Logisim 4.1.0's `TTY` (read in its code, `TtyState.add`, not run): `\n` and `\r` both start a new line, `\b` deletes, `\f` clears; other control characters are dropped. **`\r` differs, on purpose** (decided 2026-10-28, OS questionnaire round 4 Q25): a real carriage return is worth having apart from `\n`, even though the circuit's TTY can't do it. Nothing in the toolchain prints it |
 | timing | one instruction per step | several clock cycles per instruction (stepper) |
 
 ---
@@ -1412,9 +1412,10 @@ files only) and three assembly files: `runtime.asm` (`_pow2`, `_udiv`,
 
 ---
 
-## 11. The OS (`os/`)
+## 11. The OS: Tynix (`os/`)
 
-Simulator only (it needs the disk, 1.7 and 7.6). One program at a time,
+The OS is called Tynix (after tiny C; the shell's banner says `Tynix
+shell`). Simulator only (it needs the disk, 1.7 and 7.6). One program at a time,
 like CP/M or MS-DOS: there are no interrupts and no memory protection, so
 no multitasking.
 

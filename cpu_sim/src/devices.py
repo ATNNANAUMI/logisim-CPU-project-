@@ -16,23 +16,35 @@ import config as config
 
 class Display:
     """Text console at 0x5C.  Takes ASCII values, 0x0A is a newline, 0x0C
-    (form feed) clears it, as Logisim's TTY does."""
+    (form feed) clears it, as Logisim's TTY does.
+
+    0x0D is a carriage return: back to the start of the line, and what comes
+    next overwrites it (Logisim's TTY starts a new line instead; kept apart
+    from 0x0A on purpose, TECHNICAL §8).  0x08 deletes the last char at the
+    end of a line, as the TTY does; after a carriage return it moves back one.
+    """
 
     def __init__(self):
         self.lines = [""]
+        self.col = 0                    # where the next char goes in the last line
 
     def write(self, value: int) -> None:
         char = value & 0xFF
+        line = self.lines[-1]
         if char == 0x0A:
             self.lines.append("")
+            self.col = 0
         elif char == 0x0C:
             self.clear()
         elif char == 0x0D:
-            self.lines[-1] = ""
+            self.col = 0
         elif char == 0x08:
-            self.lines[-1] = self.lines[-1][:-1]
+            if self.col == len(line):
+                self.lines[-1] = line[:-1]
+            self.col = max(self.col - 1, 0)
         else:
-            self.lines[-1] += chr(char)
+            self.lines[-1] = line[:self.col] + chr(char) + line[self.col + 1:]
+            self.col += 1
 
     @property
     def text(self) -> str:
@@ -40,6 +52,7 @@ class Display:
 
     def clear(self) -> None:
         self.lines = [""]
+        self.col = 0
 
 
 class Keyboard:
