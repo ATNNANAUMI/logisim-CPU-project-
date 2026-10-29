@@ -75,7 +75,7 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       13 checks (incl. the C library's files on the simulator against fs.py, spawnv, os/shell.c)
+│   │   └── selftest.py       14 checks (incl. the C library's files on the simulator against fs.py, stat, spawnv, os/shell.c)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), setjmp.asm,
 │   │                         spawn.c + spawn.asm (spawnv: load a --exe program from the disk, run it, come back)
@@ -244,7 +244,7 @@ The design follows the "But How Do It Know?" style: a single bus,
 * Files: `fopen` & co. on the `--disk` image (TFS1, needs `python compiler/src/disk
   format`); text files packed 4 chars a word, `"b"` files a word per char (a word
   can equal EOF: use `fread`/`feof`); `dirent.h`, `unistd.h` (mkdir, chdir, getcwd),
-  `sys/statvfs.h` (free space);
+  `sys/statvfs.h` (free space), `sys/stat.h` (`stat`: type, text or binary, size);
   `fs.c` is linked only into programs that call `fopen`. Paths `/a/b` or relative.
 * Programs for the OS: `cc build --exe` links for RAM at `0x1100000` (code and
   data together) and writes a TEX1 `.exe` (5-word header + words); `spawnv(path,

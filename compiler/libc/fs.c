@@ -13,6 +13,7 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/statvfs.h>
+#include <sys/stat.h>
 #include "local.h"
 
 #define SEEK_PORT 0x8C
@@ -739,5 +740,27 @@ int statvfs(const char *path, struct statvfs *buf)
     buf->f_bfree = buf->f_bavail = free;
     buf->f_fsid = MAGIC;
     buf->f_namemax = _FS_NAME - 1;
+    return 0;
+}
+
+/* what a file is (sys/stat.h) */
+int stat(const char *path, struct stat *buf)
+{
+    _Node node;
+    if (_fs_lookup(path, &node))
+        return -1;
+    memset(buf, 0, sizeof *buf);
+    if (node.flags & _FS_DIR)
+        buf->st_mode = S_IFDIR;
+    else
+        buf->st_mode = S_IFREG | (node.flags & _FS_PACKED ? S_ITEXT : 0);
+    buf->st_nlink = 1;
+    buf->st_blksize = _FS_BLOCK;
+    buf->st_ino = node.first;
+    buf->st_size = node.length;
+    if (node.first) {                   /* blocks of the chain: count its words */
+        unsigned words = (node.flags & _FS_PACKED) ? (node.length + 3) / 4 : node.length;
+        buf->st_blocks = (words + _FS_BLOCK - 1) / _FS_BLOCK;
+    }
     return 0;
 }

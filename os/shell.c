@@ -9,7 +9,7 @@
  *
  * It checks the disk, then shows a prompt with the current directory. The
  * built-in commands (help lists them) work on the files: ls cd pwd cat echo
- * rm mv mkdir rmdir df clear halt. Any other name is a program: /bin/NAME,
+ * rm mv cp mkdir rmdir df clear halt. Any other name is a program: /bin/NAME,
  * or a path when the name has a '/' (./prog, /games/snake); spawnv() loads
  * it, runs it in the current directory and comes back here when it ends.
  * A program that can't be loaded gives a message and the shell goes on.
@@ -27,6 +27,7 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <sys/statvfs.h>
+#include <sys/stat.h>
 #include <gfx.h>
 
 #define LINE_MAX 256
@@ -204,6 +205,45 @@ static int cmd_mv(int argc, char **argv)
     return rename(argv[1], path) ? fail("mv", argv[1]) : 0;
 }
 
+/* a copy of a file, text or binary like the original (stat tells which) */
+static int cmd_cp(int argc, char **argv)
+{
+    struct stat st;
+    FILE *from, *to;
+    const char *base;
+    int c, text;
+    if (argc != 3)
+        return -1;
+    if (stat(argv[1], &st))
+        return fail("cp", argv[1]);
+    if (S_ISDIR(st.st_mode)) {
+        printf("cp: %s: is a directory\n", argv[1]);
+        return 1;
+    }
+    if (is_dir(argv[2])) {              /* into the directory, same name */
+        base = strrchr(argv[1], '/');
+        sprintf(path, "%s/%s", argv[2], base ? base + 1 : argv[1]);
+    } else
+        strcpy(path, argv[2]);
+    text = S_ISTEXT(st.st_mode);
+    if ((from = fopen(argv[1], text ? "r" : "rb")) == 0)
+        return fail("cp", argv[1]);
+    if ((to = fopen(path, text ? "w" : "wb")) == 0) {
+        fclose(from);
+        return fail("cp", path);
+    }
+    while ((c = fgetc(from)) != EOF || !feof(from))
+        fputc(c, to);                   /* a binary word of -1 reads as EOF: ferror tells */
+    c = ferror(from) || ferror(to);
+    fclose(from);
+    fclose(to);
+    if (c) {
+        printf("cp: %s: write error\n", path);
+        return 1;
+    }
+    return 0;
+}
+
 static int cmd_mkdir(int argc, char **argv)
 {
     int i, status = 0;
@@ -263,6 +303,7 @@ static const struct command {
     {"echo", "echo [word...]", "show the words", cmd_echo},
     {"rm", "rm path...", "delete files, empty directories", cmd_rm},
     {"mv", "mv from to", "rename, or move into a directory", cmd_mv},
+    {"cp", "cp from to", "copy a file, or into a directory", cmd_cp},
     {"mkdir", "mkdir dir...", "make directories", cmd_mkdir},
     {"rmdir", "rmdir dir...", "delete empty directories", cmd_rmdir},
     {"df", "df", "free space on the disk", cmd_df},
