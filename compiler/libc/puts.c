@@ -1,10 +1,9 @@
-/* puts: a string and a newline to the text display */
+/* puts: a string and a newline to stdout (see putchar.c) */
 #include <stdio.h>
 
 int puts(const char *s)
 {
-    while (*s)
-        __builtin_out(0x5C, *s++);
-    __builtin_out(0x5C, '\n');
+    fputs(s, stdout);
+    fputc('\n', stdout);
     return 0;
 }

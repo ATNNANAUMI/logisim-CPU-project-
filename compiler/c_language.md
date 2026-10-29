@@ -357,7 +357,10 @@ for it and returns its exit status (like DOS's `spawnv(P_WAIT, ...)`), or
 -1 with `errno` set when it can't be loaded: `ENOENT`, `EISDIR`, or
 `ENOEXEC` (not a program). It starts in the current directory. Close the
 files you have open first: the caller's open `FILE`s don't see the
-program's changes. A `--exe` program can't call `spawnv` (the build
+program's changes. `spawnv_to(path, argv, out)` is the same with the
+program's `stdout` (what `printf`, `putchar` and `puts` write) going to the
+open `FILE` `out` instead of the display (the shell's `>`); `stderr` and the
+keyboard echo stay on the display. A `--exe` program can't call `spawnv` (the build
 refuses). `os/shell.c` (TECHNICAL §11) is a shell built on it.
 
 **stdlib.h:** `malloc`, `calloc`, `realloc`, `free` (first fit, from
@@ -405,7 +408,7 @@ On the circuit every instruction counts (about 160 a second). The compiler:
 
 Things that help: use local variables for loop counters and pointers (not
 globals, not variables whose address is taken); avoid `printf` in loops
-(`putchar`/`puts` are much cheaper); prefer `int` to `float` when you can.
+(`putchar`/`puts` are cheaper); prefer `int` to `float` when you can.
 A call costs about 20-30 instructions. Unsigned division by a variable
 calls a helper; signed division is one instruction.
 

@@ -1,8 +1,8 @@
-/* putchar: one character to the text display */
+/* putchar: one character to stdout (the text display, or the file a shell's
+   `>` gave a program: file.c's fputc follows stdout's put) */
 #include <stdio.h>
 
 int putchar(int c)
 {
-    __builtin_out(0x5C, c);
-    return c;
+    return fputc(c, stdout);
 }

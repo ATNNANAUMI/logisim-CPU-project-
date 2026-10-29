@@ -1341,9 +1341,12 @@ leads to after an unconditional jump.
   magic). `spawnv()` (`spawn.c`) checks the header, copies the words with
   `_fs_read` (one seek a block, about 14 instructions a word), zeroes the
   variables, and jumps to the entry with R1 = a block: argc, argv, the
-  address to go back to, its current directory. That crt0 keeps the block,
-  calls the `_init_` routines and `_fs_inherit(cwd)` (when `fs.c` is linked),
-  then `main(argc, argv)`; its `_Exit` jumps back to `spawn.asm`'s
+  address to go back to, its current directory, and a `put` function for
+  stdout (0: the display; `spawnv_to(path, argv, out)` gives one that writes
+  to the caller's open `FILE`, which is how the shell's `>` works for
+  programs). That crt0 keeps the block, calls the `_init_` routines,
+  `_fs_inherit(cwd)` (when `fs.c` is linked) and `_set_stdout(put)` (when
+  `file.c` is), then `main(argc, argv)`; its `_Exit` jumps back to `spawn.asm`'s
   `_spawn_return` with R0 = the status, which `longjmp`s to the stack
   `spawnv()` had, so `exit()` works at any depth. The program has its own
   copy of the library (its own heap, from its `_end` to the end of RAM, and
@@ -1422,7 +1425,7 @@ no multitasking.
 
 | file | what it is |
 | --- | --- |
-| `os/shell.c` | the OS's ROM: a command shell, built like any C program (18,684 words of ROM, 2,923 of RAM) |
+| `os/shell.c` | the OS's ROM: a command shell, built like any C program (18,793 words of ROM, 2,925 of RAM) |
 | `os/ed.c` | a line editor for text files, a program for `/bin` (15.8K words; section 11.1) |
 | `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `os/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples and `ed`, 2.8K–17.4K words each, in under a second |
 
@@ -1470,9 +1473,13 @@ directory with the words as `argv`; the shell's variables and heap stay
 below `0x1100000`. When it ends, the shell prints `[NAME: exit status N]`
 if N isn't 0. If it can't be loaded the shell says `NAME: no such command`
 (a plain name not in `/bin`) or the path and `strerror` (`Exec format
-error` for a text file, `Is a directory`). `>` after a program is refused:
-the program has its own copy of the C library, whose `stdout` is the
-display.
+error` for a text file, `Is a directory`). `>` and `>>` work after a
+program too: the shell opens the file and passes it to `spawnv_to()`, and
+whatever the program writes to `stdout` (`printf`, `putchar`, `puts`,
+`fputs(stdout)`) goes to the file; its errors (`stderr`) and the echo of the
+keys it reads stay on the display. The program must not rewrite that file
+itself (the shell's `FILE` would not see it). If the program can't be
+loaded the file has been made (empty) anyway, as in a Unix shell.
 
 A program that never ends keeps the CPU: nothing can stop it from the
 outside. The examples `make_disk.py` puts in `/bin` end by themselves, on
