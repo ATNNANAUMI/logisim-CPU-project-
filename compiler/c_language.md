@@ -292,7 +292,7 @@ by `<stdarg.h>` and `<stddef.h>`), `__builtin_expect(e, c)`,
 Headers: `assert.h`, `cpu.h`, `ctype.h`, `dirent.h`, `errno.h`, `float.h`,
 `gfx.h`, `inttypes.h`, `iso646.h`, `limits.h`, `locale.h`, `math.h`,
 `setjmp.h`, `signal.h`, `stdalign.h`, `stdarg.h`, `stdbool.h`, `stddef.h`,
-`stdint.h`, `stdio.h`, `stdlib.h`, `stdnoreturn.h`, `string.h`, `sys/statvfs.h`,
+`stdint.h`, `stdio.h`, `stdlib.h`, `stdnoreturn.h`, `string.h`, `sys/stat.h`, `sys/statvfs.h`,
 `time.h`, `unistd.h`.
 
 Only the library files a program uses are linked in, and a program may
@@ -339,6 +339,12 @@ listed), `closedir`, at most 4 open. Errors set `errno`: `ENOENT`,
 `EEXIST`, `ENOTDIR`, `EISDIR`, `ENOTEMPTY`, `ENOSPC`, `ENODEV`, `EMFILE`,
 `ENAMETOOLONG`, `EINVAL`, `EBUSY` (the root), with Linux's numbers;
 `strerror` and `perror` print them.
+
+**sys/stat.h:** `stat(path, &st)` gives `st_mode` (`S_ISDIR`, `S_ISREG`, and
+the non-standard `S_ISTEXT`: a text file, packed 4 chars a word, as opposed to
+a binary one), `st_size` (chars for a text file, words for a binary one, the
+words of the entries for a directory), `st_ino` (the first block), `st_blocks`,
+`st_nlink` (1) and `st_blksize` (256). No times, owners or permissions.
 
 **sys/statvfs.h:** `statvfs(path, &s)` gives the disk's size and free
 space in blocks of `f_bsize` (256) chars: `f_blocks`, `f_bfree` (=

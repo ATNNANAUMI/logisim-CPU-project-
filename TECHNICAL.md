@@ -964,11 +964,11 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 13 checks: format (sparse, the superblock), text and
+python compiler/src/disk/selftest.py  # 14 checks: format (sparse, the superblock), text and
                                       # binary round trips (block edges), overwriting frees
                                       # blocks, a directory past one block (entries reused),
                                       # subdirectories, . and .., mv, name rules, disk full, CLI,
-                                      # fsck, and the C library on the simulator against fs.py
+                                      # fsck, the C library on the simulator against fs.py, `stat()` against fs.py,
                                       # (each reads what the other wrote; fsck clean after),
                                       # and spawnv(): a --exe program put on the disk, run
                                       # three times (arguments, exit status, fresh variables,
@@ -1358,7 +1358,7 @@ leads to after an unconditional jump.
 `compiler/libc/` holds the headers (`include/`), the library in C (one file
 per group of functions: `printf.c`, `format.c`, `fdigits.c`, `scanf.c`,
 `string.c`, `malloc.c`, `math.c`, `gfx.c`, `gfx_text.c` and `gfx_image.c` for the RGB
-screen, `fs.c` (files on the disk, TFS1 as in 7.6, and `statvfs`) and `dir.c`
+screen, `fs.c` (files on the disk, TFS1 as in 7.6, `stat` and `statvfs`) and `dir.c`
 (directories), ...), `local.h` (shared by the library
 files only) and three assembly files: `runtime.asm` (`_pow2`, `_udiv`,
 `_umod`), `setjmp.asm`, and `spawn.asm` (the jumps of `spawn.c`'s `spawnv`,
@@ -1378,7 +1378,7 @@ files only) and three assembly files: `runtime.asm` (`_pow2`, `_udiv`,
 * `FILE` (in `local.h`) carries `get`/`put`/`flush` pointers that `fopen`
   sets; `file.c`, `getchar.c`, `format.c` and `scanf.c` call them for
   files on the disk, so `fs.c` is linked only into programs that call
-  `fopen` or `statvfs` (c_decisions 33–35).
+  `fopen`, `stat` or `statvfs` (c_decisions 33–35).
 * `format.c` prints floats exactly: `fdigits.c` turns the float's exact
   value into decimal digits (base-10000 pieces for big integer parts, a
   160-bit binary fraction for the rest) and rounds ties to even.
@@ -1421,7 +1421,7 @@ no multitasking.
 
 | file | what it is |
 | --- | --- |
-| `os/shell.c` | the OS's ROM: a command shell, built like any C program (17,833 words of ROM, 2,923 of RAM) |
+| `os/shell.c` | the OS's ROM: a command shell, built like any C program (18,684 words of ROM, 2,923 of RAM) |
 | `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples, 2.8K–17.4K words each, in under a second |
 
 ```
@@ -1450,6 +1450,7 @@ Built-in commands (the `commands[]` table, which `help` also prints):
 | `echo [word...]` | the words, one space apart |
 | `rm path...` | `remove`: files and empty directories |
 | `mv from to` | `rename`; into `to` when that is a directory |
+| `cp from to` | a copy; into `to` when that is a directory. `stat()` says whether the source is a text file or binary (`fopen` `"r"`/`"w"` or `"rb"`/`"wb"`), so a program in `/bin` copies and still runs. Not a directory |
 | `mkdir dir...`, `rmdir dir...` | |
 | `df` | `statvfs("/")`: 1 KB blocks, used, free (it reads the whole FAT: 0.9 million instructions on 64 MB) |
 | `clear` | a form feed (12) to the text display, `gfx_clear()` for the RGB screen |

@@ -331,6 +331,71 @@ def check_c_library():
     return f"{cpu.instructions} instructions"
 
 
+STAT_PROGRAM = r"""
+#include <stdio.h>
+#include <errno.h>
+#include <sys/stat.h>
+
+static void show(const char *path)
+{
+    struct stat st;
+    if (stat(path, &st))
+        printf("%s: error %d\n", path, errno);
+    else
+        printf("%s: %s%s size %u blocks %u ino %u links %u\n", path,
+               S_ISDIR(st.st_mode) ? "dir" : S_ISREG(st.st_mode) ? "file" : "?",
+               S_ISTEXT(st.st_mode) ? " text" : "", st.st_size, st.st_blocks,
+               st.st_ino, st.st_nlink);
+}
+
+int main(void)
+{
+    show("/t.txt");
+    show("/b.bin");
+    show("/empty.txt");
+    show("/sub");
+    show("/");
+    show("/nope");
+    show("/t.txt/x");
+    return 0;
+}
+"""
+
+
+def check_stat():
+    """stat() (sys/stat.h) from C against what fs.py says about the same
+    files: type, text or binary, size, blocks, first block; the errors."""
+    import sys
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import errno
+
+    with new_disk(fs.BLOCK * 64, "stat.img") as disk:
+        disk.put("/t.txt", bytes(32 + i % 95 for i in range(1500)))
+        disk.put("/b.bin", bytes(4 * 300), binary=True)
+        disk.put("/empty.txt", b"")
+        disk.mkdir("/sub")
+        first = {n: disk.lookup(n).first for n in ("/t.txt", "/b.bin")}
+        image = disk.path
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "stat.c"
+        path.write_text(STAT_PROGRAM)
+        program, _ = driver.build([str(path)])
+    cpu, out = driver.run_in_simulator(program.rom, "", 5_000_000, disk=image)
+    with FileSystem(image) as disk:
+        sub = disk.lookup("/sub")
+        top = disk.lookup("/")
+        expect = (f"/t.txt: file text size 1500 blocks 2 ino {first['/t.txt']} links 1\n"
+                  f"/b.bin: file size 300 blocks 2 ino {first['/b.bin']} links 1\n"
+                  "/empty.txt: file text size 0 blocks 0 ino 0 links 1\n"
+                  f"/sub: dir size {sub.length} blocks {(sub.length + 255) // 256} ino {sub.first} links 1\n"
+                  f"/: dir size {top.length} blocks {(top.length + 255) // 256} ino {top.first} links 1\n"
+                  f"/nope: error {errno.ENOENT}\n"
+                  f"/t.txt/x: error {errno.ENOTDIR}\n")
+    assert cpu.halted and out == expect, out
+    return f"{cpu.instructions} instructions"
+
+
 SPAWNED = r"""
 #include <stdio.h>
 #include <stdlib.h>
@@ -454,6 +519,12 @@ SHELL_KEYS = ("help\n"
               "/bin/echo x \"y z\"\n"
               "/bin/echo\n"
               "cat /bin/echo\n"
+              "cp /a.txt /b.txt\n"
+              "cp /bin/echo /e2\n"
+              "/e2 copy\n"
+              "cp /docs /x\n"
+              "cp /nope /x\n"
+              "cat /b.txt\n"
               "/a.txt\n"
               "nope\n"
               "primes > p.txt\n"
@@ -491,6 +562,17 @@ x y z
 [/bin/echo: exit status 1]
 /docs> cat /bin/echo
 cat: /bin/echo: a binary file (a program?)
+/docs> cp /a.txt /b.txt
+/docs> cp /bin/echo /e2
+/docs> /e2 copy
+copy
+/docs> cp /docs /x
+cp: /docs: is a directory
+/docs> cp /nope /x
+cp: /nope: No such file or directory
+/docs> cat /b.txt
+two  spaces
+more
 /docs> /a.txt
 /a.txt: Exec format error
 /docs> nope
@@ -504,7 +586,7 @@ line 1
 line 1
 /> rmdir docs
 /> ls
-bin/  readme.txt  a.txt  typed.txt
+bin/  readme.txt  a.txt  b.txt  e2  typed.txt
 /> df
 {df}
 /> halt
@@ -537,7 +619,8 @@ def check_shell():
               f"{disk.free_blocks()} free ({(used * 100 + disk.blocks - 1) // disk.blocks}% used)")
         got = help_text.partition("/> help\n")[0] + sep + rest
         assert got == SHELL_OUTPUT.format(df=df, readme=len(make_disk.README)), got
-        assert disk.get("/a.txt") == b"two  spaces\nmore\n"
+        assert disk.get("/a.txt") == b"two  spaces\nmore\n" == disk.get("/b.txt")
+        assert disk.lookup("/e2").length == sizes["echo"] + 5 and not disk.lookup("/e2").packed
         assert disk.get("/typed.txt") == b"line 1\n"
         assert disk.lookup("/bin/echo").length == sizes["echo"] + 5
         assert disk.check() == [], disk.check()
@@ -556,6 +639,7 @@ CHECKS = [
     check_command_line,
     check_fsck,
     check_c_library,
+    check_stat,
     check_spawn,
     check_shell,
 ]
