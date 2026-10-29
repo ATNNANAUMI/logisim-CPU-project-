@@ -1538,7 +1538,7 @@ cells, and it does that at most every 33 ms (30 fps, `clock()`): keys are
 polled with `key_pressed()` and the screen is redrawn when something
 changed and a frame has passed. The screen can't be read back, which is why the cells are
 remembered. The text is scrolled by `top` and `left` to keep the cursor
-visible. The self-check `screen_editor` (disk suite) types a session
+visible. The window ignores characters outside ASCII 32-126 (keyboard and font are ASCII), so pasted `§` or `→` are dropped; left as is (2026-10-29). Pasting 20K chars takes about 3 s (it took 3 minutes when the page was redrawn after every key). The self-check `screen_editor` (disk suite) types a session
 through the shell, reads the file back with `fs.py`, and checks the screen
 holds text while it runs and is blank after.
 

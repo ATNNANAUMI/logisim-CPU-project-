@@ -249,7 +249,9 @@ The language itself is described in [`c_language.md`](c_language.md).
     wants. The cursor is a cell drawn inverted, not a separate overlay.
     The redraw runs at most every 33 ms (30 fps): the loop polls
     `key_pressed()`, handles every key waiting, and redraws only when
-    something changed and `clock()` says a frame has passed.
+    something changed and `clock()` says a frame has passed. Pasting 20K
+    chars went from about 3 minutes (a redraw per key) to about 3 seconds.
+    Characters outside ASCII 32-126 are dropped by the window; left as is.
     Keys: Ctrl-S / Ctrl-Q like most editors; Ctrl-D stays unused because it
     ends the shell's input. Guess: the circuit's keyboard may not buffer
     control codes (see TECHNICAL 8), so on the circuit only the arrow-less,
