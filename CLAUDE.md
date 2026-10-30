@@ -109,7 +109,7 @@ Arthur keeps the project's notes in a private Obsidian vault, `~/Documents/obsid
 - Open A/B choices: a new round in `Wiki/OS/OS questionnaire.md` (one box per option, **(rec)** on yours), linked from `Project/Questions for me.md`; when answered, a `> [!done]` callout.
 - Mistakes of the session: `Raw/ai-mistakes/ai_mistakes_<date>_<topic>.md` in the format of `Raw/ai-mistakes/ai_mistakes_prompt.md` (honest, including slips caught before committing); these logs are historical, never rewritten later.
 
-The vault has its own rules in `~/Documents/obsidian-notes/CLAUDE.md` (folders `Raw/`, `Wiki/`, `Output/`; never read or list `_build/`; a new note is linked from the project index `Wiki/Logisim CPU.md` and from `Home.md`). Read them before editing it.
+The vault has its own rules in `~/Documents/obsidian-notes/CLAUDE.md` (folders `Raw/`, `Wiki/`, `Output/`; never read or list `_build/`; a new note is linked from the project index note in `Wiki/` and from the vault's `Home.md`). Read them before editing it.
 
 Visual pages stay local files in the vault, not claude.ai artifacts.
 
