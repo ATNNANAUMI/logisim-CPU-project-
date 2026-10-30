@@ -101,7 +101,7 @@ Most facts are written in more than one doc. When you change one of these, updat
 
 ## The Obsidian vault (outside the repo)
 
-Arthur keeps the project's notes in a private Obsidian vault, `~/Documents/obsidian-notes/logisim-CPU/Wiki/` (its own git repo, backed up by itself). It is not part of this public repository: never copy its content here, and never put personal notes in the repo. After work that changes the project, update the vault in the same session, not only the repo docs:
+Arthur keeps the project's notes in a private Obsidian vault, `~/Documents/obsidian-notes/logisim-CPU/` (its own git repo, backed up by itself). It is not part of this public repository: never copy its content here, and never put personal notes in the repo. After work that changes the project, update the vault in the same session, not only the repo docs:
 
 - `Output/pages/os_roadmap.md`: the phase checklist and its Log (dated entry with branch/commit names); `Output/pages/os_roadmap.html`: the matching timeline entries (same style as the existing ones).
 - The topic notes the change touches, in `Wiki/`: `OS/OS plan.md`, `Project/Roadmap.md`, `Project/Questions for me.md`, `Toolchain/Commands.md`, `Toolchain/Testing and verification.md` (check counts).
