@@ -69,7 +69,9 @@ def _namespace(name):
     module's globals as constants (until one is assigned again) and looks up
     a plain dict's every time."""
     space = types.ModuleType(name).__dict__
-    space.update(Stop=Stop, int_op=alu.int_op, float_op=alu.float_op)
+    space.update(Stop=Stop, div=alu.div, mod=alu.mod, to_float=alu.bits_to_float,
+                 to_bits=alu.float_to_bits, fdiv=alu._float_divide,
+                 float_to_int=alu._float_to_int)
     return space
 
 
@@ -503,13 +505,8 @@ class _Writer:
             self.set_reg(0, value)
             return
         b = _hex(kb) if kb is not None else self.reg(rb)
-        if is_float or op in (0x3, 0xA):                    # floats, DIV, MOD: alu.py
-            a = _hex(ka) if ka is not None else self.reg(ra)
-            fn = "float_op" if is_float else "int_op"
-            self.emit(f"r0, flags = {fn}({name!r}, {a}, {b})" if seen
-                      else f"r0 = {fn}({name!r}, {a}, {b})[0]")
-            self.val[0] = "r0"
-            self.dirty.add(0)
+        if is_float:
+            self.float_alu(op, ka, ra, b, seen)
             return
         uses_a = seen or op not in ONE_OPERAND
         a = (_hex(ka) if ka is not None else self.reg(ra)) if uses_a else None
@@ -538,6 +535,10 @@ class _Writer:
             result, carry = f"({a} - {b}) & 0xFFFFFFFF", f"{a} < {b}"
         elif op == 0x2:                                     # MULT (low 32 bits)
             result = f"({a} * {b}) & 0xFFFFFFFF"
+        elif op == 0x3:                                     # DIV, MOD: alu.py's
+            result = f"div({a}, {b})"
+        elif op == 0xA:
+            result = f"mod({a}, {b})"
         elif op == 0x4:                                     # SHL: C = the bit out
             result, carry = f"({b} << 1) & 0xFFFFFFFF", f"{b} >> 31"
         elif op == 0x5:                                     # SHR: C = the bit out
@@ -564,3 +565,41 @@ class _Writer:
         if seen:
             refs.add(0)                                     # value (and some carries) read r0
             self.flags = _Flags(a, b, "r0", carry, None, refs)
+
+    def float_alu(self, op, ka, ra, b, seen):
+        """The float group, as alu.float_op() does it: inputs and results
+        through float32, A = RA > RB as floats, N and Z from the result (as
+        a float, so -0.0 is zero; an integer for INT), C = 0."""
+        a = _hex(ka) if ka is not None else (self.reg(ra) if seen or op in (0, 1, 2, 3, 0xF) else None)
+        fa = fb = None
+        if a is not None:
+            fa = self.temp("f")
+            self.emit(f"{fa} = to_float({a})")
+        if seen or op in (0, 1, 2, 3, 4, 7, 0xD, 0xF):
+            fb = self.temp("f")
+            self.emit(f"{fb} = to_float({b})")
+        above = f"(4 if {fa} > {fb} else 0)" if seen else ""
+        if op == 0x7:                                       # INT: float -> int
+            self.set_reg(0, f"float_to_int({fb})")
+            if seen:
+                self.emit(f"flags = {above} | ((r0 >> 30) & 2) | (r0 == 0)")
+            return
+        if op in (0x5, 0x8, 0x9, 0xA, 0xB, 0xC, 0xE):        # no result: config.FLOAT_NOP_RESULT
+            value = config.FLOAT_NOP_RESULT & MASK
+            self.set_reg(0, value)
+            if seen:
+                self.emit(f"flags = {above} | {2 if value & 0x80000000 else 0} | {int(value == 0)}")
+            return
+        result = {0x0: f"{fa} + {fb}", 0x1: f"{fa} - {fb}", 0x2: f"{fa} * {fb}",
+                  0x3: f"fdiv({fa}, {fb})", 0x4: f"{fb} * 2", 0xD: f"-{fb}", 0xF: f"{fa} - {fb}",
+                  0x6: f"float(({b} ^ 0x80000000) - 0x80000000)"}[op]
+        if op == 0xF:                                       # CMP: flags from RA - RB, R0 = 0
+            value = self.temp("d")
+            self.emit(f"{value} = to_bits({result})")
+            self.set_reg(0, 0)
+        else:
+            self.set_reg(0, f"to_bits({result})")
+            value = "r0"
+        if seen:
+            self.emit(f"flags = {above} | (2 if {value} > 0x80000000 else 0)"
+                      f" | (({value} & 0x7FFFFFFF) == 0)")
