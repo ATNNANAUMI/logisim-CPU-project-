@@ -23,7 +23,7 @@ static int digit_value(int c)
 static unsigned long parse(const char *s, char **end, int base, int *neg, int *overflow)
 {
     const char *p = s;
-    unsigned long v = 0;
+    unsigned long v = 0, limit, last;
     int digits = 0;
     *neg = 0;
     *overflow = 0;
@@ -40,9 +40,11 @@ static unsigned long parse(const char *s, char **end, int base, int *neg, int *o
     } else if (base == 0) {
         base = p[0] == '0' ? 8 : 10;
     }
+    limit = ULONG_MAX / base;                   /* v * base + d overflows when v > limit, */
+    last = ULONG_MAX - limit * base;            /* or v == limit and d > last */
     while (digit_value(*p) < base) {
         unsigned long d = digit_value(*p);
-        if (v > (ULONG_MAX - d) / base)
+        if (v > limit || (v == limit && d > last))
             *overflow = 1;
         v = v * base + d;
         digits++;
