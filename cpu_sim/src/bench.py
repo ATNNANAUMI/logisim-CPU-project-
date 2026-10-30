@@ -49,11 +49,13 @@ WORKLOADS = {
     "image":   (["c/graphics/image_demo.c"], "", None),             # gfx_image (bit stream)
     "queens":  (["../src/cc/tests/queens.c"], "", None),            # recursion, printf
     "asm":     (["asm/stdlib/stdlib_demo.asm", "asm/stdlib/stdlib.asm"], "", None),
-    "shell":   (["../../os/shell.c"],                               # the OS: disk, RAM programs
+    "shell":   (["../../os/shell.c"],                               # the OS: commands, the disk
                 "ls -l /\nhelp\necho hi > /a.txt\ncat /a.txt /readme.txt\n"
                 + "/bin/echo a b c\n/bin/echo x > /b.txt\ncp /readme.txt /c.txt\ncat /c.txt\n" * 4
                 + "cp /bin/echo /e2\n/e2 copy\nls\ndf\nhalt\n", None),
+    "os":      (["../../os/shell.c"], "game_of_life\n", 20_000_000),  # a program in RAM (/bin)
 }
+DISKS = {"shell": ["echo"], "os": ["game_of_life"]}         # what the disk's /bin holds
 
 
 def build(name, sources, rebuild):
@@ -75,14 +77,14 @@ def build(name, sources, rebuild):
     return load_image(str(rom))
 
 
-def disk_image(rebuild):
-    """A pristine 1 MB disk for the shell: TFS1, /bin/echo, /readme.txt."""
-    image = OUT / "shell.img"
+def disk_image(name, rebuild):
+    """A pristine 1 MB disk for the shell: TFS1, DISKS[name] in /bin, /readme.txt."""
+    image = OUT / f"{name}.img"
     if rebuild or not image.exists():
         sys.path.append(str(ROOT / "os"))
         import make_disk
         OUT.mkdir(parents=True, exist_ok=True)
-        make_disk.make(image, programs=["echo"], new=True, size_mb=1, log=lambda _: None)
+        make_disk.make(image, programs=DISKS[name], new=True, size_mb=1, log=lambda _: None)
     return image
 
 
@@ -141,7 +143,7 @@ def main(argv=None):
     for name in names:
         sources, keys, steps = WORKLOADS[name]
         rom = build(name, sources, args.rebuild)
-        disk = disk_image(args.rebuild) if name == "shell" else None
+        disk = disk_image(name, args.rebuild) if name in DISKS else None
         if steps:
             steps = max(1, int(steps * scale))
         count, first, best, dig = measure(name, rom, keys, steps, args.repeat, disk)

@@ -82,28 +82,40 @@ _dispatchers = {}
 _LIMIT = 50_000
 
 
-def translate(rom, start):
-    """(function, length, items) for the ROM code at start, or None when
-    there is no whole instruction there (an operand would be in RAM).
-    items: what _scan() read, to check later that the ROM still holds it."""
-    items = _scan(rom, start)
+def translate(rom, ram, start, guard=True):
+    """(function, length, items) for the code at start, or None when there
+    is no whole instruction there (an operand would be in the other bank).
+    items: what _scan() read, to check later that memory still holds it
+    (words(items) are the addresses). guard: check RAM stores against
+    translated RAM code (needed once there is any; RAM blocks always do)."""
+    items = _scan(rom, ram, start)
     if not items:
         return None
-    key = (start, options(), tuple(items))
+    guard = guard or bool(start & RAM_BIT)
+    key = (start, options(), guard, tuple(items))
     made = _made.get(key)
     if made is None:
         if len(_made) >= _LIMIT:
             _made.clear()
         space = _namespace(f"block_{start:X}")
-        exec(compile(_Writer(items).source(), f"<block 0x{start:07X}>", "exec"), space)
-        made = _made[key] = (space["block"], len(items), key[2])
+        exec(compile(_Writer(items, guard).source(), f"<block 0x{start:07X}>", "exec"), space)
+        made = _made[key] = (space["block"], len(items), key[3])
     return made
 
 
-def still_there(rom, items):
-    """Does the ROM still hold the words a block was made from?"""
+def words(items):
+    """The addresses of the words a block was made from."""
+    for pc, _, operand, _ in items:
+        yield pc
+        if operand is not None:
+            yield (pc + 1) & ADDR_MASK
+
+
+def still_there(rom, ram, items):
+    """Does memory still hold the words a block was made from?"""
     for pc, word, operand, _ in items:
-        if rom[pc] != word or operand is not None and rom[pc + 1] != operand:
+        bank, at = (ram, pc & BANK_MASK) if pc & RAM_BIT else (rom, pc)
+        if bank[at] != word or operand is not None and bank[at + 1] != operand:
             return False
     return True
 
@@ -162,31 +174,34 @@ def dispatcher(code):
 
 
 # ------------------------------------------------------------------ scanning
-def _scan(rom, start):
+def _scan(rom, ram, start):
     """The instructions of the block at start, in the order they run:
     (address, word, operand or None, followed), followed = the address a jump
-    goes on at inside the block (None: not followed)."""
+    goes on at inside the block (None: not followed). A block stays in the
+    bank (ROM or RAM) it starts in."""
     items = []
     seen = set()
     data = {}                       # register -> value from DATA just before (for JMRB)
+    bank = start & RAM_BIT
+    words = ram if bank else rom
     pc = start
-    while len(items) < MAX_LENGTH and not pc & RAM_BIT and pc not in seen:
-        word = rom[pc]
-        nxt = pc + 1
+    while len(items) < MAX_LENGTH and pc & RAM_BIT == bank and pc not in seen:
+        word = words[pc & BANK_MASK]
+        nxt = (pc + 1) & ADDR_MASK
         alu_op = word & 0x1000
         op = (word >> 8) & 0xF
         takes = bool(word & 0x4000) if alu_op else op in (0x3, 0x4, 0x5, 0x6)
-        if takes and nxt & RAM_BIT:
-            break                           # its operand would be the first RAM word
-        operand = rom[nxt] if takes else None
-        after = nxt + 1 if takes else nxt
+        if takes and nxt & RAM_BIT != bank:
+            break                           # its operand would be in the other bank
+        operand = words[nxt & BANK_MASK] if takes else None
+        after = (nxt + 1) & ADDR_MASK if takes else nxt
         seen.add(pc)
         target = None
         if not alu_op and op == 0x4:                        # RJMP
             target = (nxt + operand) & ADDR_MASK
         elif not alu_op and op == 0xA and (word & 0xF) in data:  # JMRB to a known address
             target = data[word & 0xF] & ADDR_MASK
-        if target is not None and not target & RAM_BIT:
+        if target is not None and target & RAM_BIT == bank:
             items.append((pc, word, operand, target))
             pc = target
             data = {}
@@ -204,7 +219,8 @@ def _scan(rom, start):
 def _flags_seen(items):
     """For each instruction: whether the flags it sets (an ALU instruction,
     CLF) are seen before others replace them: by a jump that tests them, or
-    by a way out of the block."""
+    by a way out of the block (in RAM, a store can be one)."""
+    stores_leave = bool(items[0][0] & RAM_BIT)
     stops = config.STOP_ON_STACK_WRAP
     seen = [False] * len(items)
     live = True                                 # the block's last way out
@@ -218,7 +234,9 @@ def _flags_seen(items):
             live = True
         elif op in (0x4, 0xA) and followed is None:     # a jump out
             live = True
-        elif op == 0xB and stops and (word >> 4) & 7 in (0, 1, 2):   # PUSH POP CALL can stop
+        elif stores_leave and (op in (0x2, 0xD) or op == 0xB and (word >> 4) & 7 in (0, 2, 4)):
+            live = True                         # ST AST PUSH CALL SET: may leave (rewritten code)
+        elif op == 0xB and stops and (word >> 4) & 7 == 1:   # POP can stop
             live = True
     return seen
 
@@ -264,8 +282,9 @@ class _Flags:
 class _Writer:
     """The Python source of one block (see the module docstring)."""
 
-    def __init__(self, items):
+    def __init__(self, items, guard=True):
         self.items = items
+        self.guard = guard          # check RAM stores against translated RAM code
         self.lines = ["def block(regs, rom, ram, flags, esp, ebp, cpu):"]
         self.val = [None] * 16      # per register: None (in regs), int (known) or "rN" (local)
         self.dirty = set()          # registers to write back
@@ -273,6 +292,8 @@ class _Writer:
         self.const_flags = None     # or the flags as a number, when they are known
         self.temps = 0
         self.bus = False
+        self.rc = False             # rc (cpu._ram_code) loaded
+        self.here = None            # (address after, instructions done) of the instruction
 
     # ------------------------------------------------------------ helpers
     def emit(self, line, indent=1):
@@ -356,10 +377,40 @@ class _Writer:
         """Write value at an address from address(), if it is in RAM."""
         if isinstance(addr, int):
             if addr & RAM_BIT:
-                self.emit(f"ram[{_hex(addr & BANK_MASK)}] = {value}")
+                self.ram_store(_hex(addr & BANK_MASK), value, 1)
             return
+        self.code_map()
         self.emit(f"if {addr} & 0x{RAM_BIT:X}:")
-        self.emit(f"ram[{addr} & 0x{BANK_MASK:X}] = {value}", 2)
+        self.ram_store(f"{addr} & 0x{BANK_MASK:X}", value, 2)
+
+    def code_map(self):
+        """rc = which RAM words translated code was made from (a block with
+        guard only runs while there is that map)."""
+        if self.guard and not self.rc:
+            self.emit("rc = cpu._ram_code")
+            self.rc = True
+
+    def ram_store(self, offset, value, indent, written=None):
+        """ram[offset] = value; then, if translated code was made from that
+        word, drop it and leave the block (after this instruction).
+        written: the offset to check, when the store comes before the end
+        of the instruction (PUSH, CALL: the caller checks)."""
+        self.code_map()
+        self.emit(f"ram[{offset}] = {value}", indent)
+        if written is None:
+            self.rewritten(offset, indent)
+
+    def rewritten(self, offset, indent):
+        """The store went to a word translated RAM code was made from: drop
+        that code. A block in RAM then leaves (it may be some of that code,
+        and so may the RAM dispatcher that called it); one in ROM goes on."""
+        if not self.guard:
+            return
+        self.emit(f"if rc[{offset}]:", indent)
+        self.emit(f"cpu._code_written({offset})", indent + 1)
+        if self.items[0][0] & RAM_BIT:
+            nxt, done = self.here
+            self.leave(_hex(nxt), done, indent=indent + 1, stop=True)
 
     def operand(self, r):
         """Register r as an int when known, else as an expression."""
@@ -380,6 +431,7 @@ class _Writer:
         for i, (pc, word, operand, followed) in enumerate(self.items):
             done += 1
             nxt = (pc + (1 if operand is None else 2)) & ADDR_MASK
+            self.here = (nxt, done)
             op = (word >> 8) & 0xF
             ra, rb = (word >> 4) & 0xF, word & 0xF
             if word & 0x1000:
@@ -455,10 +507,13 @@ class _Writer:
     def stack(self, kind, rb, nxt, done):
         stops = config.STOP_ON_STACK_WRAP
         if kind in (0, 2):                                  # PUSH, CALL (the frame only)
+            slot = self.temp("s")
+            if self.guard:
+                self.emit(f"{slot} = esp")
             if kind == 0:
-                self.emit(f"ram[esp] = {self.reg(0)}")
+                self.ram_store("esp", self.reg(0), 1, written=slot)
             else:
-                self.emit("ram[esp] = ebp")
+                self.ram_store("esp", "ebp", 1, written=slot)
                 self.emit("ebp = esp")
             self.emit("esp += 1")
             self.emit(f"if esp > 0x{STACK_MASK:X}:")
@@ -466,6 +521,7 @@ class _Writer:
             if stops:
                 self.emit("if cpu.stopped:", 2)
                 self.leave(_hex(nxt), done, indent=3, stop=True)
+            self.rewritten(slot, 1)
         elif kind == 1:                                     # POP
             self.emit("esp -= 1")
             self.emit("if esp < 0:")
@@ -478,7 +534,12 @@ class _Writer:
             self.emit("esp = ebp")
             self.emit(f"ebp = ram[ebp] & 0x{STACK_MASK:X}")
         elif kind == 4:                                     # SET
-            self.emit(f"ram[{self.stack_index(rb)}] = {self.reg(0)}")
+            index = self.stack_index(rb)
+            if self.guard:
+                slot = self.temp("s")
+                self.emit(f"{slot} = {index}")
+                index = slot
+            self.ram_store(index, self.reg(0), 1)
         elif kind == 5:                                     # GET
             self.set_reg(0, f"ram[{self.stack_index(rb)}]")
 

@@ -372,10 +372,11 @@ def test_run_matches_step():
 
 
 def test_translated_code_matches_step():
-    # run() translates ROM code into Python (translate.py), here as soon as
-    # it is reached: random code shaped like a program (loops and branches,
+    # run() translates code into Python (translate.py), here as soon as it
+    # is reached: random code shaped like a program (loops and branches,
     # calls, the stack, memory, devices, edge-case values, each TWEAKS
-    # setting) must leave it exactly where step() does, also in pieces
+    # setting; in ROM, or in RAM where it gets written over) must leave it
+    # exactly where step() does, also in pieces
     import random
     import translate
     from devices import Timer
@@ -390,7 +391,7 @@ def test_translated_code_matches_step():
     values = [0, 1, 2, 3, 7, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF, 0xFFFFFFFE, 0x3F800000,
               0xBF800000, 0x7F800000, 0x7FC00000, 0x00800000, 0x3FFF, 0x4000, RAM, RAM | 0x3FFF,
               RAM | 0x5000, RAM | 0x5003, RAM | config.BANK_MASK, config.BANK_MASK, 0x5C, 0x3C,
-              0x6C, 0xF0, 0x7C, 0x0305F800]
+              0x6C, 0xF0, 0x7C, 0x0305F800] + [RAM | 0x5000 + i for i in (1, 5, 8, 13, 21, 34, 55)]
 
     def program():
         """[(words of one instruction)]; jump offsets are filled in later."""
@@ -401,8 +402,9 @@ def test_translated_code_matches_step():
                 word = 0x1000 | rng.randrange(16) << 8 | ra << 4 | rb
                 word |= 0x2000 if rng.random() < 0.15 else 0
                 code.append([word | 0x4000, rng.choice(values)] if rng.random() < 0.3 else [word])
-            elif pick < 0.42:
-                code.append([0x0300 | rb, rng.choice(values)])  # DATA
+            elif pick < 0.42:                                   # DATA (often a word of the RAM copy)
+                code.append([0x0300 | rb, rng.choice(values) if rng.random() < 0.6
+                             else RAM | 0x5000 + rng.randrange(60)])
             elif pick < 0.52:                                   # CPY LD ST ALD AST ADDR
                 code.append([rng.choice((0x0E, 0x0E, 0x01, 0x02, 0x0C, 0x0D, 0x09)) << 8 | ra << 4 | rb])
             elif pick < 0.64:                                   # STK
@@ -443,6 +445,7 @@ def test_translated_code_matches_step():
     rom = slow.mem.rom
     for cpu in (slow, fast, chunked):
         cpu.bus.timer = Timer(clock=lambda: 0.0)
+    made = 0                                                    # blocks there at the ends
     try:
         translate.HOT = 1
         for seed in range(40):
@@ -453,10 +456,14 @@ def test_translated_code_matches_step():
             rom[:len(words) + 8] = words + [0] * 8
             if seed % 4 == 3:                                   # some code at the top of ROM
                 rom[config.BANK_WORDS - 3:] = [0x0302, 0xFFFFFFFF, 0x0400]
+            in_ram = seed % 3 == 1          # from RAM 0x5000, where some stores land
             for cpu in (slow, fast, chunked):
                 cpu.reset(clear_ram=False)
                 cpu.mem.rom = rom
                 cpu.bus.keyboard.type("q\b")
+                if in_ram:
+                    cpu.mem.ram[0x5000:0x5000 + len(words)] = words
+                    cpu.iar = RAM | 0x5000
             for _ in range(3000):
                 if slow.step() is None:
                     break
@@ -466,15 +473,18 @@ def test_translated_code_matches_step():
                 pass
             assert state(fast) == state(slow), f"run() differs from step(), seed {seed}"
             assert state(chunked) == state(slow), f"run() in pieces differs, seed {seed}"
-            assert fast._code, f"nothing was translated, seed {seed}"
+            assert fast._code or in_ram, f"nothing was translated, seed {seed}"
+            made += len(fast._code)
+        assert made > 100, made
     finally:
         (config.A_FLAG_SIGNED, config.SHR_ARITHMETIC, config.STOP_ON_STACK_WRAP,
          translate.HOT) = saved
 
 
-def test_translated_code_follows_rom_changes():
-    # a block is made from the ROM's words: after they change (and a reset)
-    # the new words run, and forget_code() drops blocks at once
+def test_translated_code_follows_changes():
+    # a block is made from memory words: after ROM words change (and a
+    # reset) the new words run, forget_code() drops blocks at once, and a
+    # program that writes over its own (translated) RAM code runs the new code
     import translate
     saved = translate.HOT
     try:
@@ -492,6 +502,20 @@ def test_translated_code_follows_rom_changes():
         cpu.forget_code()
         cpu.run(100)
         assert cpu.regs[0] == 25, cpu.regs[0]
+        # in RAM: DATA R4,RAM ; DATA R1,word 9 ; DATA R0,HALT ; ST R1,R0 ;
+        # ++ R2 ; CPY R0,R2 ; (9:) JMRB R4 (the ST makes it HALT) ; HALT
+        code = [0x0304, RAM, 0x0301, RAM | 9, 0x0300, 0x0F00, 0x0210, 0x1B02, 0x0E02,
+                0x0A04, 0x0F00]
+        for fast in (False, True):
+            cpu = CPU()
+            cpu.mem.ram[:len(code)] = code
+            cpu.iar, cpu.regs[2] = RAM, 40
+            cpu.run(1000) if fast else [cpu.step() for _ in range(1000)]
+            assert cpu.halted and cpu.iar == RAM | 10 and cpu.regs[2] == 41, (fast, cpu.regs)
+            cpu.mem.ram[5] = 0x0000             # now the ST writes a NOP over that HALT
+            cpu.halted, cpu.iar = False, RAM
+            cpu.run(1000) if fast else [cpu.step() for _ in range(1000)]
+            assert cpu.halted and cpu.iar == RAM | 11 and cpu.regs[2] == 42, (fast, cpu.regs)
     finally:
         translate.HOT = saved
 
