@@ -338,12 +338,26 @@ class FileSystem:
             raise FsError(f"{path}: is a directory")
         words = pack(data)
         flags = USED if binary else USED | PACKED
-        if node is None:
+        need = (len(words) + BLOCK - 1) // BLOCK
+        fresh = node is None
+        if fresh:
             node = self.add_entry(directory, name, flags)
         else:
+            if need > self.free_blocks() + len(self.chain(node.first)):
+                raise FsError("disk full")          # the old file stays as it was
             self.free_chain(node.first)
-            node.first, node.flags = 0, flags
-        self.write(node, 0, words)
+            node.first, node.length, node.flags = 0, 0, flags
+            self.save(node)                         # the entry no longer names freed blocks
+        try:
+            self.write(node, 0, words)
+        except FsError:                             # disk full part way: give the blocks back
+            self.free_chain(node.first)
+            node.first, node.length = 0, 0
+            if fresh:
+                self.remove_entry(node)
+            else:
+                self.save(node)
+            raise
         node.length = len(words) if binary else len(data)
         self.save(node)
         return node

@@ -286,8 +286,9 @@ class CPU:
             return ""
 
         if name == "LD":
-            self.regs[rb] = self.mem.read(self.regs[ra])
-            return f"R{rb} <- [0x{self.regs[ra] & config.ADDR_MASK:0{config.ADDR_DIGITS}X}]"
+            addr = self.regs[ra] & config.ADDR_MASK     # before the load, when ra == rb
+            self.regs[rb] = self.mem.read(addr)
+            return f"R{rb} <- [0x{addr:0{config.ADDR_DIGITS}X}]"
 
         if name == "ST":
             ok = self.mem.write(self.regs[ra], self.regs[rb])

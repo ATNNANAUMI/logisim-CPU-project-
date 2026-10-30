@@ -95,7 +95,7 @@ class Preprocessor:
 
     def read_file(self, path, at):
         try:
-            with open(path, encoding="utf-8", errors="replace") as f:
+            with open(path, encoding="utf-8-sig", errors="replace") as f:
                 text = f.read()
         except OSError as e:
             if at is None:

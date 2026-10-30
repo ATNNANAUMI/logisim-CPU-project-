@@ -61,6 +61,15 @@ def test_ram_and_array():
     assert cpu.mem.ram[0x102] == cpu.regs[0]
 
 
+def test_ld_note_names_the_address_read():
+    # DATA R1,RAM+0x100 ; DATA R2,0x1234 ; ST R1,R2 ; LD R1,R1 (ra == rb: R1 is overwritten)
+    cpu = CPU()
+    cpu.mem.load_rom([0x0301, RAM | 0x100, 0x0302, 0x1234, 0x0212, 0x0111, 0x0F00])
+    notes = [cpu.step().note for _ in range(4)]
+    assert cpu.regs[1] == 0x1234
+    assert f"{RAM | 0x100:0{config.ADDR_DIGITS}X}" in notes[3], notes[3]
+
+
 def test_rom_write_is_ignored():
     # DATA R1,0x100 (ROM) ; DATA R2,5 ; ST R1,R2
     cpu = run([0x0301, 0x100, 0x0302, 5, 0x0212, 0x0F00])

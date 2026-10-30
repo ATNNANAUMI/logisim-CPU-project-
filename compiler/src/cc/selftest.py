@@ -79,6 +79,10 @@ def check_preprocessor():
     assert toks[0].value == [97, 98]
     assert toks[1].value == 16 and toks[1].ty == ("int", "u", 16)
     assert toks[2].value == 1.5 and toks[3].value == 10
+    with tempfile.TemporaryDirectory() as tmp:          # an editor's UTF-8 BOM is not a token
+        bom = Path(tmp) / "bom.c"
+        bom.write_bytes(b"\xef\xbb\xbfint x;\n")
+        assert [t.text for t in Preprocessor().run_file(str(bom))][:3] == ["int", "x", ";"]
 
 
 def check_errors():
