@@ -70,6 +70,30 @@ def test_ld_note_names_the_address_read():
     assert f"{RAM | 0x100:0{config.ADDR_DIGITS}X}" in notes[3], notes[3]
 
 
+def test_step_line_stops_at_lines_breakpoints_and_halt():
+    from debuginfo import DebugInfo, step_line
+    # 0: DATA R1,0 (line 1)   2: ++ R1 (line 2)   3: ++ R1   4: ++ R1 (line 3)   5: HALT
+    info = DebugInfo(lines=[(0, "f.c", 1), (2, "f.c", 2), (4, "f.c", 3)])
+
+    def fresh():
+        cpu = CPU()
+        cpu.mem.load_rom([0x0301, 0, 0x1B01, 0x1B01, 0x1B01, 0x0F00])
+        return cpu
+
+    cpu = fresh()
+    assert step_line(cpu, info) == "line" and cpu.iar == 2
+    assert step_line(cpu, info) == "line" and cpu.iar == 4 and cpu.instructions == 3
+    assert step_line(cpu, info) == "halted" and cpu.halted
+    cpu = fresh()
+    cpu.iar = 2
+    cpu.breakpoints.add(3)
+    assert step_line(cpu, info) == "breakpoint" and cpu.iar == 3
+    cpu = fresh()
+    cpu.iar = 2
+    assert step_line(cpu, info, limit=1) == "limit" and cpu.iar == 3
+    assert step_line(cpu, info, limit=1) == "line" and cpu.iar == 4
+
+
 def test_rom_write_is_ignored():
     # DATA R1,0x100 (ROM) ; DATA R2,5 ; ST R1,R2
     cpu = run([0x0301, 0x100, 0x0302, 5, 0x0212, 0x0F00])

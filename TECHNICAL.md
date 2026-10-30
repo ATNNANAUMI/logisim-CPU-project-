@@ -443,7 +443,7 @@ modules import each other by plain name, so run them as scripts
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 26 checks on the core |
+| `selftest.py` | 27 checks on the core |
 
 ### 3.2 Execution model
 
@@ -943,7 +943,7 @@ python compiler/src/asm/selftest.py   # 20 checks: encodings, values, strings, j
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 26 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 27 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
                                       # floats, FCMP flags, keyboard, backspace, key codes (arrows, Ctrl), the display's
                                       # backspace and form feed, ADDR/JMRB,
@@ -951,7 +951,8 @@ python cpu_sim/src/selftest.py        # 26 checks: immediates, flags, carry flag
                                       # on random code, run() stopping at breakpoints,
                                       # the top of both 16M-word banks, the timer,
                                       # the disk (kept in its file, size, past the end),
-                                      # the LD trace note when RA == RB
+                                      # the LD trace note when RA == RB, step_line (C line
+                                      # stepping: line, breakpoint, halt, limit)
 python compiler/src/cc/selftest.py    # 16 checks: preprocessor, error messages (several per run), warnings,
                                       # type sizes, exit/atexit, strtoul overflow limits, keyboard input, globals
                                       # after a reset, library override, reserved names,
