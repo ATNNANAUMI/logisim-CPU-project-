@@ -162,6 +162,7 @@ class MemoryPane(ttk.Frame):
         except ValueError:
             messagebox.showerror("edit memory", f"cannot read {answer!r}")
             return
+        self.cpu.forget_code()                  # the translated code may hold the old word
         self.render()
 
     # ------------------------------------------------------------ drawing

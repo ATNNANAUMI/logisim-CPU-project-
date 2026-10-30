@@ -5,9 +5,11 @@ from dataclasses import dataclass, field
 import alu as alu
 import config as config
 import isa as isa
+import translate as translate
 from devices import DeviceBus
 from isa import decode, disassemble
 from memory import Memory
+from translate import Stop
 
 
 @dataclass
@@ -37,6 +39,17 @@ class CPU:
     error: str = ""
     instructions: int = 0
 
+    # translated ROM code (translate.py), made for the ROM list _code_rom
+    # and the TWEAKS _code_options: see forget_code()
+    _code: dict = field(default_factory=dict, init=False, repr=False, compare=False)
+    _code_rom: object = field(default=None, init=False, repr=False, compare=False)
+    _code_options: tuple = field(default=(), init=False, repr=False, compare=False)
+    _code_check: bool = field(default=False, init=False, repr=False, compare=False)
+    _heat: dict = field(default_factory=dict, init=False, repr=False, compare=False)
+    _dispatch: object = field(default=None, init=False, repr=False, compare=False)
+    _outside: int = field(default=0, init=False, repr=False, compare=False)
+    _redispatch: int = field(default=0, init=False, repr=False, compare=False)
+
     # --------------------------------------------------------------- state
     def reset(self, clear_ram: bool = True) -> None:
         self.regs = [0] * 16
@@ -47,8 +60,32 @@ class CPU:
         self.error = ""
         self.instructions = 0
         self.bus.reset()
+        self._code_check = True     # keep the translated code that is still right
         if clear_ram:
             self.mem.clear_ram()
+
+    def forget_code(self) -> None:
+        """Drop the translated code. Call it after changing ROM words from
+        outside while a program runs; a new ROM list (load_rom()) and a
+        reset() need no call (the code made for the words a reset finds
+        changed is dropped then)."""
+        self._code = {}             # ROM address -> translate.translate()'s block
+        self._heat = {}             # ROM address -> times the interpreter jumped there
+        self._dispatch = None       # translate.dispatcher() of _code
+        self._outside = 0           # blocks run outside _dispatch
+        self._redispatch = translate.REDISPATCH
+        self._code_rom = None
+        self._code_check = False
+
+    def _check_code(self) -> None:
+        """After a reset: drop the blocks whose ROM words have changed."""
+        self._code_check = False
+        rom = self.mem.rom
+        stale = [a for a, block in self._code.items() if not translate.still_there(rom, block[2])]
+        for address in stale:
+            del self._code[address]
+        if stale:
+            self._dispatch = None
 
     def resume(self) -> None:
         self.halted = False
@@ -88,19 +125,94 @@ class CPU:
     def run(self, max_steps: int = 1_000_000, stop_at=()) -> int:
         """Execute up to max_steps instructions; returns how many ran.
 
-        Does what calling step() max_steps times does, about ten times
-        faster: no Step records, no disassembly, machine state kept in local
-        variables. It stops early at HALT, at a stack wrap (when that stops
-        the CPU), or before an instruction whose address is in stop_at (not
-        checked for the first one, so a run can leave a breakpoint).
-
-        The common integer ALU ops are written out here for speed; DIV, MOD
-        and the float group go through alu.py. selftest.py checks that both
-        paths agree, so keep them in step when an instruction changes.
+        Does what calling step() max_steps times does, much faster: ROM code
+        runs as translated blocks (translate.py), the rest (RAM code, the
+        last instructions before max_steps, and everything when there are
+        breakpoints) through _interpret(). It stops early at HALT, at a
+        stack wrap (when that stops the CPU), or before an instruction whose
+        address is in stop_at (not checked for the first one, so a run can
+        leave a breakpoint).
         """
         if self.halted or self.stopped:
             return 0
+        if stop_at:
+            return self._interpret(max_steps, stop_at)
+        rom, ram, regs = self.mem.rom, self.mem.ram, self.regs
+        options = translate.options()
+        if self._code_rom is not rom or self._code_options != options:
+            self.forget_code()
+            self._code_rom, self._code_options = rom, options
+        elif self._code_check:
+            self._check_code()
+        code, heat = self._code, self._heat
+        hot = translate.HOT
+        dispatch = self._dispatch
 
+        iar, flags, esp, ebp = self.iar, self.flags, self.esp, self.ebp
+        count = 0               # instructions run, by blocks and by _interpret()
+        interpreted = 0         # those of _interpret(), which counts them itself
+        try:
+            while count < max_steps:
+                if dispatch is not None:
+                    iar, flags, esp, ebp, count, stopped = dispatch(
+                        regs, rom, ram, flags, esp, ebp, self, iar, count, max_steps)
+                    if stopped or count >= max_steps:
+                        break
+                block = code.get(iar)
+                if block is None:
+                    if not iar & config.RAM_BIT:
+                        warm = heat.get(iar, 0) + 1
+                        heat[iar] = warm
+                        if warm >= hot:
+                            block = translate.translate(rom, iar)
+                    if block is None:
+                        # cold code, RAM code (or an operand in RAM): one at a
+                        # time, up to a jump to hot or translated ROM code
+                        self.iar, self.flags, self.esp, self.ebp = iar, flags, esp, ebp
+                        iar = None                  # self has it (if _interpret raises)
+                        done = self._interpret(max_steps - count, watch=True)
+                        iar, flags, esp, ebp = self.iar, self.flags, self.esp, self.ebp
+                        count += done
+                        interpreted += done
+                        if self.halted or self.stopped:
+                            break
+                        continue
+                    code[iar] = block
+                function, length, _ = block
+                if count + length > max_steps:      # the last few: one at a time
+                    self.iar, self.flags, self.esp, self.ebp = iar, flags, esp, ebp
+                    iar = None
+                    done = self._interpret(max_steps - count)
+                    iar, flags, esp, ebp = self.iar, self.flags, self.esp, self.ebp
+                    count += done
+                    interpreted += done
+                    break
+                iar, flags, esp, ebp, done = function(regs, rom, ram, flags, esp, ebp, self)
+                count += done
+                self._outside += 1                  # a block dispatch() doesn't have yet
+                if self._outside >= self._redispatch:
+                    self._outside = 0
+                    self._redispatch *= 2
+                    dispatch = self._dispatch = translate.dispatcher(code)
+        except Stop as stop:
+            iar, flags, esp, ebp, done = stop.args
+            count += done
+        finally:
+            if iar is not None:
+                self.iar, self.flags, self.esp, self.ebp = iar, flags, esp, ebp
+            self.instructions += count - interpreted
+        return count
+
+    def _interpret(self, max_steps: int, stop_at=(), watch: bool = False) -> int:
+        """run() one instruction at a time (no translation). watch: also
+        stop at a jump to ROM code that is translated or has become hot
+        (counted in _heat, see translate.HOT).
+
+        The common integer ALU ops are written out here for speed; DIV, MOD
+        and the float group go through alu.py. selftest.py checks that this,
+        the translated blocks and step() agree, so keep them in step when an
+        instruction changes.
+        """
         regs = self.regs
         rom, ram = self.mem.rom, self.mem.ram
         bus = self.bus
@@ -112,11 +224,15 @@ class CPU:
         INDEX_MASK = config.STACK_INDEX_MASK
         a_signed, shr_arith = config.A_FLAG_SIGNED, config.SHR_ARITHMETIC
 
+        if watch:
+            code, heat = self._code, self._heat
+            hot = translate.HOT
+
         iar, flags, esp, ebp = self.iar, self.flags, self.esp, self.ebp
         count = 0
         try:
             while count < max_steps:
-                if iar in stop_at and count:
+                if count and iar in stop_at:
                     break
                 word = ram[iar & BANK_MASK] if iar & RAM_BIT else rom[iar]
                 iar = (iar + 1) & ADDR_MASK
@@ -210,7 +326,17 @@ class CPU:
                         take = flags & rb != rb
                     # relative to the offset word; adding the unsigned offset
                     # gives the same low address bits as adding the signed one
-                    iar = (iar + offset) & ADDR_MASK if take else (iar + 1) & ADDR_MASK
+                    if not take:
+                        iar = (iar + 1) & ADDR_MASK
+                        continue
+                    iar = (iar + offset) & ADDR_MASK
+                    if watch and not iar & RAM_BIT:         # translated or hot code there?
+                        if iar in code:
+                            break
+                        warm = heat.get(iar, 0) + 1
+                        heat[iar] = warm
+                        if warm >= hot:
+                            break
                 elif op == 0xE:                             # CPY
                     regs[rb] = regs[(word >> 4) & 0xF]
                 elif op == 0xB:                             # STK
@@ -263,6 +389,13 @@ class CPU:
                     regs[rb] = iar
                 elif op == 0xA:                             # JMRB
                     iar = regs[rb] & ADDR_MASK
+                    if watch and not iar & RAM_BIT:         # translated or hot code there?
+                        if iar in code:
+                            break
+                        warm = heat.get(iar, 0) + 1
+                        heat[iar] = warm
+                        if warm >= hot:
+                            break
                 elif op == 0x7:                             # CLF
                     flags = 0
                 elif op == 0xF:                             # HALT
