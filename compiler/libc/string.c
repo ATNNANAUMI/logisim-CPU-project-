@@ -1,15 +1,6 @@
 /* string.h: strings and memory blocks. A char is a whole 32-bit word. */
 #include <string.h>
 
-void *memcpy(void *dst, const void *src, size_t n)
-{
-    char *d = dst;
-    const char *s = src;
-    while (n--)
-        *d++ = *s++;
-    return dst;
-}
-
 void *memmove(void *dst, const void *src, size_t n)
 {
     char *d = dst;
@@ -23,14 +14,6 @@ void *memmove(void *dst, const void *src, size_t n)
         while (n--)
             *--d = *--s;
     }
-    return dst;
-}
-
-void *memset(void *dst, int c, size_t n)
-{
-    char *d = dst;
-    while (n--)
-        *d++ = c;
     return dst;
 }
 
