@@ -101,13 +101,15 @@ Most facts are written in more than one doc. When you change one of these, updat
 
 ## The Obsidian vault (outside the repo)
 
-Arthur keeps the project's notes in a private Obsidian vault, `~/notes/logisim-CPU/` (its own git repo, backed up by itself). It is not part of this public repository: never copy its content here, and never put personal notes in the repo. After work that changes the project, update the vault in the same session, not only the repo docs:
+Arthur keeps the project's notes in a private Obsidian vault, `~/Documents/obsidian-notes/logisim-CPU/Wiki/` (its own git repo, backed up by itself). It is not part of this public repository: never copy its content here, and never put personal notes in the repo. After work that changes the project, update the vault in the same session, not only the repo docs:
 
-- `project_files/os_roadmap.md`: the phase checklist and its Log (dated entry with branch/commit names); `project_files/os_roadmap.html`: the matching timeline entries (same style as the existing ones).
-- The topic notes the change touches: `OS plan.md`, `Roadmap.md`, `Commands.md`, `Testing and verification.md` (check counts), `Questions for me.md`.
-- `how it works/NN <part>.md` (index `How it works.md`): one note per OS part, following ONE concrete example from the C line to the instructions, machine words, registers and bytes, with numbers from real simulator runs; ends with "Ideas for the video".
-- Open A/B choices: a new round in `OS questionnaire.md` (one box per option, **(rec)** on yours), linked from `Questions for me.md`; when answered, a `> [!done]` callout.
-- Mistakes of the session: `project_files/ai_mistakes_<date>_<topic>.md` in the format of `project_files/ai_mistakes_prompt.md` (honest, including slips caught before committing).
+- `Output/pages/os_roadmap.md`: the phase checklist and its Log (dated entry with branch/commit names); `Output/pages/os_roadmap.html`: the matching timeline entries (same style as the existing ones).
+- The topic notes the change touches, in `Wiki/`: `OS/OS plan.md`, `Project/Roadmap.md`, `Project/Questions for me.md`, `Toolchain/Commands.md`, `Toolchain/Testing and verification.md` (check counts).
+- `Wiki/OS/How it works/NN <part>.md` (index `How it works.md`): one note per OS part, following ONE concrete example from the C line to the instructions, machine words, registers and bytes, with numbers from real simulator runs; ends with "Ideas for the video".
+- Open A/B choices: a new round in `Wiki/OS/OS questionnaire.md` (one box per option, **(rec)** on yours), linked from `Project/Questions for me.md`; when answered, a `> [!done]` callout.
+- Mistakes of the session: `Raw/ai-mistakes/ai_mistakes_<date>_<topic>.md` in the format of `Raw/ai-mistakes/ai_mistakes_prompt.md` (honest, including slips caught before committing); these logs are historical, never rewritten later.
+
+The vault has its own rules in `~/Documents/obsidian-notes/CLAUDE.md` (folders `Raw/`, `Wiki/`, `Output/`; never read or list `_build/`; a new note is linked from the project index `Wiki/Logisim CPU.md` and from `Home.md`). Read them before editing it.
 
 Visual pages stay local files in the vault, not claude.ai artifacts.
 
