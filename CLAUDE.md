@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # five self-check suites (assembler 20, simulator 25, C compiler 15, image tool 10, disk tool 15), then check_docs.py
+python run.py test                                   # five self-check suites (assembler 20, simulator 25, C compiler 15, image tool 10, disk tool 16), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
@@ -60,7 +60,7 @@ Pictures: `compiler/src/img/` turns a PNG into a `.h` holding a compressed image
 
 Disk: the simulator's disk device (`0x8C`/`0x8D`, `--disk FILE`) is a file of words; `compiler/src/disk/` makes and edits images in the TFS1 filesystem (format in `fs.py`'s docstring: 256-word blocks chained by a FAT, directories are files of 132-word entries, text files packed 4 chars a word). The C library's `fs.c`/`dir.c` (`fopen` and friends, `dirent.h`, `unistd.h`) read and write the same format, and `fs.py` is the reference; the disk self-check runs both against each other. Programs for the OS: `cc build --exe` links a C program for RAM at `0x1100000` (`linker.link(base=...)`) into a TEX1 `.exe` (format in `compiler/libc/spawn.c`), and `spawnv()` (`spawn.c`/`spawn.asm`) loads it from the disk, runs it with argc/argv through the block crt0 gets in R1, and comes back by longjmp when it exits.
 
-The OS, Tynix (simulator only, TECHNICAL §11): `os/shell.c` is an ordinary C program in ROM; its built-in commands use the C library's file functions, and any other name is a `cc build --exe` program that `spawnv()` loads from `/bin` on the disk, runs at `0x1100000` and returns from. `os/make_disk.py` builds `os/disk.img` (git-ignored) with the examples in `PROGRAMS`. A program in `/bin` must end by itself (no interrupts): the examples quit on Ctrl-D or `q`.
+The OS, Tynix (simulator only, TECHNICAL §11): `os/shell.c` is an ordinary C program in ROM; its built-in commands use the C library's file functions, and any other name is a `cc build --exe` program that `spawnv()` loads from `/bin` on the disk, runs at `0x1100000` and returns from. `os/ed.c` (line editor) and `os/edit.c` (full-screen editor on the RGB screen: polls keys, redraws changed cells at most every 33 ms) are `/bin` programs like the examples. `os/make_disk.py` builds `os/disk.img` (git-ignored) with the examples in `PROGRAMS`. A program in `/bin` must end by itself (no interrupts): the examples quit on Ctrl-D or `q`.
 
 `compiler/src/asm/`, `compiler/src/cc/`, `compiler/src/img/`, `compiler/src/disk/` and `cpu_sim/src/` import their sibling modules by plain name, so run files as scripts (or put the directory on `sys.path`), not as packages. The assembler, the C compiler, the image converter and the disk tool are invoked as directories (`python compiler/src/asm <cmd>`, `python compiler/src/cc <cmd>`, `python compiler/src/img pic.png`, `python compiler/src/disk <cmd> disk.img`, via `__main__.py`).
 
@@ -97,6 +97,21 @@ Most facts are written in more than one doc. When you change one of these, updat
 | the memory map (bank width, RAM base, stack, heap) | `compiler/src/asm/linker.py` + `cpu_sim/src/config.py` + `compiler/libc/malloc.c` (`HEAP_END`) + `stdlib.asm` (`HEAP_START`/`HEAP_END`) + `logisim/run_rom.py` (`BANK_BITS`); TECHNICAL §1.2/§2.4/§4.6, `assembly_syntax.md` §6, `c_language.md` §2 and §4, STRUCTURE "ISA cheat sheet", README one-paragraph summary, this file's key facts |
 | a file or folder added, moved or removed | STRUCTURE tree; README "Layout"; TECHNICAL §9 if it's outdated material |
 | a shell command, or the programs put in `/bin` | `os/shell.c` (header, `commands[]`), `os/make_disk.py` (`PROGRAMS`, `README`); TECHNICAL §11, STRUCTURE tree, the disk self-check's `SHELL_OUTPUT` |
+| a phase or feature finished, a choice made, a mistake of the session | the Obsidian vault (next section) |
+
+## The Obsidian vault (outside the repo)
+
+Arthur keeps the project's notes in a private Obsidian vault, `~/Documents/obsidian-notes/logisim-CPU/` (its own git repo, backed up by itself). It is not part of this public repository: never copy its content here, and never put personal notes in the repo. After work that changes the project, update the vault in the same session, not only the repo docs:
+
+- `Output/pages/os_roadmap.md`: the phase checklist and its Log (dated entry with branch/commit names); `Output/pages/os_roadmap.html`: the matching timeline entries (same style as the existing ones).
+- The topic notes the change touches, in `Wiki/`: `OS/OS plan.md`, `Project/Roadmap.md`, `Project/Questions for me.md`, `Toolchain/Commands.md`, `Toolchain/Testing and verification.md` (check counts).
+- `Wiki/OS/How it works/NN <part>.md` (index `How it works.md`): one note per OS part, following ONE concrete example from the C line to the instructions, machine words, registers and bytes, with numbers from real simulator runs; ends with "Ideas for the video".
+- Open A/B choices: a new round in `Wiki/OS/OS questionnaire.md` (one box per option, **(rec)** on yours), linked from `Project/Questions for me.md`; when answered, a `> [!done]` callout.
+- Mistakes of the session: `Raw/ai-mistakes/ai_mistakes_<date>_<topic>.md` in the format of `Raw/ai-mistakes/ai_mistakes_prompt.md` (honest, including slips caught before committing); these logs are historical, never rewritten later.
+
+The vault has its own rules in `~/Documents/obsidian-notes/CLAUDE.md` (folders `Raw/`, `Wiki/`, `Output/`; never read or list `_build/`; a new note is linked from the project index note in `Wiki/` and from the vault's `Home.md`). Read them before editing it.
+
+Visual pages stay local files in the vault, not claude.ai artifacts.
 
 ## Outdated notes
 
