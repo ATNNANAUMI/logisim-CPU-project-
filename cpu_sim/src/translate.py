@@ -1,13 +1,13 @@
 """Turns the program's code into Python functions, for CPU.run().
 
-Decoding an instruction costs more than doing it, so run() decodes each
-piece of code once: translate() makes a *block*, the code from one address
-on, into one Python function that does what executing those instructions
-one at a time does. A block goes on through conditional jumps (a taken one
-leaves the block) and follows unconditional ones (RJMP, and a JMRB whose
-address the block knows, like CALL's), up to a JMRB to an address only
-known when it runs (RET's), HALT, MAX_LENGTH instructions or the end of
-the ROM.
+Decoding an instruction costs more than doing it, so run() decodes code
+that runs often once: translate() makes a *block*, the code from one
+address on, into one Python function that does what executing those
+instructions one at a time does. A block goes on through conditional jumps
+(a taken one leaves the block) and follows unconditional ones (RJMP, and a
+JMRB whose address the block knows, like CALL's), up to a JMRB to an
+address only known when it runs (RET's), HALT, MAX_LENGTH instructions or
+the end of its bank.
 
 In the function the registers are local variables (written back to the
 list on the way out), operands, addresses and jump targets are constants,
@@ -23,14 +23,16 @@ A block function is
 
     block(regs, rom, ram, flags, esp, ebp, cpu) -> (iar, flags, esp, ebp, executed)
 
-It raises Stop(iar, flags, esp, ebp, executed) at HALT, and at a stack wrap
-when config.STOP_ON_STACK_WRAP stops the CPU. Only ROM code is translated:
-the CPU can't write ROM, so a block stays right until the ROM is loaded or
-changed from outside (CPU.forget_code()). Code in RAM is run one
-instruction at a time.
+It raises Stop(iar, flags, esp, ebp, executed) at HALT, at a stack wrap
+when config.STOP_ON_STACK_WRAP stops the CPU, and (a RAM block, with no
+stop) after a store over translated RAM code. The CPU can't write ROM, so a
+ROM block stays right until the ROM is changed from outside; RAM code can
+change under its blocks, so the CPU keeps a map of the RAM words they were
+made from, which every RAM store checks (CPU._code_written() drops them).
+dispatcher() makes the loop that runs blocks one after the other.
 
-selftest.py's test_run_matches_step runs random code through this and
-through CPU.step(); keep the two in step when an instruction changes.
+selftest.py's test_translated_code_matches_step runs random code through
+this and through CPU.step(); keep them in step when an instruction changes.
 """
 
 import types

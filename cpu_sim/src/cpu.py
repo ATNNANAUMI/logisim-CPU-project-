@@ -268,8 +268,8 @@ class CPU:
 
     def _interpret(self, max_steps: int, stop_at=(), watch: bool = False) -> int:
         """run() one instruction at a time (no translation). watch: also
-        stop at a jump to ROM code that is translated or has become hot
-        (counted in _heat, see translate.HOT).
+        stop at a jump to code that is translated or has become hot (jumps
+        are counted in _heat, see translate.HOT).
 
         The common integer ALU ops are written out here for speed; DIV, MOD
         and the float group go through alu.py. selftest.py checks that this,

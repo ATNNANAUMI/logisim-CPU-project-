@@ -319,8 +319,9 @@ def test_addr_and_jmrb():
 
 
 def test_run_matches_step():
-    # run() has its own copy of the instruction set (for speed); random code,
-    # with plenty of edge-case words, must leave it exactly where step() does
+    # run() has its own copies of the instruction set (for speed: the
+    # _interpret() loop, and translate.py's blocks once code gets hot); random
+    # code, with plenty of edge-case words, must leave it exactly where step() does
     import random
 
     def state(cpu):

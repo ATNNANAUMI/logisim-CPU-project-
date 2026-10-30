@@ -437,13 +437,15 @@ modules import each other by plain name, so run them as scripts
 | `config.py` | sizes (`WORD_BITS`, `ADDR_BITS`, `RAM_BIT`, `BANK_WORDS`, `STACK_WORDS`), device addresses, and the **TWEAKS** switches (3.4) |
 | `isa.py` | opcode tables, `decode(word) -> Instr`, `disassemble(word, operand)`. `Instr.takes_operand` says whether a literal word follows |
 | `alu.py` | `int_op(name, a, b)` and `float_op(name, a, b)`, each returning `(R0 value, flag nibble)`; float32 ↔ bits helpers |
-| `memory.py` | `Memory` with two 16M-word banks (Python lists, 128 MB each), `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
+| `memory.py` | `Memory` with two 16M-word banks (Python lists, 128 MB each, kept out of the cycle collector's sight with `gc.freeze()`: it walked their 32M items, 66 ms a time), `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
 | `devices.py` | `Display` (lines of text; `\n` new line, `\r` back to the start of the line (what follows overwrites it), `\b` deletes, `\f` clears it all, so headless output shows only what came after the last `\f`), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
-| `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()`, `reset()`, `resume()` |
+| `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()` (translated blocks, and the `_interpret()` loop), `reset()`, `resume()`, `forget_code()` |
+| `translate.py` | turns code that runs often into Python functions for `run()` (3.2): `translate()` (one block), `dispatcher()` (the loop that runs them) |
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 25 checks on the core |
+| `selftest.py` | 27 checks on the core |
+| `bench.py` | the simulator's speed on nine example programs (3.3) |
 
 ### 3.2 Execution model
 
@@ -461,16 +463,47 @@ ALU instructions call `alu.int_op` or `alu.float_op` with `a = R[RA]` and
 `halted`; `resume()` clears it and execution continues after the `HALT`.
 
 `CPU.run(max_steps, stop_at=())` does what calling `step()` `max_steps`
-times does, without building `Step` records or disassembling: one loop with
-the machine state in local variables, about 3 MHz against `step()`'s
-~250 kHz. It stops at `HALT`, at a stack wrap that stops the CPU, or before
-an address in `stop_at` (not checked for the first instruction, so a run can
-leave a breakpoint). It writes out the common integer ALU ops itself and
-calls `alu.py` for DIV, MOD and the float group, so an instruction change
-touches both `run()` and `_execute()`; the self-check `test_run_matches_step`
-compares them on random code. The window (when the trace is off), the
-headless runner (without `--trace`) and `python compiler/src/cc run` all use
-`run()`; single steps, the trace and C line stepping use `step()`.
+times does, without building `Step` records or disassembling. It stops at
+`HALT`, at a stack wrap that stops the CPU, or before an address in
+`stop_at` (not checked for the first instruction, so a run can leave a
+breakpoint). Code that runs often is translated into Python
+(`translate.py`): once execution has jumped to an address 50 times
+(`translate.HOT`), the code from there becomes a *block*, one Python
+function, that goes through conditional jumps (a taken one leaves it) and
+follows `RJMP` and `CALL`'s `JMRB`, up to `RET`'s `JMRB`, `HALT` or 64
+instructions. In it the registers are local variables, operands and `DATA`
+values are constants, and the flags are only worked out where a jump or a
+way out of the block sees them. A generated dispatcher per bank, an if/else
+tree on the address that calls each block by its own name (so pypy3 can
+compile each call in), runs one block after another. The rest runs in
+`_interpret()`, the one-instruction-at-a-time loop: code that isn't hot yet,
+the last instructions before `max_steps` (fewer than the next block has),
+and the whole run when there are breakpoints.
+
+Blocks are kept over a `reset()` (the ones whose words changed are dropped
+then), shared by every `CPU` in the process, and made for the current
+TWEAKS (3.4). The CPU can't write ROM; RAM code (programs for the OS, 11)
+can change under its blocks, so a map of the RAM words they came from is
+checked by every RAM store (translated code, `_interpret()`, `step()`), and
+a store there drops all RAM blocks. ROM blocks only check that map once some
+RAM code is translated. After changing memory from outside while a program
+runs, call `forget_code()` (the window does when a word is edited).
+
+An instruction change touches `_execute()` (for `step()`), the
+`_interpret()` loop and `translate.py` (`alu.py` holds DIV, MOD and the
+float group for all three); the self-checks `test_run_matches_step` and
+`test_translated_code_matches_step` compare them with `step()` on random
+code. The window (when the trace is off), the headless runner (without
+`--trace`) and `python compiler/src/cc run` all use `run()`; single steps,
+the trace and C line stepping use `step()`.
+
+Speed, from `bench.py` (3.3) on a Ryzen 5 5600, in millions of instructions
+a second: `step()` about 0.25; `run()` with CPython 3.14 15 to 21 (the old
+loop alone did about 3); with pypy3 about 100 over the nine programs, and
+250 to 680 on programs that keep to a few hot loops (`life`, `sqrt`,
+`queens`, and `os` when it runs long). pypy3 compiles each block before it
+runs fast, so a program that ends within a few million instructions runs at
+5 to 40 MHz the first time.
 
 ### 3.3 Running it
 
@@ -524,6 +557,17 @@ waiting to be read.
 Speed control: a 20 ms Tk timer runs `hz × elapsed` instructions per tick,
 at most 50 000 per tick so the window stays responsive. Trace logging is
 skipped when more than 200 instructions run in one tick.
+
+**Speed check:** `bench.py` builds nine example programs (once, into
+`compiler/ROM/bench/`), runs each in `run()` a few times on one CPU (reset
+in between, the timer stopped at 0 so every run does the same work) and
+prints MHz for the first run and the best of the others, with a digest of
+the end state that an optimisation must leave unchanged:
+
+```
+pypy3 cpu_sim/src/bench.py [life sqrt qr grapher image queens asm shell os] [--repeat N]
+python cpu_sim/src/bench.py [names] [--scale F]   # CPython: fixed-length runs are 0.1 as long
+```
 
 ### 3.4 Configurable behaviour (`config.py` TWEAKS)
 
@@ -943,12 +987,15 @@ python compiler/src/asm/selftest.py   # 20 checks: encodings, values, strings, j
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 25 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 27 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
                                       # floats, FCMP flags, keyboard, backspace, key codes (arrows, Ctrl), the display's
                                       # backspace and form feed, ADDR/JMRB,
                                       # float specials, float SHL, run() against step()
-                                      # on random code, run() stopping at breakpoints,
+                                      # on random code, translated code against step() on
+                                      # random program-like code (each TWEAKS setting, in ROM
+                                      # and in RAM it writes over), translated code after
+                                      # memory changes, run() stopping at breakpoints,
                                       # the top of both 16M-word banks, the timer,
                                       # the disk (kept in its file, size, past the end)
 python compiler/src/cc/selftest.py    # 15 checks: preprocessor, error messages (several per run), warnings,
@@ -1097,9 +1144,10 @@ Measured on 4 s clips, 128×96 (12 288 words a frame at one word per pixel):
 
 Drawing costs about 28 instructions a pixel even where nothing changed
 (`gfx_image` decodes and walks every pixel), so 10 frames a second needs
-about 4 million instructions a second: `pypy3` keeps up (0 frames late on
-the demo), plain `python` (about 2.7 MHz) doesn't, and the circuit (about
-2 kHz) would take minutes a frame. Skipping transparent runs without
+about 4 million instructions a second: `pypy3` and plain `python` keep up
+(0 frames late on the demo; `python` did about 2.7 MHz before `run()`
+translated code, 3.2, and fell behind), and the circuit (about 2 kHz) would
+take minutes a frame. Skipping transparent runs without
 walking their pixels would be the next speed-up.
 
 ---

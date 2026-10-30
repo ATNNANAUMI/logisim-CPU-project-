@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # five self-check suites (assembler 20, simulator 25, C compiler 15, image tool 10, disk tool 15), then check_docs.py
+python run.py test                                   # five self-check suites (assembler 20, simulator 27, C compiler 15, image tool 10, disk tool 15), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
@@ -17,6 +17,7 @@ python compiler/src/img/selftest.py                  # image converter + gfx_ima
 python compiler/src/disk/selftest.py                 # disk tool + filesystem only
 python compiler/src/cc/tests/difftest.py [names] [--update]   # C test programs against gcc (--update rewrites .expected)
 python compiler/src/cc/tests/fuzz.py [--count N] [--seed S]   # random C programs, gcc against tiny C
+pypy3 cpu_sim/src/bench.py [names] [--repeat N] [--scale F]   # simulator speed (MHz) on nine example programs + end-state digest
 
 # a single check (assembler, C compiler and image tool checks are check_*, simulator ones are test_*)
 python -c "import sys; sys.path.insert(0,'compiler/src/asm'); import selftest; selftest.check_linking()"
@@ -52,7 +53,9 @@ There is no linter or build step. Assembler output goes to `compiler/ROM/` (git-
 
 Pipeline: `.asm` → two-pass assembler (`assembler.py`, with pseudo-op expansion and relocations) → `.obj` (JSON, `objfile.py`) → `linker.py` → `.rom` in Logisim "v2.0 raw" format → either the Python simulator or the real circuit (`run_rom.py` patches the image into the ROM component inside the `RAM` subcircuit and runs Logisim headless).
 
-The ISA is encoded in two independent places that must stay in sync: `compiler/src/asm/encoding.py` (assembler) and `cpu_sim/src/isa.py` (simulator decode/disassemble). An ISA change also touches `alu.py`/`cpu.py`, the docs, and possibly `stdlib.asm`.
+The ISA is encoded in two independent places that must stay in sync: `compiler/src/asm/encoding.py` (assembler) and `cpu_sim/src/isa.py` (simulator decode/disassemble). An ISA change also touches `alu.py`/`cpu.py`/`translate.py`, the docs, and possibly `stdlib.asm`.
+
+Simulator speed: `CPU.run()` translates code that execution has jumped to 50 times into Python functions (`translate.py`, TECHNICAL §3.2; a generated if-tree per bank dispatches them, which pypy3 compiles well) and interprets the rest in `_interpret()`; `step()` is the slow, traced path and the reference. Translations survive `reset()` (re-checked against memory); RAM stores drop translated RAM code they hit; after editing memory from outside during a run, call `cpu.forget_code()`. `bench.py` measures it (pypy3 about 100 MHz over its programs, CPython 15-21).
 
 C: `compiler/src/cc/` (preprocessor → parser/type checker → `codegen.py` + `regalloc.py` + `peephole.py`) writes assembly text, which `driver.py` feeds to `compiler/src/asm`'s assembler and links with a generated crt0 and the C library (`compiler/libc/`, compiled once and cached in `compiler/ROM/libc/`; only the files a program needs are linked). Every program in `compiler/src/cc/tests/` must print exactly what gcc's build prints (`.expected` files come from gcc); keep test programs free of undefined behaviour and of type sizes. `compiler/examples/c/tests/circuit_test.c` checks the compiler's tricky code paths on the circuit.
 
@@ -81,7 +84,7 @@ Most facts are written in more than one doc. When you change one of these, updat
 
 | when this changes | update |
 | --- | --- |
-| an instruction (encoding or behaviour) | `encoding.py` + `isa.py` + `alu.py`/`cpu.py` (both `_execute()` and the fast `run()` loop); TECHNICAL §1, `compiler/assembly_syntax.md` §4, STRUCTURE "ISA cheat sheet", README if it's the one-paragraph summary |
+| an instruction (encoding or behaviour) | `encoding.py` + `isa.py` + `alu.py`/`cpu.py` (both `_execute()` and the `_interpret()` loop) + `translate.py` (the code it writes); TECHNICAL §1, `compiler/assembly_syntax.md` §4, STRUCTURE "ISA cheat sheet", README if it's the one-paragraph summary |
 | assembler syntax, directives, pseudo-ops | `compiler/assembly_syntax.md`; TECHNICAL §4, STRUCTURE "Assembler conventions" |
 | a command, flag or output path | TECHNICAL §3.3 / §4.1 / §7; README "Quick start", STRUCTURE "Common commands", `assembly_syntax.md` §10, this file's Commands |
 | a stdlib function or the calling convention | the header of `stdlib.asm`; TECHNICAL §5.1–5.2, STRUCTURE "Assembler conventions" |
