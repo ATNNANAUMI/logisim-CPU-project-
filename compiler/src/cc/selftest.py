@@ -79,6 +79,13 @@ def check_preprocessor():
     assert toks[0].value == [97, 98]
     assert toks[1].value == 16 and toks[1].ty == ("int", "u", 16)
     assert toks[2].value == 1.5 and toks[3].value == 10
+    ins = lambda *a: ("ins", a[0], tuple(a[1:]))        # peephole: STK GET right after STK SET
+    import peephole
+    got = peephole.optimize([ins("STK", "SET", "R13"), ("comment", "x"), ins("STK", "GET", "R13"),
+                             ins("STK", "SET", "R13"), ins("STK", "GET", "R12"),
+                             ins("STK", "SET", "R13"), ("label", "L"), ins("STK", "GET", "R13"),
+                             ins("STK", "SET", "R13"), ins("ADD", "R1", "R2"), ins("STK", "GET", "R13")])
+    assert [(i[1], i[2][0]) for i in got if i[0] == "ins"].count(("STK", "GET")) == 3, got
     with tempfile.TemporaryDirectory() as tmp:          # an editor's UTF-8 BOM is not a token
         bom = Path(tmp) / "bom.c"
         bom.write_bytes(b"\xef\xbb\xbfint x;\n")
