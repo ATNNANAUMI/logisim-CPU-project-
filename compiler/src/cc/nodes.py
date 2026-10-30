@@ -71,12 +71,10 @@ class Obj:
     is_definition: bool = False
     is_tentative: bool = False
     is_function: bool = False
-    is_inline: bool = False
     init_data: list | None = None    # words: int, or (label, addend)
     in_rom: bool = False         # const data placed in ROM
     is_string: bool = False      # a string literal
     asm_text: str | None = None  # a file-scope asm("...") block
-    addr_used: bool = False      # its address appears in static data
 
     # functions
     params: list = field(default_factory=list)

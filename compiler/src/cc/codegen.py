@@ -33,9 +33,9 @@ import peephole
 import regalloc
 import typesys as T
 from cerror import CError, error_at
-from cparser import MASK, wrap
+from cparser import MASK
 from linker import RAM_BASE      # compiler/src/asm, on sys.path via driver.py
-from nodes import Node, Obj
+from nodes import Node
 
 TEMPS = list(range(1, 13))
 SCRATCH = 13
@@ -790,7 +790,6 @@ class CodeGen:
         else:
             r = self.to_reg(self.hold(v))
         cases = node.cases
-        values = [c for c in cases if c.lo == c.hi]
         if self.use_table(cases):
             self.jump_table(node, r)
         else:
@@ -1103,9 +1102,6 @@ class CodeGen:
         if k in ("add", "sub", "mul", "div", "mod", "bitand", "bitor", "bitxor", "shl", "shr"):
             a, b = self.operands(node.lhs, node.rhs)
             return self.binop(k, ty, a, b, node)
-        if k == "sub" and ty.is_integer and node.lhs.ty.kind == "ptr":
-            a, b = self.operands(node.lhs, node.rhs)
-            return self.binop("sub", T.int_type(), a, b, node)
         if k in ("eq", "ne", "lt", "le", "logand", "logor", "not"):
             return self.gen_bool(node)
         if k == "neg":
@@ -1383,8 +1379,6 @@ class CodeGen:
             for i in range(n):
                 v = self.load_keep(src.plus(i), None)
                 v = self.hold(v) if dst.kind == "frame" and dst.reg is not None else v
-                if v.kind == "reg" and dst.kind != "frame":
-                    pass
                 out = self.store(dst.plus(i), v)
                 self.free_val(out)
             return

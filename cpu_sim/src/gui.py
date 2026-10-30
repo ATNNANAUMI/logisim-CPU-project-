@@ -765,10 +765,9 @@ class SimulatorWindow(tk.Tk):
                 self.set_running(False)
                 break
             self._moved = True
-            if log:
-                operand = "" if step.operand is None else f" 0x{step.operand:08X}"
-                self._log(f"0x{step.address:07X}  {step.word:08X}{operand:<11s} "
-                          f"{step.text:<18s} {step.note}")
+            operand = "" if step.operand is None else f" 0x{step.operand:08X}"
+            self._log(f"0x{step.address:07X}  {step.word:08X}{operand:<11s} "
+                      f"{step.text:<18s} {step.note}")
 
     # ------------------------------------------------------------- drawing
     def _focused(self):

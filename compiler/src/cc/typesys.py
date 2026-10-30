@@ -105,10 +105,6 @@ class Type:
         return self.is_integer or self.is_float
 
     @property
-    def is_pointer(self):
-        return self.kind == "ptr"
-
-    @property
     def is_ptr_like(self):
         """Pointers and arrays: things with a base type you can index."""
         return self.kind in ("ptr", "array")
@@ -128,16 +124,6 @@ class Type:
     @property
     def is_void(self):
         return self.kind == "void"
-
-    @property
-    def is_complete(self):
-        return self.size >= 0 and self.kind != "void"
-
-    def root(self):
-        t = self
-        while t.origin is not None:
-            t = t.origin
-        return t
 
     def __repr__(self):
         return f"<{type_name(self)}>"
@@ -171,10 +157,6 @@ def int_type(unsigned=False):
 
 def long_type(unsigned=False):
     return _basic("long", unsigned)
-
-
-def llong_type(unsigned=False):
-    return _basic("llong", unsigned)
 
 
 def float_type():
