@@ -84,7 +84,7 @@ def compile_c(path, include_dirs=(), defines=(), unit=None, warn=None):
     source = {}
     for f in pp.files:
         try:
-            source[f] = Path(f).read_text(encoding="utf-8", errors="replace").splitlines()
+            source[f] = Path(f).read_text(encoding="utf-8-sig", errors="replace").splitlines()
         except OSError:
             pass
     return generate(program, unit or unit_name(path), source, unit_file=str(path))
@@ -114,6 +114,9 @@ def _compiler_stamp():
         h.update(p.read_bytes())
     for p in sorted(INCLUDE_DIR.rglob("*.h")):         # sys/*.h too
         h.update(str(p.relative_to(INCLUDE_DIR)).encode())
+        h.update(p.read_bytes())
+    for p in sorted(LIBC_DIR.glob("*.h")):             # local.h: the library's own FILE layout
+        h.update(p.name.encode())
         h.update(p.read_bytes())
     return h.hexdigest()
 

@@ -93,11 +93,6 @@ int ungetc(int c, FILE *stream)
     return c;
 }
 
-int _stdin_eof(void)
-{
-    return at_eof && pos >= len && pushed == EOF;
-}
-
 void _stdin_clear(void)
 {
     at_eof = 0;

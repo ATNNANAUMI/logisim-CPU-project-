@@ -868,7 +868,6 @@ class Parser:
         var = self.new_gvar(name, ty, tok)
         var.is_function = is_function
         var.is_static = attr.is_static
-        var.is_inline = attr.is_inline
         self.global_names[name] = var
         self.scopes[0].vars[name] = VarScope(var=var)
         return var
@@ -1412,9 +1411,9 @@ class Parser:
             elif self.consume("<="):
                 node = self.new_compare("le", node, self.shift(), t)
             elif self.consume(">"):
-                node = self.new_compare("lt", self.shift(), node, t, swapped=True)
+                node = self.new_compare("lt", self.shift(), node, t)
             elif self.consume(">="):
-                node = self.new_compare("le", self.shift(), node, t, swapped=True)
+                node = self.new_compare("le", self.shift(), node, t)
             else:
                 return node
 
@@ -1865,8 +1864,6 @@ class Parser:
             node.ty = node.lhs.ty
         elif k in ("shl", "shr"):
             node.ty = node.lhs.ty
-        elif k == "cast":
-            pass
         return node
 
     def new_cast(self, expr, ty, t=None):
@@ -1910,7 +1907,7 @@ class Parser:
                 raise error_at(t, f"invalid operands to binary {sym} (needs integers)")
         return self.fold(self.typed(Node(kind, t, lhs=lhs, rhs=rhs)))
 
-    def new_compare(self, kind, lhs, rhs, t, swapped=False):
+    def new_compare(self, kind, lhs, rhs, t):
         lt, rt = lhs.ty, rhs.ty
         if lt.is_arith and rt.is_arith:
             lhs, rhs = self.arith_operands(lhs, rhs, t, "comparison")
@@ -1931,7 +1928,6 @@ class Parser:
             raise error_at(t, f"invalid operands to a comparison "
                            f"('{T.type_name(lt)}' and '{T.type_name(rt)}')")
         node = Node(kind, t, lhs=lhs, rhs=rhs)
-        node.swapped = swapped
         return self.fold(self.typed(node))
 
     def new_add(self, lhs, rhs, t):
@@ -2625,16 +2621,11 @@ class Parser:
         """Address of element i of the array 'target'."""
         base = Node("addr", t, lhs=target)
         base.ty = T.pointer_to(ty.base)
-        self.mark_addr_taken_for_init(target)
         if i == 0:
             return base
         node = Node("add", t, lhs=base, rhs=self.new_num(i * ty.base.size, t))
         node.ty = base.ty
         return node
-
-    def mark_addr_taken_for_init(self, node):
-        """Arrays and structs live in memory anyway; nothing to mark."""
-        return
 
     def null_expr(self, t):
         node = Node("block_expr", t)
@@ -2707,8 +2698,6 @@ class Parser:
             return addend & MASK
         if var is not None and var.is_function:
             var.is_referenced = True
-        if var is not None:
-            var.addr_used = True
         return (label, addend)
 
 

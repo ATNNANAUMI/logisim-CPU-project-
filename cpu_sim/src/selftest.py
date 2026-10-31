@@ -61,6 +61,69 @@ def test_ram_and_array():
     assert cpu.mem.ram[0x102] == cpu.regs[0]
 
 
+def test_ld_note_names_the_address_read():
+    # DATA R1,RAM+0x100 ; DATA R2,0x1234 ; ST R1,R2 ; LD R1,R1 (ra == rb: R1 is overwritten)
+    cpu = CPU()
+    cpu.mem.load_rom([0x0301, RAM | 0x100, 0x0302, 0x1234, 0x0212, 0x0111, 0x0F00])
+    notes = [cpu.step().note for _ in range(4)]
+    assert cpu.regs[1] == 0x1234
+    assert f"{RAM | 0x100:0{config.ADDR_DIGITS}X}" in notes[3], notes[3]
+
+
+def test_step_line_stops_at_lines_breakpoints_and_halt():
+    from debuginfo import DebugInfo, step_line
+    # 0: DATA R1,0 (line 1)   2: ++ R1 (line 2)   3: ++ R1   4: ++ R1 (line 3)   5: HALT
+    info = DebugInfo(lines=[(0, "f.c", 1), (2, "f.c", 2), (4, "f.c", 3)])
+
+    def fresh():
+        cpu = CPU()
+        cpu.mem.load_rom([0x0301, 0, 0x1B01, 0x1B01, 0x1B01, 0x0F00])
+        return cpu
+
+    cpu = fresh()
+    assert step_line(cpu, info) == "line" and cpu.iar == 2
+    assert step_line(cpu, info) == "line" and cpu.iar == 4 and cpu.instructions == 3
+    assert step_line(cpu, info) == "halted" and cpu.halted
+    cpu = fresh()
+    cpu.iar = 2
+    cpu.breakpoints.add(3)
+    assert step_line(cpu, info) == "breakpoint" and cpu.iar == 3
+    cpu = fresh()
+    cpu.iar = 2
+    assert step_line(cpu, info, limit=1) == "limit" and cpu.iar == 3
+    assert step_line(cpu, info, limit=1) == "line" and cpu.iar == 4
+
+
+def test_isa_agrees_with_the_assemblers_tables():
+    """encoding.py (assembler) and isa.py (this decoder) are written apart; they must still agree."""
+    import sys
+    from pathlib import Path
+    import isa
+    asm_dir = str(Path(__file__).resolve().parents[2] / "compiler" / "src" / "asm")
+    sys.path.insert(0, asm_dir)
+    try:
+        import encoding as enc
+    finally:
+        sys.path.remove(asm_dir)
+    alias = {"++": "INC", "--": "DEC"}
+    for name, (opcode, shape) in enc.SYSTEM_OPS.items():
+        ins = isa.decode(enc.word(enc.SYSTEM, opcode, 3, 5))
+        assert ins.name == name and not ins.is_alu, name
+        assert (shape in enc.TWO_WORD_SHAPES) == ins.takes_operand, name
+    for name, (prefix, opcode, shape) in enc.ALU_OPS.items():
+        for imm in (0, enc.IMMEDIATE):
+            ins = isa.decode(enc.word(prefix | imm, opcode, 3, 5))
+            want = alias.get(name, name)
+            if name in ("FADD", "FSUB", "FMULT", "FDIV", "FNEG", "FCMP"):
+                want = name[1:]                                # FADD is ADD in the float group
+            assert ins.name == want and ins.is_alu and ins.is_float == (prefix == enc.FLOAT_ALU), name
+            assert ins.is_imm == bool(imm) and ins.takes_operand == bool(imm), name
+            assert (ins.name in isa.ONE_OPERAND) == (shape == "alu1"), name
+    assert {v: k for k, (v, _) in enc.STK_OPS.items()} == isa.STK_OPS
+    assert {v: k for k, v in enc.COMM_OPS.items()} == isa.COMM_OPS
+    assert enc.FLAGS == isa.FLAG_BITS
+
+
 def test_rom_write_is_ignored():
     # DATA R1,0x100 (ROM) ; DATA R2,5 ; ST R1,R2
     cpu = run([0x0301, 0x100, 0x0302, 5, 0x0212, 0x0F00])

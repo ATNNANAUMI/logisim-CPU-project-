@@ -50,9 +50,11 @@ static int utoa(unsigned v, unsigned base, int upper, char *end)
 {
     const char *digits = upper ? "0123456789ABCDEF" : "0123456789abcdef";
     int n = 0;
+    unsigned q;
     do {
-        *--end = digits[v % base];
-        v /= base;
+        q = v / base;
+        *--end = digits[v - q * base];
+        v = q;
         n++;
     } while (v);
     return n;

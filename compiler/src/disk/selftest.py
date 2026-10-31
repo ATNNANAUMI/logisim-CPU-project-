@@ -175,6 +175,10 @@ def check_disk_full():
         assert disk.free_blocks() == 5
         disk.put("/f", bytes(4 * 1024))               # 4 blocks
         raises("disk full", disk.put, "/g", bytes(2 * 1024))
+        assert disk.check() == [] and disk.lookup("/g") is None   # no leaked blocks, no stray entry
+        disk.put("/f", b"x" * 100)
+        raises("disk full", disk.put, "/f", bytes(8 * 1024))      # an overwrite that cannot fit
+        assert disk.check() == [] and disk.get("/f") == b"x" * 100  # keeps the old contents
     with new_disk(fs.BLOCK * 16, "full.img") as disk:   # 13 free
         image = disk.path
     with tempfile.TemporaryDirectory() as tmp:
@@ -200,6 +204,9 @@ def check_command_line():
 
     assert run("format", img, "--size", "1")[0] == 0
     assert "already a disk" in run("format", img, "--size", "1")[1]
+    assert run("format", host, "--size", "1")[0] != 0      # a file that is not a disk survives
+    assert "not a disk image" in run("format", host, "--size", "1")[1]
+    assert open(host).read() != ""
     assert run("mkdir", img, "/docs")[0] == 0
     assert run("put", img, host, "/docs")[1].strip() == "/docs/hello.txt: 15 chars"
     code, text = run("ls", img, "docs")
@@ -522,6 +529,8 @@ SHELL_KEYS = ("help\n"
               "cp /a.txt /b.txt\n"
               "cp /bin/echo /e2\n"
               "/e2 copy\n"
+              "cp /b.txt /b.txt\n"
+              "cp /b.txt /docs/../b.txt\n"
               "cp /docs /x\n"
               "cp /nope /x\n"
               "cat /b.txt\n"
@@ -569,6 +578,10 @@ cat: /bin/echo: a binary file (a program?)
 /docs> cp /bin/echo /e2
 /docs> /e2 copy
 copy
+/docs> cp /b.txt /b.txt
+cp: /b.txt and /b.txt are the same file
+/docs> cp /b.txt /docs/../b.txt
+cp: /b.txt and /docs/../b.txt are the same file
 /docs> cp /docs /x
 cp: /docs: is a directory
 /docs> cp /nope /x

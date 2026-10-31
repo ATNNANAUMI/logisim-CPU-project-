@@ -40,6 +40,8 @@ void *malloc(size_t n)
             b -= size;               /* in use: skip it */
             continue;
         }
+        if (size == 0)               /* a damaged header: b += 0 would never end */
+            return 0;
         /* join the free blocks that follow */
         while (b + size < HEAP_END && b[size] > 0)
             size += b[size];

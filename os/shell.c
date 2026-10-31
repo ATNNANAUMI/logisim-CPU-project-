@@ -209,7 +209,7 @@ static int cmd_mv(int argc, char **argv)
 /* a copy of a file, text or binary like the original (stat tells which) */
 static int cmd_cp(int argc, char **argv)
 {
-    struct stat st;
+    struct stat st, dst;
     FILE *from, *to;
     const char *base;
     int c, text;
@@ -226,6 +226,10 @@ static int cmd_cp(int argc, char **argv)
         sprintf(path, "%s/%s", argv[2], base ? base + 1 : argv[1]);
     } else
         strcpy(path, argv[2]);
+    if (st.st_ino && stat(path, &dst) == 0 && dst.st_ino == st.st_ino) {
+        printf("cp: %s and %s are the same file\n", argv[1], path);
+        return 1;                       /* "w" would free the blocks it is reading */
+    }
     text = S_ISTEXT(st.st_mode);
     if ((from = fopen(argv[1], text ? "r" : "rb")) == 0)
         return fail("cp", argv[1]);

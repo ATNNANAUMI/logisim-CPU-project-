@@ -24,7 +24,6 @@ this stops with a message instead (TECHNICAL.md 2.4 lists what to widen).
 import argparse
 import os
 import re
-import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -90,7 +89,7 @@ def main():
     p.add_argument("--seconds", type=int, default=120)
     p.add_argument("--circuit", default="PC")
     p.add_argument("--dump-rom")
-    p.add_argument("--keep", help="where to write the patched .circ (default: temp)")
+    p.add_argument("--keep", help="where to write the patched .circ (default: NAME__patched.circ in the current directory)")
     args = p.parse_args()
 
     tree = ET.parse(args.circ)

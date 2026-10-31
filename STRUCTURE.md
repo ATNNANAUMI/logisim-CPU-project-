@@ -58,7 +58,7 @@ logisim-CPU-project-/
 │   │   ├── peephole.py       clean-ups per function
 │   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0 (ROM or --exe), link, TEX1 .exe, run in simulator
 │   │   ├── cerror.py         CError (file:line:col: error: ...)
-│   │   ├── selftest.py       15 checks (incl. every tests/ program against gcc's output)
+│   │   ├── selftest.py       16 checks (incl. every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
 │   │                         fuzz.py: random programs, gcc vs tiny C
 │   ├── src/img/              PNG -> compressed image for gfx_image() (run as `python compiler/src/img pic.png`)
@@ -77,7 +77,7 @@ logisim-CPU-project-/
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
 │   │   └── selftest.py       16 checks (incl. the C library's files on the simulator against fs.py, stat, spawnv, os/shell.c, os/ed.c, os/edit.c)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
-│   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), setjmp.asm,
+│   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), memory.asm (memcpy, memset), setjmp.asm,
 │   │                         spawn.c + spawn.asm (spawnv: load a --exe program from the disk, run it, come back)
 │   ├── examples/             example programs, in folders by kind (asm/ and c/)
 │   │   ├── asm/              assembly
@@ -128,7 +128,7 @@ logisim-CPU-project-/
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG]`
     │   ├── bench.py          speed check: nine example programs in run(), MHz first/best run + end-state digest
-    │   └── selftest.py       27 checks (incl. translated code against step() on random code)
+    │   └── selftest.py       30 checks (incl. translated code against step() on random code)
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)

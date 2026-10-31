@@ -444,7 +444,7 @@ modules import each other by plain name, so run them as scripts
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 27 checks on the core |
+| `selftest.py` | 30 checks on the core |
 | `bench.py` | the simulator's speed on nine example programs (3.3) |
 
 ### 3.2 Execution model
@@ -993,7 +993,7 @@ python compiler/src/asm/selftest.py   # 20 checks: encodings, values, strings, j
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 27 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 30 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
                                       # floats, FCMP flags, keyboard, backspace, key codes (arrows, Ctrl), the display's
                                       # backspace and form feed, ADDR/JMRB,
@@ -1003,9 +1003,12 @@ python cpu_sim/src/selftest.py        # 27 checks: immediates, flags, carry flag
                                       # and in RAM it writes over), translated code after
                                       # memory changes, run() stopping at breakpoints,
                                       # the top of both 16M-word banks, the timer,
-                                      # the disk (kept in its file, size, past the end)
-python compiler/src/cc/selftest.py    # 15 checks: preprocessor, error messages (several per run), warnings,
-                                      # type sizes, exit/atexit, keyboard input, globals
+                                      # the disk (kept in its file, size, past the end),
+                                      # the LD trace note when RA == RB, step_line (C line
+                                      # stepping: line, breakpoint, halt, limit), isa.py against the assembler's
+                                      # encoding.py tables (names, groups, one/two-word shapes)
+python compiler/src/cc/selftest.py    # 16 checks: preprocessor, error messages (several per run), warnings,
+                                      # type sizes, exit/atexit, strtoul overflow limits, keyboard input, globals
                                       # after a reset, library override, reserved names,
                                       # mixing C and assembly, memory past 64K words (ROM
                                       # table, RAM array, malloc, far code), CLI, C line
@@ -1182,7 +1185,7 @@ counts chars; a binary file's length counts words. A 64 MB disk has 65,536
 blocks (256 for the FAT) and 65,278 free when new.
 
 ```
-python compiler/src/disk format disk.img [--size MB] [--force]   # new disk (64 MB, sparse); --force wipes one
+python compiler/src/disk format disk.img [--size MB] [--force]   # new disk (64 MB, sparse); --force overwrites an existing file; without it a disk or any other existing file is refused
 python compiler/src/disk ls disk.img [PATH]                      # a directory: size (chars/words) and name
 python compiler/src/disk put disk.img HOST [PATH] [--binary]     # copy in (text unless --binary, or a TEX1
                                                                  # program from cc build --exe); PATH: a
@@ -1421,8 +1424,9 @@ per group of functions: `printf.c`, `format.c`, `fdigits.c`, `scanf.c`,
 `string.c`, `malloc.c`, `math.c`, `gfx.c`, `gfx_text.c` and `gfx_image.c` for the RGB
 screen, `fs.c` (files on the disk, TFS1 as in 7.6, `stat` and `statvfs`) and `dir.c`
 (directories), ...), `local.h` (shared by the library
-files only) and three assembly files: `runtime.asm` (`_pow2`, `_udiv`,
-`_umod`), `setjmp.asm`, and `spawn.asm` (the jumps of `spawn.c`'s `spawnv`,
+files only) and four assembly files: `runtime.asm` (`_pow2`, `_udiv`,
+`_umod`), `memory.asm` (`memcpy` and `memset`, 6 instructions a word instead of the
+13 and 9 of the compiled loops), `setjmp.asm`, and `spawn.asm` (the jumps of `spawn.c`'s `spawnv`,
 10.4). `_Exit` is in the generated crt0.
 
 * The driver compiles each library file the first time it is needed and
@@ -1513,7 +1517,7 @@ Built-in commands (the `commands[]` table, which `help` also prints):
 | `echo [word...]` | the words, one space apart |
 | `rm path...` | `remove`: files and empty directories |
 | `mv from to` | `rename`; into `to` when that is a directory |
-| `cp from to` | a copy; into `to` when that is a directory. `stat()` says whether the source is a text file or binary (`fopen` `"r"`/`"w"` or `"rb"`/`"wb"`), so a program in `/bin` copies and still runs. Not a directory |
+| `cp from to` | a copy; into `to` when that is a directory. `stat()` says whether the source is a text file or binary (`fopen` `"r"`/`"w"` or `"rb"`/`"wb"`), so a program in `/bin` copies and still runs. Not a directory; copying a file onto itself is refused ("are the same file") |
 | `mkdir dir...`, `rmdir dir...` | |
 | `df` | `statvfs("/")`: 1 KB blocks, used, free (it reads the whole FAT: 0.9 million instructions on 64 MB) |
 | `clear` | a form feed (12) to the text display, `gfx_clear()` for the RGB screen |

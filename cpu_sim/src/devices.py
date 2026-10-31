@@ -175,7 +175,6 @@ class Video:
 
     def png(self, scale: int = 1) -> bytes:
         """The screen as a PNG file (for headless runs)."""
-        import struct
         import zlib
         rows = []
         for y in range(self.height):
