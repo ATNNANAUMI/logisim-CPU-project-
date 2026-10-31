@@ -5,13 +5,25 @@ selects RAM, off selects ROM. Each bank holds config.BANK_WORDS words.
 Reads work on both banks; writes to ROM are ignored.
 """
 
+import gc
+
 import config as config
+
+
+def _unseen(bank):
+    """CPython's cycle collector walks every item of every list it tracks,
+    and a bank's 16M items take it tens of milliseconds each time; a bank
+    only ever holds ints, so the bank (and whatever else exists by then) is
+    moved out of its sight with gc.freeze()."""
+    if hasattr(gc, "freeze"):
+        gc.freeze()
+    return bank
 
 
 class Memory:
     def __init__(self):
         self.rom = [0] * config.BANK_WORDS
-        self.ram = [0] * config.BANK_WORDS
+        self.ram = _unseen([0] * config.BANK_WORDS)
 
     # ------------------------------------------------------------ access
     @staticmethod
@@ -57,10 +69,10 @@ class Memory:
         if len(bank) > config.BANK_WORDS:
             raise ValueError(f"image is {len(bank)} words, bank holds {config.BANK_WORDS}")
         bank += [0] * (config.BANK_WORDS - len(bank))
-        return bank, len(words)
+        return _unseen(bank), len(words)
 
     def clear_ram(self) -> None:
-        self.ram = [0] * config.BANK_WORDS
+        self.ram = _unseen([0] * config.BANK_WORDS)
 
 
 # --------------------------------------------------------------- file format

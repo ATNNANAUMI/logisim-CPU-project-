@@ -45,6 +45,10 @@ def run_c(text, keys="", name="test.c", steps=20_000_000):
     return cpu, out
 
 
+def output_lines(text):
+    return text.strip().splitlines()
+
+
 def output(text, keys=""):
     return run_c(text, keys)[1]
 
@@ -79,6 +83,17 @@ def check_preprocessor():
     assert toks[0].value == [97, 98]
     assert toks[1].value == 16 and toks[1].ty == ("int", "u", 16)
     assert toks[2].value == 1.5 and toks[3].value == 10
+    ins = lambda *a: ("ins", a[0], tuple(a[1:]))        # peephole: STK GET right after STK SET
+    import peephole
+    got = peephole.optimize([ins("STK", "SET", "R13"), ("comment", "x"), ins("STK", "GET", "R13"),
+                             ins("STK", "SET", "R13"), ins("STK", "GET", "R12"),
+                             ins("STK", "SET", "R13"), ("label", "L"), ins("STK", "GET", "R13"),
+                             ins("STK", "SET", "R13"), ins("ADD", "R1", "R2"), ins("STK", "GET", "R13")])
+    assert [(i[1], i[2][0]) for i in got if i[0] == "ins"].count(("STK", "GET")) == 3, got
+    with tempfile.TemporaryDirectory() as tmp:          # an editor's UTF-8 BOM is not a token
+        bom = Path(tmp) / "bom.c"
+        bom.write_bytes(b"\xef\xbb\xbfint x;\n")
+        assert [t.text for t in Preprocessor().run_file(str(bom))][:3] == ["int", "x", ";"]
 
 
 def check_errors():
@@ -162,6 +177,41 @@ def check_programs():
             failed.append(path.stem)
     assert not failed, "different from the expected output: " + ", ".join(failed)
     return f"{count} programs"
+
+
+def check_strtol_limits():
+    """Overflow of the 32-bit word is found at the exact digit, in every base."""
+    out = output(r"""
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <limits.h>
+static void t(const char *s, int base)
+{
+    char *e;
+    unsigned long v;
+    errno = 0;
+    v = strtoul(s, &e, base);
+    printf("%s/%d: %lu %d %d\n", s, base, v, errno == ERANGE, (int)(e - s));
+}
+int main(void)
+{
+    t("4294967295", 10); t("4294967296", 10); t("42949672950", 10);
+    t("ffffffff", 16); t("100000000", 16); t("0xFFFFFFFFg", 0);
+    t("37777777777", 8); t("40000000000", 8);
+    t("1z141z3", 36); t("1z141z4", 36); t("11111111111111111111111111111111", 2);
+    t("100000000000000000000000000000000", 2); t("", 10); t("zz", 10);
+    return 0;
+}
+""")
+    assert output_lines(out) == [
+        "4294967295/10: 4294967295 0 10", "4294967296/10: 4294967295 1 10",
+        "42949672950/10: 4294967295 1 11", "ffffffff/16: 4294967295 0 8",
+        "100000000/16: 4294967295 1 9", "0xFFFFFFFFg/0: 4294967295 0 10",
+        "37777777777/8: 4294967295 0 11", "40000000000/8: 4294967295 1 11",
+        "1z141z3/36: 4294967295 0 7", "1z141z4/36: 4294967295 1 7",
+        "11111111111111111111111111111111/2: 4294967295 0 32",
+        "100000000000000000000000000000000/2: 4294967295 1 33", "/10: 0 0 0", "zz/10: 0 0 0"], out
 
 
 def check_exit_and_atexit():
@@ -362,6 +412,7 @@ CHECKS = [
     check_warnings,
     check_sizes,
     check_exit_and_atexit,
+    check_strtol_limits,
     check_input,
     check_globals_reset,
     check_library_override,

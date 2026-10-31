@@ -11,7 +11,7 @@ literals are decoded.
 """
 
 import re
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 
 from cerror import CError, error_at
 
@@ -315,4 +315,4 @@ def describe(tok):
 
 
 __all__ = ["Token", "tokenize", "decode_literal", "parse_number", "KEYWORDS",
-           "describe", "field"]
+           "describe"]

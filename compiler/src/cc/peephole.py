@@ -7,6 +7,8 @@ program does:
     known values   DATA Rn, x is dropped when Rn already holds x (the same
                    DATA earlier in the straight-line code, nothing changed
                    Rn since); CPY Ra, Rb is dropped when Rb already equals Ra
+    stack reload   STK GET, Rn straight after STK SET, Rn is dropped: R0 already
+                   holds what SET stored (neither touches the flags)
     flags          TEST R0 (or TEST Rn just after CPY R0, Rn) is dropped
                    right after an integer ALU instruction that set the flags
                    for R0, when the next jump tests only Z and/or N
@@ -62,6 +64,7 @@ def reg(text):
 
 def optimize(items):
     items = known_values(items)
+    items = stack_reload(items)
     items = flags(items)
     for _ in range(4):
         before = len(items)
@@ -124,6 +127,23 @@ def known_values(items):
         else:
             for r in changed:
                 forget(r)
+        out.append(item)
+    return out
+
+
+def stack_reload(items):
+    """Drop STK GET, Rn when the instruction just before it is STK SET, Rn."""
+    out = []
+    last = None           # the last real instruction, if only comments came since
+    for item in items:
+        if item[0] == "ins":
+            if (item[1] == "STK" and item[2][0] == "GET" and last is not None
+                    and last[1] == "STK" and last[2][0] == "SET"
+                    and reg(last[2][1]) == reg(item[2][1])):
+                continue                              # R0 already holds that word
+            last = item
+        elif item[0] not in ("comment", "loc"):
+            last = None                               # a label or raw text: someone may jump in
         out.append(item)
     return out
 

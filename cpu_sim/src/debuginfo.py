@@ -100,8 +100,12 @@ def step_line(cpu, info, over=False, limit=2_000_000):
     start = info.line_at(cpu.iar)
     start_ebp = cpu.ebp
     over = over and start is not None   # from assembly code: stop at the first C line
-    for _ in range(limit):
-        if cpu.step() is None:
+    stops = info.starts | cpu.breakpoints      # run() is the fast path: it only needs to stop here
+    left = limit
+    while left > 0:
+        ran = cpu.run(left, stops)
+        left -= ran
+        if ran == 0 or cpu.halted or cpu.stopped:
             return "halted"
         if cpu.iar in cpu.breakpoints:
             return "breakpoint"

@@ -159,6 +159,7 @@ def encode_video(frames, width, height, colors=32, tolerance=16):
 
 # ------------------------------------------------------------------- output
 def header_text(filename, source, command, width, height, fps, palette, words, starts):
+    source, command = (t.replace("*/", "* /") for t in (source, command))   # stay inside the comment
     frames = len(starts)
     lines = [
         f"/* {filename} - {MARK} from {source}",

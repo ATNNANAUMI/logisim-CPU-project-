@@ -420,6 +420,53 @@ has 24 address bits, `run_rom.py` runs programs again (it writes the
 matching `addr/data` header itself). Relative jumps need nothing new: the
 offset is added in 32 bits and the IAR keeps its low 25.
 
+### 2.5 The control section as a microcode ROM (`logisim/microcode/`)
+
+A replacement for `CONTROL_SECTION`'s decoding gates, for a faster copy of
+the circuit; `CPU.circ` itself doesn't use it yet. `microcode.py` holds the
+table (one list of steps per instruction, read off the circuit) and writes
+`microcode.rom`, a 64K × 32 image in the "v2.0 raw" format (load it into a
+Logisim `ROM` with 16 address bits and 32 data bits). Its docstring has the
+full bit layout.
+
+```
+python logisim/microcode/microcode.py [-o microcode.rom] [--list]   # write the image / print the table
+python logisim/microcode/verify.py [--quick] [--circ logisim/CPU.circ]  # check it against the gates
+```
+
+* **Address**: `IR[14:8]` (IMM, FLOAT, ALU, opcode), `IR[6:4]` (the STK/COMM
+  sub-operation), the step, then `JF` = any of `IR[3:0] & flags` and `JNF` =
+  any of `IR[3:0] & ~flags` (flags as `C=8 A=4 N=2 Z=1`, the `RJF`/`RJNF`
+  mask). `IR[15]` and `IR[7]` aren't used by the control section.
+* **Data**: the 10 set lines (gated with `clk_s` outside the ROM), the 7
+  enable lines (gated with `clk_e`), a 2-bit code for the register to set and
+  one for the register to enable (none/RA/RB/R0, turned into the 16-bit
+  one-hot selects by a multiplexer and a decoder), the stepper reset,
+  `in`/`out`, `STACK_OP`, two bits for the 6-bit ALU operation (the jumps'
+  "use the ALU", ORed outside with `IR[14]` and `IR[12]` into bit 5; and
+  "low 4 bits = `IR[11:8]`"; bit 4 is `IR[13]`), the halt flip-flop's preset,
+  and "step 0" for the IAR reset gate. Every bit is also ANDed with the
+  stepper's enable output, as the step decoder is now.
+* **Kept as gates**: `CLOCK`, the stepper, the halt flip-flop (a D flip-flop
+  used only through its preset and reset: preset by `HALT`, reset by
+  `RESUME`), the OR that makes `halt_output`, the clock gate in front of
+  `CLOCK`, and `iar_reset` = `RESET` AND NOT (`halt_output` AND step 0).
+* **How it was read off**: `verify.py` copies the circuit, replaces
+  `CONTROL_SECTION`'s `CLOCK` and `stepper` with pins and runs every IR, step
+  and flag value through Logisim's own simulator (`ControlSweep.java`, about
+  a minute per sweep), with all phases on, then each of `clk_s`, `clk_e` and the
+  stepper enable off. The ROM matches the gates at every step an instruction
+  can reach. Steps after an instruction's stepper reset never run, and
+  the table leaves them empty (the gates still drive a few lines there).
+
+Steps per instruction, fetch included (the circuit's clock cycles, one
+stepper count each): `NOP CLF ADDR JMRB CPY HALT` and `COMM` out 3; `LD ST`,
+`COMM INDATA`, `STK PUSH POP RET SET GET` 4; `DATA RJMP RJF RJNF ALD AST`,
+`STK CALL` and the register ALU operations 5; ALU operations with an
+immediate 6; `CMP`/`FCMP` 16. `CMP` sets the flags at step 3 but never resets
+the stepper (and never writes R0), so the stepper runs to 15 and wraps
+around to the next fetch.
+
 ---
 
 
@@ -437,13 +484,15 @@ modules import each other by plain name, so run them as scripts
 | `config.py` | sizes (`WORD_BITS`, `ADDR_BITS`, `RAM_BIT`, `BANK_WORDS`, `STACK_WORDS`), device addresses, and the **TWEAKS** switches (3.4) |
 | `isa.py` | opcode tables, `decode(word) -> Instr`, `disassemble(word, operand)`. `Instr.takes_operand` says whether a literal word follows |
 | `alu.py` | `int_op(name, a, b)` and `float_op(name, a, b)`, each returning `(R0 value, flag nibble)`; float32 ↔ bits helpers |
-| `memory.py` | `Memory` with two 16M-word banks (Python lists, 128 MB each), `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
-| `devices.py` | `Display` (lines of text; `\n` new line, `\r` back to the start of the line (what follows overwrites it), `\b` deletes, `\f` clears it all, so headless output shows only what came after the last `\f`), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
-| `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()`, `reset()`, `resume()` |
+| `memory.py` | `Memory` with two 16M-word banks (Python lists, 128 MB each, kept out of the cycle collector's sight with `gc.freeze()`: it walked their 32M items, 66 ms a time), `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
+| `devices.py` | `Display` (lines of text; `\n` new line, `\r` back to the start of the line (what follows overwrites it), `\b` deletes, `\f` clears it all, so headless output shows only what came after the last `\f`), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; the selected input and output addresses, and `hex_value`, the last word sent to the hex display; `OUTADDR` looks the output device up once and keeps its function in `send`, and putting another device in `display`, `video` or `disk` rewires it) |
+| `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()` (translated blocks, and the `_interpret()` loop), `reset()`, `resume()`, `forget_code()` |
+| `translate.py` | turns code that runs often into Python functions for `run()` (3.2): `translate()` (one block), `dispatcher()` (the loop that runs them) |
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 25 checks on the core |
+| `selftest.py` | 30 checks on the core |
+| `bench.py` | the simulator's speed on nine example programs (3.3) |
 
 ### 3.2 Execution model
 
@@ -461,16 +510,51 @@ ALU instructions call `alu.int_op` or `alu.float_op` with `a = R[RA]` and
 `halted`; `resume()` clears it and execution continues after the `HALT`.
 
 `CPU.run(max_steps, stop_at=())` does what calling `step()` `max_steps`
-times does, without building `Step` records or disassembling: one loop with
-the machine state in local variables, about 3 MHz against `step()`'s
-~250 kHz. It stops at `HALT`, at a stack wrap that stops the CPU, or before
-an address in `stop_at` (not checked for the first instruction, so a run can
-leave a breakpoint). It writes out the common integer ALU ops itself and
-calls `alu.py` for DIV, MOD and the float group, so an instruction change
-touches both `run()` and `_execute()`; the self-check `test_run_matches_step`
-compares them on random code. The window (when the trace is off), the
-headless runner (without `--trace`) and `python compiler/src/cc run` all use
-`run()`; single steps, the trace and C line stepping use `step()`.
+times does, without building `Step` records or disassembling. It stops at
+`HALT`, at a stack wrap that stops the CPU, or before an address in
+`stop_at` (not checked for the first instruction, so a run can leave a
+breakpoint). Code that runs often is translated into Python
+(`translate.py`): once execution has jumped to an address 50 times
+(`translate.HOT`), the code from there becomes a *block*, one Python
+function, that goes through conditional jumps (a taken one leaves it) and
+follows `RJMP` and `CALL`'s `JMRB`, up to `RET`'s `JMRB`, `HALT` or 64
+instructions. In it the registers are local variables, operands and `DATA`
+values are constants, and the flags are only worked out where a jump or a
+way out of the block sees them. An `OUTADDR` of a known address is skipped
+when that device is already selected, and an `OUTDATA` to the RGB screen
+the block's own `OUTADDR` picked is written out in the block (what
+`Video.write()` does: the pixel, `dirty`, `used`). A generated dispatcher per bank, an if/else
+tree on the address that calls each block by its own name (so pypy3 can
+compile each call in), runs one block after another. The rest runs in
+`_interpret()`, the one-instruction-at-a-time loop: code that isn't hot yet,
+the last instructions before `max_steps` (fewer than the next block has),
+and the whole run when there are breakpoints.
+
+Blocks are kept over a `reset()` (the ones whose words changed are dropped
+then), shared by every `CPU` in the process, and made for the current
+TWEAKS (3.4). The CPU can't write ROM; RAM code (programs for the OS, 11)
+can change under its blocks, so a map of the RAM words they came from is
+checked by every RAM store (translated code, `_interpret()`, `step()`), and
+a store there drops all RAM blocks. ROM blocks only check that map once some
+RAM code is translated. After changing memory from outside while a program
+runs, call `forget_code()` (the window does when a word is edited).
+
+An instruction change touches `_execute()` (for `step()`), the
+`_interpret()` loop and `translate.py` (`alu.py` holds DIV, MOD and the
+float group for all three; a change to `Video.write()` also touches
+`translate.py`'s `pixel()`); the self-checks `test_run_matches_step` and
+`test_translated_code_matches_step` compare them with `step()` on random
+code. The window (when the trace is off), the headless runner (without
+`--trace`) and `python compiler/src/cc run` all use `run()`; single steps,
+the trace and C line stepping use `step()`.
+
+Speed, from `bench.py` (3.3) on a Ryzen 5 5600, in millions of instructions
+a second: `step()` about 0.25; `run()` with CPython 3.14 15 to 21 (the old
+loop alone did about 3); with pypy3 about 100 over the nine programs, and
+250 to 680 on programs that keep to a few hot loops (`life`, `sqrt`,
+`queens`, and `os` when it runs long). pypy3 compiles each block before it
+runs fast, so a program that ends within a few million instructions runs at
+5 to 40 MHz the first time.
 
 ### 3.3 Running it
 
@@ -498,7 +582,9 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
 * middle: ROM and RAM tabs, 256 words per page, with optional disassembly and
   "follow IAR"; and a C source tab (below)
 * right: the display (`0x5C`) and the RGB screen (`0x6C`, a tab that comes
-  forward when a program first draws), the hex display, the keyboard field
+  forward when a program first draws; redrawn every tick from the pixels
+  that changed, or as one PPM picture when more than 400 did), the hex
+  display, the keyboard field
   (`0xF0`), and the last executed instructions
 
 Editing: type into any register/IAR/ESP/EBP box and press Enter, click the
@@ -524,6 +610,17 @@ waiting to be read.
 Speed control: a 20 ms Tk timer runs `hz × elapsed` instructions per tick,
 at most 50 000 per tick so the window stays responsive. Trace logging is
 skipped when more than 200 instructions run in one tick.
+
+**Speed check:** `bench.py` builds nine example programs (once, into
+`compiler/ROM/bench/`), runs each in `run()` a few times on one CPU (reset
+in between, the timer stopped at 0 so every run does the same work) and
+prints MHz for the first run and the best of the others, with a digest of
+the end state that an optimisation must leave unchanged:
+
+```
+pypy3 cpu_sim/src/bench.py [life sqrt qr grapher image queens asm shell os] [--repeat N]
+python cpu_sim/src/bench.py [names] [--scale F]   # CPython: fixed-length runs are 0.1 as long
+```
 
 ### 3.4 Configurable behaviour (`config.py` TWEAKS)
 
@@ -943,16 +1040,22 @@ python compiler/src/asm/selftest.py   # 20 checks: encodings, values, strings, j
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 25 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 30 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
                                       # floats, FCMP flags, keyboard, backspace, key codes (arrows, Ctrl), the display's
                                       # backspace and form feed, ADDR/JMRB,
                                       # float specials, float SHL, run() against step()
-                                      # on random code, run() stopping at breakpoints,
+                                      # on random code, translated code against step() on
+                                      # random program-like code (each TWEAKS setting, in ROM
+                                      # and in RAM it writes over), translated code after
+                                      # memory changes, run() stopping at breakpoints,
                                       # the top of both 16M-word banks, the timer,
-                                      # the disk (kept in its file, size, past the end)
-python compiler/src/cc/selftest.py    # 15 checks: preprocessor, error messages (several per run), warnings,
-                                      # type sizes, exit/atexit, keyboard input, globals
+                                      # the disk (kept in its file, size, past the end),
+                                      # the LD trace note when RA == RB, step_line (C line
+                                      # stepping: line, breakpoint, halt, limit), isa.py against the assembler's
+                                      # encoding.py tables (names, groups, one/two-word shapes)
+python compiler/src/cc/selftest.py    # 16 checks: preprocessor, error messages (several per run), warnings,
+                                      # type sizes, exit/atexit, strtoul overflow limits, keyboard input, globals
                                       # after a reset, library override, reserved names,
                                       # mixing C and assembly, memory past 64K words (ROM
                                       # table, RAM array, malloc, far code), CLI, C line
@@ -966,12 +1069,12 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 15 checks: format (sparse, the superblock), text and
+python compiler/src/disk/selftest.py  # 16 checks: format (sparse, the superblock), text and
                                       # binary round trips (block edges), overwriting frees
                                       # blocks, a directory past one block (entries reused),
                                       # subdirectories, . and .., mv, name rules, disk full, CLI,
                                       # fsck, the C library on the simulator against fs.py, `stat()` against fs.py,
-                                      # the shell and the `ed` editor run on a disk,
+                                      # the shell and the `ed` and `edit` editors run on a disk,
                                       # (each reads what the other wrote; fsck clean after),
                                       # and spawnv(): a --exe program put on the disk, run
                                       # three times (arguments, exit status, fresh variables,
@@ -1097,9 +1200,10 @@ Measured on 4 s clips, 128×96 (12 288 words a frame at one word per pixel):
 
 Drawing costs about 28 instructions a pixel even where nothing changed
 (`gfx_image` decodes and walks every pixel), so 10 frames a second needs
-about 4 million instructions a second: `pypy3` keeps up (0 frames late on
-the demo), plain `python` (about 2.7 MHz) doesn't, and the circuit (about
-2 kHz) would take minutes a frame. Skipping transparent runs without
+about 4 million instructions a second: `pypy3` and plain `python` keep up
+(0 frames late on the demo; `python` did about 2.7 MHz before `run()`
+translated code, 3.2, and fell behind), and the circuit (about 2 kHz) would
+take minutes a frame. Skipping transparent runs without
 walking their pixels would be the next speed-up.
 
 ---
@@ -1128,7 +1232,7 @@ counts chars; a binary file's length counts words. A 64 MB disk has 65,536
 blocks (256 for the FAT) and 65,278 free when new.
 
 ```
-python compiler/src/disk format disk.img [--size MB] [--force]   # new disk (64 MB, sparse); --force wipes one
+python compiler/src/disk format disk.img [--size MB] [--force]   # new disk (64 MB, sparse); --force overwrites an existing file; without it a disk or any other existing file is refused
 python compiler/src/disk ls disk.img [PATH]                      # a directory: size (chars/words) and name
 python compiler/src/disk put disk.img HOST [PATH] [--binary]     # copy in (text unless --binary, or a TEX1
                                                                  # program from cc build --exe); PATH: a
@@ -1163,7 +1267,8 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | RGB screen `0x6C`/`0x6D` | 128×128 RGB565, the "RGB screen" tab, `--screen` | `RGB_Display` → RGB Video in `PC` (2026-10-22); the `0x6D` clear isn't built |
 | disk `0x8C`/`0x8D` | a file, `--disk` or the window's `disk` button | none (Logisim's RAM can't save itself) |
 | text display `0x5C`: control characters | `\n` new line, `\r` a carriage return (back to the start of the line; what follows overwrites it), `\b` deletes at the end of a line (after `\r` it moves back one), `\f` clears it all; others are printed | the `display` subcircuit gives the TTY 7 data bits and a write strobe (its clear pin isn't wired). Logisim 4.1.0's `TTY` (read in its code, `TtyState.add`, not run): `\n` and `\r` both start a new line, `\b` deletes, `\f` clears; other control characters are dropped. **`\r` differs, on purpose** (decided 2026-10-28, OS questionnaire round 4 Q25): a real carriage return is worth having apart from `\n`, even though the circuit's TTY can't do it. Nothing in the toolchain prints it |
-| timing | one instruction per step | several clock cycles per instruction (stepper) |
+| timing | one instruction per step | several clock cycles per instruction (stepper): 3 to 6, and 16 for `CMP`/`FCMP` (2.5) |
+| `CMP`/`FCMP`: R0 | writes 0 (1.5) | the control section never selects a register to set during `CMP` (2.5: read from its gates, 2026-10-23), so R0 should keep its old value; not yet run on the circuit |
 
 ---
 
@@ -1367,8 +1472,9 @@ per group of functions: `printf.c`, `format.c`, `fdigits.c`, `scanf.c`,
 `string.c`, `malloc.c`, `math.c`, `gfx.c`, `gfx_text.c` and `gfx_image.c` for the RGB
 screen, `fs.c` (files on the disk, TFS1 as in 7.6, `stat` and `statvfs`) and `dir.c`
 (directories), ...), `local.h` (shared by the library
-files only) and three assembly files: `runtime.asm` (`_pow2`, `_udiv`,
-`_umod`), `setjmp.asm`, and `spawn.asm` (the jumps of `spawn.c`'s `spawnv`,
+files only) and four assembly files: `runtime.asm` (`_pow2`, `_udiv`,
+`_umod`), `memory.asm` (`memcpy` and `memset`, 6 instructions a word instead of the
+13 and 9 of the compiled loops), `setjmp.asm`, and `spawn.asm` (the jumps of `spawn.c`'s `spawnv`,
 10.4). `_Exit` is in the generated crt0.
 
 * The driver compiles each library file the first time it is needed and
@@ -1430,7 +1536,8 @@ no multitasking.
 | --- | --- |
 | `os/shell.c` | the OS's ROM: a command shell, built like any C program (18,793 words of ROM, 2,925 of RAM) |
 | `os/ed.c` | a line editor for text files, a program for `/bin` (15.8K words; section 11.1) |
-| `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `os/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples and `ed`, 2.8K–17.4K words each, in under a second |
+| `os/edit.c` | a full-screen editor on the RGB screen, a program for `/bin` (section 11.2) |
+| `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `os/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples, `ed` and `edit`, 2.8K–17.4K words each, in under a second |
 
 ```
 python os/make_disk.py [IMG] [--new] [--size MB]
@@ -1458,7 +1565,7 @@ Built-in commands (the `commands[]` table, which `help` also prints):
 | `echo [word...]` | the words, one space apart |
 | `rm path...` | `remove`: files and empty directories |
 | `mv from to` | `rename`; into `to` when that is a directory |
-| `cp from to` | a copy; into `to` when that is a directory. `stat()` says whether the source is a text file or binary (`fopen` `"r"`/`"w"` or `"rb"`/`"wb"`), so a program in `/bin` copies and still runs. Not a directory |
+| `cp from to` | a copy; into `to` when that is a directory. `stat()` says whether the source is a text file or binary (`fopen` `"r"`/`"w"` or `"rb"`/`"wb"`), so a program in `/bin` copies and still runs. Not a directory; copying a file onto itself is refused ("are the same file") |
 | `mkdir dir...`, `rmdir dir...` | |
 | `df` | `statvfs("/")`: 1 KB blocks, used, free (it reads the whole FAT: 0.9 million instructions on 64 MB) |
 | `clear` | a form feed (12) to the text display, `gfx_clear()` for the RGB screen |
@@ -1517,4 +1624,27 @@ A range is `N`, `N,M`, `.` (the current line), `$` (the last), or `,`
 `not found: x`). Lines are at most 255 chars (the same limit as the shell's
 line). The self-check `editor` (disk suite) drives it through the shell and
 reads the file back with `fs.py`.
+
+### 11.2 The full-screen editor: `edit` (`os/edit.c`)
+
+`edit notes.txt` shows the text on the RGB screen (128 x 128, 6 x 8 cells:
+21 columns, 15 text lines and a status line in inverted colours with the
+name, `*` when unsaved and `line:column`, or the last message). Keys come
+from the keyboard device (arrows 28-31 and Ctrl-A..Z 1..26, simulator only,
+8): printable keys insert, Enter splits, Backspace deletes or joins lines,
+arrows move (up/down keep the column), Ctrl-A / Ctrl-E start / end of line,
+Ctrl-B / Ctrl-F a page, Ctrl-K deletes the line, Ctrl-S saves, Ctrl-Q quits
+(unsaved: a warning, a second Ctrl-Q quits), Ctrl-G lists them. The same
+rules as `ed`: a missing file is made by saving, a binary file is refused,
+lines are at most 255 chars. Ctrl-D is left alone (it is the shell's end of
+input). The page is not redrawn on every key: `shown[][]` remembers what
+each cell displays and `refresh()` calls `gfx_char` only for cells that
+differ (the cursor is a cell drawn inverted), so a typed char costs a few
+cells, and it does that at most every 33 ms (30 fps, `clock()`): keys are
+polled with `key_pressed()` and the screen is redrawn when something
+changed and a frame has passed. The screen can't be read back, which is why the cells are
+remembered. The text is scrolled by `top` and `left` to keep the cursor
+visible. The window ignores characters outside ASCII 32-126 (keyboard and font are ASCII), so pasted `§` or `→` are dropped; left as is (2026-10-29). Pasting 20K chars takes about 3 s (it took 3 minutes when the page was redrawn after every key). The self-check `screen_editor` (disk suite) types a session
+through the shell, reads the file back with `fs.py`, and checks the screen
+holds text while it runs and is blank after.
 

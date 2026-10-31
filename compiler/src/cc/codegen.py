@@ -33,9 +33,9 @@ import peephole
 import regalloc
 import typesys as T
 from cerror import CError, error_at
-from cparser import MASK, wrap
+from cparser import MASK
 from linker import RAM_BASE      # compiler/src/asm, on sys.path via driver.py
-from nodes import Node, Obj
+from nodes import Node
 
 TEMPS = list(range(1, 13))
 SCRATCH = 13
@@ -790,7 +790,6 @@ class CodeGen:
         else:
             r = self.to_reg(self.hold(v))
         cases = node.cases
-        values = [c for c in cases if c.lo == c.hi]
         if self.use_table(cases):
             self.jump_table(node, r)
         else:
@@ -1091,6 +1090,10 @@ class CodeGen:
                 v = self.load_bitfield(addr, node.member, node)
                 self.free_addr(addr)
                 return v
+            if k == "deref":
+                v = self.gen_indexed_load(node)
+                if v is not None:
+                    return v
             addr = self.gen_addr(node)
             v = self.load(addr, ty)
             return v
@@ -1103,9 +1106,6 @@ class CodeGen:
         if k in ("add", "sub", "mul", "div", "mod", "bitand", "bitor", "bitxor", "shl", "shr"):
             a, b = self.operands(node.lhs, node.rhs)
             return self.binop(k, ty, a, b, node)
-        if k == "sub" and ty.is_integer and node.lhs.ty.kind == "ptr":
-            a, b = self.operands(node.lhs, node.rhs)
-            return self.binop("sub", T.int_type(), a, b, node)
         if k in ("eq", "ne", "lt", "le", "logand", "logor", "not"):
             return self.gen_bool(node)
         if k == "neg":
@@ -1196,12 +1196,7 @@ class CodeGen:
                 base = self.gen_ptr(node.lhs)
                 n = signed(idx.val)
                 return base.plus(n if k == "add" else -n)
-            if has_call(idx) and not has_call(node.lhs):
-                iv = self.hold(self.gen(idx), idx)
-                base = self.gen_ptr(node.lhs)
-            else:
-                base = self.gen_ptr(node.lhs)
-                iv = self.gen(idx)
+            base, iv = self.ptr_operands(node)
             if k == "sub":
                 ri = self.reg_name(iv)
                 self.free_val(iv)
@@ -1219,6 +1214,31 @@ class CodeGen:
             return Addr("abs", reg=v.reg, owned=False)
         r = self.to_reg(v, node)
         return Addr("abs", reg=r)
+
+    def ptr_operands(self, node):
+        """(base Addr, index Val) of a pointer +/- a runtime index, evaluated
+        in an order that a call in the index can't upset."""
+        if has_call(node.rhs) and not has_call(node.lhs):
+            iv = self.hold(self.gen(node.rhs), node.rhs)
+            return self.gen_ptr(node.lhs), iv
+        base = self.gen_ptr(node.lhs)
+        return base, self.gen(node.rhs)
+
+    def gen_indexed_load(self, node):
+        """*(p + i) with p in a register: ALD Rp, Ri reads it in one
+        instruction (else None: the caller does the general thing)."""
+        ptr = node.lhs
+        if not (ptr.kind == "add" and ptr.ty.kind == "ptr" and ptr.lhs.ty.is_ptr_like
+                and ptr.rhs.kind != "num"):
+            return None
+        base, iv = self.ptr_operands(ptr)
+        if (base.kind == "abs" and base.reg is not None and base.label is None
+                and base.off == 0 and iv.kind in ("reg", "vreg", "r0")):
+            self.ins("ALD", f"R{base.reg}", self.reg_name(iv))
+            self.free_addr(base)
+            self.free_val(iv)
+            return Val("r0")
+        return self.load(self.addr_add(base, iv, ptr), node.ty)
 
     def addr_add(self, base, iv, node):
         """base + a runtime index (a Val, consumed)."""
@@ -1383,8 +1403,6 @@ class CodeGen:
             for i in range(n):
                 v = self.load_keep(src.plus(i), None)
                 v = self.hold(v) if dst.kind == "frame" and dst.reg is not None else v
-                if v.kind == "reg" and dst.kind != "frame":
-                    pass
                 out = self.store(dst.plus(i), v)
                 self.free_val(out)
             return

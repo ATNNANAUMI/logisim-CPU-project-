@@ -40,13 +40,13 @@ def size_text(node):
 
 
 def cmd_format(args):
-    if os.path.exists(args.image) and not args.force:
+    if os.path.exists(args.image) and os.path.getsize(args.image) and not args.force:
         try:
             FileSystem(args.image).close()
-            raise FsError(f"{args.image} is already a disk: --force to wipe it")
-        except FsError as e:
-            if "already" in str(e):
-                raise
+            what = "already a disk"
+        except FsError:
+            what = "not a disk image"
+        raise FsError(f"{args.image} is {what}: --force to overwrite it")
     words = int(args.size * MB) // 4
     with FileSystem.format(args.image, words) as disk:
         print(f"{args.image}: {disk.blocks} blocks of {fs.BLOCK} words, "
@@ -107,7 +107,7 @@ def main(argv=None):
 
     p = command("format", "make an empty disk")
     p.add_argument("--size", type=float, default=64, help="size in MB (default 64)")
-    p.add_argument("--force", action="store_true", help="wipe an existing disk")
+    p.add_argument("--force", action="store_true", help="overwrite an existing file (a disk or not)")
     command("ls", "list a directory").add_argument("path", nargs="?", default="/")
     p = command("put", "copy a file from the PC onto the disk", "host")
     p.add_argument("path", nargs="?")

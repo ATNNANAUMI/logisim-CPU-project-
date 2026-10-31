@@ -57,6 +57,7 @@ def c_name(text):
 
 
 def header_text(name, filename, source, command, width, height, k, words, note):
+    source, command = (t.replace("*/", "* /") for t in (source, command))   # stay inside the comment
     lines = [
         f"/* {filename} - {MARK} from {source}",
         " *",

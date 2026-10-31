@@ -99,15 +99,19 @@ DIR *opendir(const char *path)
 
 struct dirent *readdir(DIR *dir)
 {
-    unsigned count = dir->node.length / _FS_ENTRY, base, flags, k;
+    unsigned count = dir->node.length / _FS_ENTRY, base, flags, k, c;
     while (dir->next < count) {
         base = dir->next++ * _FS_ENTRY;
         flags = _fs_word(dir->node.first, base + _FS_NAME + 2);
         if (!(flags & _FS_USED))
             continue;
-        for (k = 0; k < _FS_NAME; k++)
-            dir->entry.d_name[k] = _fs_word(dir->node.first, base + k);
-        dir->entry.d_name[_FS_NAME - 1] = 0;
+        for (k = 0; k < _FS_NAME - 1; k++) {      /* up to the 0 that ends the name */
+            c = _fs_word(dir->node.first, base + k);
+            dir->entry.d_name[k] = c;
+            if (c == 0)
+                break;
+        }
+        dir->entry.d_name[k] = 0;
         dir->entry.d_size = _fs_word(dir->node.first, base + _FS_NAME + 1);
         dir->entry.d_type = flags & _FS_DIR ? DT_DIR : DT_REG;
         return &dir->entry;

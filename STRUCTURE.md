@@ -31,6 +31,11 @@ logisim-CPU-project-/
 ├── logisim/
 │   ├── CPU.circ              THE CIRCUIT. Top-level circuit = "PC" (RGB Video fed by RGB_Display)
 │   ├── run_rom.py            patches a .rom into the ROM inside subcircuit "RAM", runs Logisim headless, prints TTY
+│   ├── microcode/            CONTROL_SECTION as a 64K x 32 microcode ROM (not wired into CPU.circ yet; TECHNICAL 2.5)
+│   │   ├── microcode.py      the table (steps per instruction, bit layout) -> microcode.rom; --list prints it
+│   │   ├── microcode.rom     the generated image ("v2.0 raw")
+│   │   ├── verify.py         runs CONTROL_SECTION's gates through Logisim for every IR/step/flags, compares with the ROM
+│   │   └── ControlSweep.java the sweep verify.py compiles and runs (needs javac + the Logisim jar)
 │   └── cpu datas/            old notes: stack micro-steps, personal TODO
 │
 ├── compiler/
@@ -58,7 +63,7 @@ logisim-CPU-project-/
 │   │   ├── peephole.py       clean-ups per function
 │   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0 (ROM or --exe), link, TEX1 .exe, run in simulator
 │   │   ├── cerror.py         CError (file:line:col: error: ...)
-│   │   ├── selftest.py       15 checks (incl. every tests/ program against gcc's output)
+│   │   ├── selftest.py       16 checks (incl. every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
 │   │                         fuzz.py: random programs, gcc vs tiny C
 │   ├── src/img/              PNG -> compressed image for gfx_image() (run as `python compiler/src/img pic.png`)
@@ -75,9 +80,9 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       15 checks (incl. the C library's files on the simulator against fs.py, stat, spawnv, os/shell.c, os/ed.c)
+│   │   └── selftest.py       16 checks (incl. the C library's files on the simulator against fs.py, stat, spawnv, os/shell.c, os/ed.c, os/edit.c)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
-│   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), setjmp.asm,
+│   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), memory.asm (memcpy, memset), setjmp.asm,
 │   │                         spawn.c + spawn.asm (spawnv: load a --exe program from the disk, run it, come back)
 │   ├── examples/             example programs, in folders by kind (asm/ and c/)
 │   │   ├── asm/              assembly
@@ -110,6 +115,7 @@ logisim-CPU-project-/
 │   │                         cd pwd cat echo rm mv cp mkdir rmdir df clear halt (> and >> to a file); any other
 │   │                         name runs /bin/NAME (or a path) with spawnv() and waits
 │   ├── ed.c                  a line editor for text files (a program for /bin: a, i, c, d, p, s, /find, w, q)
+│   ├── edit.c                a full-screen editor on the RGB screen (a program for /bin: arrows, ^S save, ^Q quit)
 │   └── make_disk.py          os/disk.img (git-ignored): TFS1, ed and the C examples built --exe in /bin, /readme.txt
 │
 └── cpu_sim/
@@ -118,12 +124,16 @@ logisim-CPU-project-/
     │   ├── isa.py            decode(), disassemble(), opcode tables
     │   ├── alu.py            int_op(), float_op() → (R0 value, flags)
     │   ├── memory.py         ROM/RAM banks, v2.0 raw loader
-    │   ├── devices.py        Display (0x5C; form feed clears it), Keyboard (0xF0, empty reads 0; `key_code()`: arrows 28–31, Ctrl+letter 1–26), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), Disk (0x8C seek/size, 0x8D data; mmap of a file), DeviceBus (+ hex display value, 0x3C)
-    │   ├── cpu.py            CPU: step() (traced), run() (fast loop), reset(), stack ops, COMM
+    │   ├── devices.py        Display (0x5C; form feed clears it), Keyboard (0xF0, empty reads 0; `key_code()`: arrows 28–31, Ctrl+letter 1–26), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), Disk (0x8C seek/size, 0x8D data; mmap of a file), DeviceBus (+ hex display value, 0x3C; `send` = the selected output device's function)
+    │   ├── cpu.py            CPU: step() (traced), run() (translated blocks + the _interpret() loop), reset(), forget_code(), stack ops, COMM
+    │   ├── translate.py      code jumped to 50 times -> one Python function per block (registers as locals, lazy flags);
+    │   │                     dispatcher(): an if-tree per bank calling blocks by name (pypy3 compiles it in); RAM code too
+    │   │                     (every RAM store checks a map of translated words and drops RAM blocks it hits)
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG]`
-    │   └── selftest.py       25 checks
+    │   ├── bench.py          speed check: nine example programs in run(), MHz first/best run + end-state digest
+    │   └── selftest.py       30 checks (incl. translated code against step() on random code)
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -204,7 +214,7 @@ The design follows the "But How Do It Know?" style: a single bus,
   `python compiler/src/disk`. Programs for the OS (`cc build --exe`) run
   from RAM at `0x1100000`, loaded by C's `spawnv()`.
   Videos: `compiler/src/img/video.py` -> frames that `video_player.c` draws
-  on time (about 350k instructions a 128×96 frame: pypy3 keeps up at 12 fps).
+  on time (about 350k instructions a 128×96 frame: python and pypy3 keep up at 12 fps).
 
 ## Assembler conventions
 
@@ -267,6 +277,8 @@ python cpu_sim/src/main.py compiler/ROM/prog.rom                       # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 --keys $'text\n'
 python cpu_sim/src/main.py compiler/ROM/prog.rom --disk disk.img            # with a disk (cc run --disk too)
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom   (jar: $LOGISIM_JAR or the Arch package path)
+python logisim/microcode/microcode.py [--list]                     # control section -> logisim/microcode/microcode.rom
+python logisim/microcode/verify.py [--quick]                        # that ROM against CONTROL_SECTION's gates (a few minutes)
 python compiler/src/cc run prog.c [--keys $'12\n'] [--stats]      # C: build + run in the simulator
 python compiler/src/cc build prog.c [more.c x.asm] [-o prog.rom]   # C: -> compiler/ROM/prog.rom (+ prog.asm)
 python compiler/src/cc build prog.c --exe                          # C: -> prog.exe, a program for the OS (disk put it)
@@ -278,6 +290,7 @@ python compiler/src/disk format disk.img; python compiler/src/disk put disk.img 
 python os/make_disk.py; python compiler/src/cc build os/shell.c                 # the OS: os/disk.img with /bin, the shell's ROM
 python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img             # run it, type help
 pypy3 compiler/src/cc run compiler/examples/c/graphics/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
+pypy3 cpu_sim/src/bench.py [life sqrt ...]                          # simulator speed in MHz (python: --scale 0.1 by default)
 ```
 
 ## Open questions / gotchas
@@ -293,6 +306,9 @@ pypy3 compiler/src/cc run compiler/examples/c/graphics/video_player.c -I . -D 'V
   (`diag12.asm`, `diag13.asm`). The simulator now matches the circuit.
 * The simulator also gave `0.0/0.0 = +inf`, `1.0/-0.0 = +inf` and `INT(inf) = 0`;
   `diag14.asm`/`diag15.asm` measured the circuit and the simulator now matches.
+* Read from the control section's gates (`logisim/microcode/`, TECHNICAL 2.5),
+  not yet run: `CMP`/`FCMP` never write R0 (the simulator writes 0) and take
+  16 clock cycles (the stepper never resets); other instructions take 3 to 6.
 * Still-unconfirmed behaviours can be switched in `cpu_sim/src/config.py`
   (TWEAKS).
 * The C library is compiled once and cached in `compiler/ROM/libc/`; the
