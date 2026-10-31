@@ -442,7 +442,7 @@ class CPU:
                 elif op == 0x8:                             # COMM
                     mode = (word >> 4) & 3
                     if mode == 2:
-                        bus.out_data(regs[rb])
+                        bus.send(regs[rb])
                     elif mode == 3:
                         bus.out_address(regs[rb])
                     elif mode == 1:

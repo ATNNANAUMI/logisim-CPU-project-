@@ -294,6 +294,8 @@ class _Writer:
         self.const_flags = None     # or the flags as a number, when they are known
         self.temps = 0
         self.bus = False
+        self.out = None             # the output address, when an OUTADDR here set a known one
+        self.video = False          # video (the bus's Video) loaded
         self.rc = False             # rc (cpu._ram_code) loaded
         self.here = None            # (address after, instructions done) of the instruction
 
@@ -492,9 +494,18 @@ class _Writer:
                 self.bus = True
             mode = ra & 3
             if mode == 2:
-                self.emit(f"bus.out_data({self.reg(rb)})")
+                if self.out == config.VIDEO_ADDR:
+                    self.pixel(self.reg(rb))
+                else:
+                    self.emit(f"bus.send({self.reg(rb)})")
             elif mode == 3:
-                self.emit(f"bus.out_address({self.reg(rb)})")
+                k = self.known(rb)
+                self.out = k
+                if k is None:
+                    self.emit(f"bus.out_address({self.reg(rb)})")
+                else:                                       # mostly selected already
+                    self.emit(f"if bus.out_addr != {_hex(k)}:")
+                    self.emit(f"bus.out_address({_hex(k)})", 2)
             elif mode == 1:
                 self.emit(f"bus.in_address({self.reg(rb)})")
             else:                                           # INDATA: nothing there keeps RB
@@ -505,6 +516,21 @@ class _Writer:
         elif op == 0x9:                                     # ADDR
             self.set_reg(rb, (pc + 1) & ADDR_MASK)
         # 0x0 NOP
+
+    def pixel(self, value):
+        """OUTDATA to the RGB screen, selected by an OUTADDR of this block:
+        what devices.Video.write() does, written out (for a screen of
+        config's size)."""
+        if not self.video:
+            self.emit("video = bus._video")
+            self.video = True
+        bits = config.VIDEO_WIDTH.bit_length() - 1
+        i = self.temp("p")
+        self.emit(f"{i} = (({value} >> {16 - bits}) & 0x{(config.VIDEO_HEIGHT - 1) << bits:X})"
+                  f" | (({value} >> 24) & 0x{config.VIDEO_WIDTH - 1:X})")
+        self.emit(f"video.pixels[{i}] = {value} & 0xFFFF")
+        self.emit(f"video.dirty.add({i})")
+        self.emit("video.used = True")
 
     def stack(self, kind, rb, nxt, done):
         stops = config.STOP_ON_STACK_WRAP
