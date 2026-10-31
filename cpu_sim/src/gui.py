@@ -10,7 +10,7 @@ import alu as alu
 import config as config
 from cpu import CPU
 from debuginfo import DebugInfo, step_line, step_out
-from devices import key_code
+from devices import Video, key_code
 from isa import decode, disassemble
 from memory import load_image
 
@@ -19,6 +19,24 @@ MONO = "TkFixedFont"
 MAX_PER_TICK = 100_000         # keeps the window responsive at high speeds
 MAX_SLICE = 0.05               # seconds of running per window tick at "max"
 STATE_CHARS = 30               # fixed width of the status block, so it never resizes the window
+FULL_REDRAW = 400              # more changed pixels than this: redraw the whole RGB screen
+                               # (one put of every pixel costs about as much as 400 puts of one)
+
+
+class _Colors(dict):
+    """RGB565 colour -> what Tk takes for it, made the first time it is asked for."""
+
+    def __init__(self, make):
+        super().__init__()
+        self.make = make
+
+    def __missing__(self, color):
+        value = self[color] = self.make(Video.rgb(color))
+        return value
+
+
+_PPM_COLORS = _Colors(bytes)                                    # 3 bytes, for a PPM
+_COLOR_NAMES = _Colors(lambda rgb: "#%02x%02x%02x" % rgb)      # "#rrggbb", for one pixel
 
 # label -> instructions per second (0 = as fast as the host manages)
 SPEEDS = [
@@ -852,24 +870,30 @@ class SimulatorWindow(tk.Tk):
             self.screen_big = self.screen_image.zoom(zoom)
             self.screen_label.configure(image=self.screen_big)
 
+    def _zoom_screen(self) -> None:
+        """Copy the screen into its zoomed picture, in place (making a new
+        zoomed image every redraw, and showing it, took ten times longer)."""
+        self.tk.call(self.screen_big, "copy", self.screen_image,
+                     "-zoom", self.screen_zoom, self.screen_zoom)
+
     def _draw_screen(self) -> None:
         video = self.cpu.bus.video
         if not (video.dirty or video.cleared):
             return
-        if video.cleared or len(video.dirty) > 1000:
-            # the whole image in one put: one {row} of colours per line
-            names = ["#%02x%02x%02x" % video.rgb(c) for c in video.pixels]
-            w = video.width
-            self.screen_image.put(" ".join("{" + " ".join(names[y * w:(y + 1) * w]) + "}"
-                                           for y in range(video.height)))
+        image = self.screen_image
+        if video.cleared or len(video.dirty) > FULL_REDRAW:
+            # the whole screen as one binary PPM: Tk reads it far faster
+            # than a list of colour names
+            ppm = b"P6 %d %d 255\n" % (video.width, video.height)
+            self.tk.call(image, "put", ppm + b"".join(map(_PPM_COLORS.__getitem__, video.pixels)),
+                         "-format", "ppm")
         else:
+            w = video.width
             for i in video.dirty:
-                self.screen_image.put("#%02x%02x%02x" % video.rgb(video.pixels[i]),
-                                      to=(i % video.width, i // video.width))
+                image.put(_COLOR_NAMES[video.pixels[i]], to=(i % w, i // w))
         video.dirty = set()
         video.cleared = False
-        self.screen_big = self.screen_image.zoom(self.screen_zoom)
-        self.screen_label.configure(image=self.screen_big)
+        self._zoom_screen()
         if video.used and not self._screen_shown:
             self._screen_shown = True
             self.outputs.select(self.screen_tab)
