@@ -54,9 +54,9 @@
 #include <string.h>
 #include <time.h>
 
-#define GRAPH_H 112                     /* rows 0-111 graph, 112-119 status, 120-127 input */
-#define STATUS_Y 112
-#define INPUT_Y 120
+#define GRAPH_H (GFX_HEIGHT - 16)       /* rows 0-239 graph, 240-247 status, 248-255 input */
+#define STATUS_Y GRAPH_H
+#define INPUT_Y (GRAPH_H + 8)
 #define MAX_LINE 60
 #define MAX_CODE 128                    /* stack program words */
 #define MAX_CONST 32
@@ -569,7 +569,7 @@ static void set_view(double a, double b, double c, double d)
 static char line[MAX_LINE + 1];
 static int line_len;
 
-#define INPUT_CHARS 20                  /* after the "> " */
+#define INPUT_CHARS (GFX_WIDTH / GFX_CHAR_WIDTH - 1)    /* after the ">" */
 
 static void draw_input(void)
 {

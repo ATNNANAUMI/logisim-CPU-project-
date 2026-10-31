@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # five self-check suites (assembler 20, simulator 30, C compiler 16, image tool 10, disk tool 16), then check_docs.py
+python run.py test                                   # five self-check suites (assembler 20, simulator 30, C compiler 17, image tool 10, disk tool 16), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
@@ -100,6 +100,7 @@ Most facts are written in more than one doc. When you change one of these, updat
 | a C test program | `compiler/src/cc/tests/<name>.c`, then `difftest.py <name> --update` (needs gcc) to write its `.expected` |
 | the compressed image format | `compiler/src/img/codec.py` (docstring, encode, decode) + `compiler/libc/gfx_image.c`; TECHNICAL §7.4, then remake the `.h` files in `compiler/examples/c/graphics/images/` |
 | the memory map (bank width, RAM base, stack, heap) | `compiler/src/asm/linker.py` + `cpu_sim/src/config.py` + `compiler/libc/malloc.c` (`HEAP_END`) + `stdlib.asm` (`HEAP_START`/`HEAP_END`) + `logisim/run_rom.py` (`BANK_BITS`); TECHNICAL §1.2/§2.4/§4.6, `assembly_syntax.md` §6, `c_language.md` §2 and §4, STRUCTURE "ISA cheat sheet", README one-paragraph summary, this file's key facts |
+| the screen's size (256×256, one pixel word: x 31–24, y 23–16, colour 15–0) | `cpu_sim/src/config.py` (`VIDEO_WIDTH`/`VIDEO_HEIGHT`) + `compiler/libc/include/gfx.h` (`GFX_WIDTH`/`GFX_HEIGHT`) + `SCREEN` in `compiler/src/img/__main__.py` + `logisim/CPU.circ` (RGB Video `resolution`, `width`, `height` and `scale`; `RGB_Display`'s two splitters and `X_coord`/`Y_coord` pins); TECHNICAL §2.2 and the device table, STRUCTURE, README, `compiler/c_language.md`; examples that place things by pixel (`snake.c`, `grapher.c`, `gfx_demo.c`) and `os/edit.c`'s comments |
 | a file or folder added, moved or removed | STRUCTURE tree; README "Layout"; TECHNICAL §9 if it's outdated material |
 | a shell command, or the programs put in `/bin` | `os/shell.c` (header, `commands[]`), `os/make_disk.py` (`PROGRAMS`, `README`); TECHNICAL §11, STRUCTURE tree, the disk self-check's `SHELL_OUTPUT` |
 | a phase or feature finished, a choice made, a mistake of the session | the Obsidian vault (next section) |

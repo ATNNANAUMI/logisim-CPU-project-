@@ -549,7 +549,7 @@ class SimulatorWindow(tk.Tk):
         screen_box = ttk.Frame(self.outputs)
         self.outputs.add(screen_box, text=f"RGB screen (0x{config.VIDEO_ADDR:02X})")
         self.screen_tab = screen_box
-        self.screen_zoom = max(1, 384 // max(video.width, video.height))
+        self.screen_zoom = max(1, 512 // max(video.width, video.height))
         self.screen_image = tk.PhotoImage(width=video.width, height=video.height)
         self.screen_big = self.screen_image.zoom(self.screen_zoom)
         # placed, not packed: the picture follows the tab's size (_fit_screen)

@@ -63,7 +63,7 @@ logisim-CPU-project-/
 │   │   ├── peephole.py       clean-ups per function
 │   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0 (ROM or --exe), link, TEX1 .exe, run in simulator
 │   │   ├── cerror.py         CError (file:line:col: error: ...)
-│   │   ├── selftest.py       16 checks (incl. every tests/ program against gcc's output)
+│   │   ├── selftest.py       17 checks (incl. every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
 │   │                         fuzz.py: random programs, gcc vs tiny C
 │   ├── src/img/              PNG -> compressed image for gfx_image() (run as `python compiler/src/img pic.png`)
@@ -152,7 +152,7 @@ PC (top)                  has the output pin `halt` that ends headless runs at H
 ├── display               text TTY at 0x5C
 ├── NUMBER_DISPLAY        8 hex digits at 0x3C
 ├── KEYBOARD              keyboard at 0xF0
-└── RGB_Display           RGB Video at 0x6C (x, y, colour from one word; Video's enable tied to 1). No 0x6D clear yet
+└── RGB_Display           RGB Video at 0x6C, 256×256 (x, y: 8 bits each, colour from one word; Video's enable tied to 1). No 0x6D clear yet
 Unused subcircuits: ROM, program_loader, sign_controller, teste
 ```
 

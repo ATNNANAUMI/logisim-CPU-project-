@@ -273,14 +273,22 @@ def test_display_controls():
 
 
 def test_rgb_video():
-    # DATA R1,0x6C ; COMM OUTADDR,R1 ; DATA R2,pixel ; COMM OUTDATA,R2 ; DATA R2,pixel ; COMM OUTDATA,R2
-    # x = 3, y = 5, red; then x = 0x83 (only 7 bits wired: x = 3), y = 6, white
+    # DATA R1,0x6C ; COMM OUTADDR,R1 ; DATA R2,pixel ; COMM OUTDATA,R2 ; ... (three pixels)
+    # x = 3, y = 5, red; x = 0x83, y = 6, white; x = 255, y = 255 (the last pixel), blue
     cpu = run([0x0301, 0x6C, 0x0831, 0x0302, 0x0305F800, 0x0822,
-               0x0302, 0x8306FFFF, 0x0822, 0x0F00])
+               0x0302, 0x8306FFFF, 0x0822, 0x0302, 0xFFFF001F, 0x0822, 0x0F00])
     video = cpu.bus.video
-    assert video.pixels[5 * video.width + 3] == 0xF800
-    assert video.pixels[6 * video.width + 3] == 0xFFFF
+    assert (video.width, video.height) == (256, 256) and len(video.pixels) == 256 * 256
+    assert video.pixels[5 * 256 + 3] == 0xF800
+    assert video.pixels[6 * 256 + 0x83] == 0xFFFF and video.pixels[6 * 256 + 3] == 0
+    assert video.pixels[256 * 256 - 1] == 0x001F
+    assert sum(1 for p in video.pixels if p) == 3
     assert video.rgb(0xF800) == (255, 0, 0)
+    # a smaller screen wires fewer bits: 128 x 128 keeps the low 7 bits of x and y
+    from devices import Video
+    small = Video(128, 128)
+    small.write(0x8306FFFF)
+    assert small.pixels[6 * 128 + 3] == 0xFFFF
     # DATA R1,0x6D ; COMM OUTADDR,R1 ; COMM OUTDATA,R1  clears it
     cpu.halted = False
     cpu.mem.load_rom([0x0301, 0x6D, 0x0831, 0x0821, 0x0F00])

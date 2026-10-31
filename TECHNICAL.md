@@ -215,7 +215,7 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 | `0x5C` | text display (TTY) | prints the low 7 bits as ASCII; `0x0A` newline, `0x08` backspace, `0x0C` (form feed) clears it (Logisim's `TTY` does this; read in its code, not run on the circuit) |
 | `0x3C` | number display | latches the 32-bit word and shows it on 8 hex digits (the simulator shows it in the window, and as `HEX DISPLAY:` in headless output) |
 | `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08`, printable ASCII as itself; simulator only so far: arrows up/down/left/right = 28/29/30/31, Ctrl-A … Ctrl-Z = 1 … 26 (Ctrl-D = 4; Ctrl-H, Ctrl-J, Ctrl-M are Backspace and Enter; Ctrl-C and Ctrl-V stay with the window) |
-| `0x6C` | RGB screen | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; on the 128×128 RGB Video only the low 7 bits of x and y are wired. Write-only |
+| `0x6C` | RGB screen | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; a 256×256 RGB Video uses all 32 bits (a smaller one would wire only the low bits of x and y). Write-only |
 | `0x6D` | RGB screen clear (*simulator only*) | any word pulses the RGB Video's reset: all black. Not built on the circuit yet, where it does nothing |
 | `0x7C` | timer (*planned*) | `INDATA` reads the milliseconds since reset, wrapping at 32 bits; C's `clock()` |
 | `0x8C` | disk seek (*simulator only*) | `OUTDATA` sets the disk's word position; `INDATA` reads the disk's size in words |
@@ -379,8 +379,18 @@ from the Keyboard's buffer.
 
 **RGB_Display** — address decoder for `0x6C` and the same select flip-flop
 and write strobe as `display`. Splitters take the colour from bus bits 15–0,
-y from bits 22–16 and x from bits 30–24; they and the strobe (on the clock
-input) go to the `RGB Video` in `PC`. The Video's write-enable input is tied
+y from bits 23–16 and x from bits 31–24; they and the strobe (on the clock
+input) go to the `RGB Video` in `PC`. Since 2026-10-31 the screen is
+256×256 and x and y are 8 bits each (the `X_coord` and `Y_coord` pins are 8
+bits wide; the two splitters used to drop bit 7, leaving 7 bits for the
+128×128 Video). The `RGB Video` in `PC` has resolution `256x256` at scale 2
+(the same size on the schematic as 128×128 at scale 4). Logisim only takes
+that resolution from the file when `width` and `height` are written there
+too (`resolution` alone loads as 128×128), so all three are in `CPU.circ`.
+Checked with Logisim's own loader and simulator, not by running a program:
+the Video loads as 256×256 with 8-bit X and Y ports on the wires that were
+already there, `PC` has no width mismatches, and `RGB_Display` turns the word
+`0xA55A1234` into X `0xA5`, Y `0x5A`, colour `0x1234` (it gave X `0x25` before). The Video's write-enable input is tied
 to a constant 1 there: left unconnected, nothing is drawn. There is no clear
 (`0x6D`) yet.
 
@@ -927,7 +937,7 @@ Assembly is under `asm/` (`programs/`, `stdlib/`, `two_files/`, `tests/` for cir
 | `c/basics/hello.c` | C: `printf("hello, world\n")` |
 | `c/basics/primes.c` | C: a sieve, `printf` with a width, the hex display (`cpu.h`) |
 | `c/graphics/gfx_demo.c` | C: the RGB screen with `gfx.h`: gradient, text, shapes, a sine wave (`--screen` saves the picture) |
-| `c/graphics/image_demo.c` | C: compressed pictures with `gfx_image` (7.4): a 128×128 Mandelbrot picture and a transparent 16×16 sprite from `c/graphics/images/` (the PNGs and the `.h` files made from them), clipped at the edges |
+| `c/graphics/image_demo.c` | C: compressed pictures with `gfx_image` (7.4): a 256×256 Mandelbrot picture and a transparent 16×16 sprite from `c/graphics/images/` (the PNGs and the `.h` files made from them), clipped at the edges |
 | `c/basics/structs.c` | C: an array of structs, `qsort`, `malloc`, `printf("%.2f")` |
 | `c/games/guess.c` | C: guess the number with `scanf`; seeded by how long the first key takes (`key_pressed`); the header has a transcript |
 | `c/tests/benchmark.c` | C: twelve square roots (the old bit-by-bit `sqrt` as the reference, Quake III's inverse square root with two constants, one or two Newton steps or a residual correction, Newton's method from `y = x` or from two bit-based first guesses) timed with `clock()` over 20 000 inputs and checked against the reference: max absolute and relative error, how many results differ. `-D ONLY_ALGORITHM=n` runs one; `-D COUNT_ONLY` drops the timing so `--stats` gives that one's instruction count. Needs `--steps 600000000` with `cc run` |
@@ -1054,8 +1064,9 @@ python cpu_sim/src/selftest.py        # 30 checks: immediates, flags, carry flag
                                       # the LD trace note when RA == RB, step_line (C line
                                       # stepping: line, breakpoint, halt, limit), isa.py against the assembler's
                                       # encoding.py tables (names, groups, one/two-word shapes)
-python compiler/src/cc/selftest.py    # 16 checks: preprocessor, error messages (several per run), warnings,
-                                      # type sizes, exit/atexit, strtoul overflow limits, keyboard input, globals
+python compiler/src/cc/selftest.py    # 17 checks: preprocessor, error messages (several per run), warnings,
+                                      # type sizes, exit/atexit, strtoul overflow limits, the 256 x 256 screen's edges (clipped, not
+                                      # wrapped), keyboard input, globals
                                       # after a reset, library override, reserved names,
                                       # mixing C and assembly, memory past 64K words (ROM
                                       # table, RAM array, malloc, far code), CLI, C line
@@ -1102,7 +1113,7 @@ turns a PNG into a compressed image that `gfx_image(x, y, img)` (`gfx.h`,
 holding `static const unsigned int picture[] = {...};`, which a C program
 `#include`s (so the words end up in ROM). It won't overwrite a file it
 didn't write. The defaults: the array is named after the file; a picture
-bigger than the screen is shrunk to fit 128×128 (area average), `--size`
+bigger than the screen is shrunk to fit 256×256 (area average), `--size`
 picks the size (`64x` or `x48` keeps the shape); pixels with alpha below
 128 become transparent. `--preview` saves what the screen will show (2×).
 
@@ -1131,7 +1142,7 @@ one word per pixel):
 | --- | --- | --- |
 | `gfx_demo.c`'s screen | 22 | 268 |
 | a logo | 194 | 516 |
-| the Mandelbrot picture of `image_demo.c` | 230 | 1734 |
+| the Mandelbrot picture of `image_demo.c` (128×128 then; 256×256 now: 70 colours, 1707 words) | 230 | 1734 |
 | a cartoon, reduced to 256 / 16 colours | 1096 | 1359 / 469 |
 | a logo / a cartoon, thresholded to black and white | 2 | 106 / 155 |
 | a page of text, black on white | 2 | 306 |
@@ -1161,7 +1172,7 @@ python compiler/src/img/video.py frames/ ...      (a folder of PNGs, in name ord
 turns a video into a `.h` of compressed frames that
 `compiler/examples/c/graphics/video_player.c` plays at the video's speed. `ffmpeg`
 and `ffprobe` read the video (they must be installed; a folder of PNG frames
-needs neither): `--fps` frames a second (1–60), shrunk to fit 128×128 unless
+needs neither): `--fps` frames a second (1–60), shrunk to fit 256×256 unless
 `--size` says otherwise, `--start`/`--seconds` take a part.
 
 * **One palette for every frame:** `--colors` (default 32) chosen over all
@@ -1264,7 +1275,7 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | carry flag | as in 1.5 | confirmed (`diag12.asm`, `diag13.asm`, 2026-10-10). The simulator used to set C on `SUB`/`CMP` when there was *no* borrow, and on `MULT` overflow; it now matches the circuit |
 | float division by zero, NaN, `INT` out of range | as in 1.5 | confirmed (`diag14.asm`, `diag15.asm`, 2026-10-10). The simulator used to give `0.0/0.0 = +inf`, `1.0/-0.0 = +inf` and `INT(inf) = 0`; it now matches the circuit |
 | number display `0x3C` | shows the last word sent (window and headless output) | 8 hex digits in `PC` |
-| RGB screen `0x6C`/`0x6D` | 128×128 RGB565, the "RGB screen" tab, `--screen` | `RGB_Display` → RGB Video in `PC` (2026-10-22); the `0x6D` clear isn't built |
+| RGB screen `0x6C`/`0x6D` | 256×256 RGB565 (`VIDEO_WIDTH`/`VIDEO_HEIGHT` in `config.py`), the "RGB screen" tab, `--screen` | `RGB_Display` → RGB Video in `PC` (2026-10-22); the `0x6D` clear isn't built. The circuit's screen was 128×128 until 2026-10-31: see 2.2 for the 256×256 change, which no program has run on yet (the circuit still has 16-bit banks, so `run_rom.py` refuses current programs) |
 | disk `0x8C`/`0x8D` | a file, `--disk` or the window's `disk` button | none (Logisim's RAM can't save itself) |
 | text display `0x5C`: control characters | `\n` new line, `\r` a carriage return (back to the start of the line; what follows overwrites it), `\b` deletes at the end of a line (after `\r` it moves back one), `\f` clears it all; others are printed | the `display` subcircuit gives the TTY 7 data bits and a write strobe (its clear pin isn't wired). Logisim 4.1.0's `TTY` (read in its code, `TtyState.add`, not run): `\n` and `\r` both start a new line, `\b` deletes, `\f` clears; other control characters are dropped. **`\r` differs, on purpose** (decided 2026-10-28, OS questionnaire round 4 Q25): a real carriage return is worth having apart from `\n`, even though the circuit's TTY can't do it. Nothing in the toolchain prints it |
 | timing | one instruction per step | several clock cycles per instruction (stepper): 3 to 6, and 16 for `CMP`/`FCMP` (2.5) |
@@ -1627,8 +1638,8 @@ reads the file back with `fs.py`.
 
 ### 11.2 The full-screen editor: `edit` (`os/edit.c`)
 
-`edit notes.txt` shows the text on the RGB screen (128 x 128, 6 x 8 cells:
-21 columns, 15 text lines and a status line in inverted colours with the
+`edit notes.txt` shows the text on the RGB screen (256 x 256, 6 x 8 cells:
+42 columns, 31 text lines and a status line in inverted colours with the
 name, `*` when unsaved and `line:column`, or the last message). Keys come
 from the keyboard device (arrows 28-31 and Ctrl-A..Z 1..26, simulator only,
 8): printable keys insert, Enter splits, Backspace deletes or joins lines,

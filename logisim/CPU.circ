@@ -189,7 +189,10 @@
     <comp lib="6" loc="(770,530)" name="RGB Video">
       <a name="color" val="565 RGB (16 bit)"/>
       <a name="cursor" val="No Cursor"/>
-      <a name="scale" val="4"/>
+      <a name="height" val="256"/>
+      <a name="resolution" val="256x256"/>
+      <a name="scale" val="2"/>
+      <a name="width" val="256"/>
     </comp>
     <comp lib="6" loc="(800,680)" name="Hex Digit Display"/>
     <comp lib="6" loc="(840,680)" name="Hex Digit Display"/>
@@ -12162,7 +12165,7 @@ b10 e0e ef0 a0e 1 2 4 8
       <a name="bit4" val="1"/>
       <a name="bit5" val="1"/>
       <a name="bit6" val="1"/>
-      <a name="bit7" val="0"/>
+      <a name="bit7" val="1"/>
       <a name="incoming" val="8"/>
     </comp>
     <comp lib="0" loc="(420,190)" name="Splitter">
@@ -12172,7 +12175,7 @@ b10 e0e ef0 a0e 1 2 4 8
       <a name="bit4" val="1"/>
       <a name="bit5" val="1"/>
       <a name="bit6" val="1"/>
-      <a name="bit7" val="0"/>
+      <a name="bit7" val="1"/>
       <a name="incoming" val="8"/>
     </comp>
     <comp lib="0" loc="(450,110)" name="Pin">
@@ -12187,14 +12190,14 @@ b10 e0e ef0 a0e 1 2 4 8
       <a name="facing" val="west"/>
       <a name="label" val="Y_coord"/>
       <a name="type" val="output"/>
-      <a name="width" val="7"/>
+      <a name="width" val="8"/>
     </comp>
     <comp lib="0" loc="(450,180)" name="Pin">
       <a name="appearance" val="classic"/>
       <a name="facing" val="west"/>
       <a name="label" val="X_coord"/>
       <a name="type" val="output"/>
-      <a name="width" val="7"/>
+      <a name="width" val="8"/>
     </comp>
     <comp lib="0" loc="(640,200)" name="Pin">
       <a name="appearance" val="classic"/>

@@ -1,12 +1,15 @@
 /* gfx.h - drawing on the RGB Video screen (not standard C)
  *
- * The screen is Logisim's RGB Video component, 128 x 128 pixels of RGB565
+ * The screen is Logisim's RGB Video component, 256 x 256 pixels of RGB565
  * colour. Each word sent to device 0x6C sets one pixel: x in bits 31-24,
- * y in bits 23-16, the colour in bits 15-0. Any word sent to 0x6D clears the
- * screen to black (simulator only: the circuit has no clear yet, so there
- * gfx_clear() and gfx_fill(GFX_BLACK) do nothing; gfx_fill_rect(0, 0,
- * GFX_WIDTH, GFX_HEIGHT, GFX_BLACK) works on both). The screen can't be read back. Everything is clipped:
- * drawing off the screen does nothing.
+ * y in bits 23-16, the colour in bits 15-0 (all 32 bits are used; x and y
+ * are 8 bits, so 256 is as big as one word can address). Any word sent to
+ * 0x6D clears the screen to black (simulator only: the circuit has no clear
+ * yet, so there gfx_clear() and gfx_fill(GFX_BLACK) do nothing;
+ * gfx_fill_rect(0, 0, GFX_WIDTH, GFX_HEIGHT, GFX_BLACK) works on both). The
+ * screen can't be read back. Everything is clipped: drawing off the screen
+ * does nothing (the hardware keeps 8 bits of x and y, so x = 256 would
+ * otherwise land on x = 0).
  *
  *   GFX_RGB(r, g, b)               a colour from 0-255 components
  *   gfx_clear()                    all black (fast: one reset pulse)
@@ -41,8 +44,8 @@
 
 #define GFX_DEVICE 0x6C
 #define GFX_CLEAR_DEVICE 0x6D
-#define GFX_WIDTH 128
-#define GFX_HEIGHT 128
+#define GFX_WIDTH 256
+#define GFX_HEIGHT 256
 #define GFX_X_SHIFT 24
 #define GFX_Y_SHIFT 16
 

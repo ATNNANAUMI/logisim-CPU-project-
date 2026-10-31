@@ -10,15 +10,16 @@
  * python compiler/src/cc build compiler/examples/c/games/snake.c, then open
  *     compiler/ROM/snake.rom in the simulator window (the "RGB screen" tab)
  *
- * Grid: 16 x 14 cells, each 8 x 8 pixels. The top 16 pixels are reserved for the score panel.
+ * Grid: 16 x 14 cells, each 16 x 16 pixels, on the 256 x 256 screen. The top 32 pixels are
+ * reserved for the score panel.
  * Controls: W/A/S/D. Press R to restart after game over, Q to quit (back to
  * the OS's shell when it was run from there: os/shell.c).
  */
 
 #define GRID_W 16
 #define GRID_H 14
-#define CELL 8
-#define BOARD_Y 16
+#define CELL 16
+#define BOARD_Y 32
 #define MAX_SNAKE (GRID_W * GRID_H)
 
 #define COLOR_BG      GFX_RGB(12, 18, 28)
@@ -96,9 +97,9 @@ static void draw_game(void)
 
     /* The board starts below the score panel, so UI and gameplay never overlap. */
     for (i = 0; i < GRID_W; i++)
-        gfx_vline(i * CELL, BOARD_Y, 128 - BOARD_Y, GFX_RGB(22, 30, 42));
+        gfx_vline(i * CELL, BOARD_Y, GFX_HEIGHT - BOARD_Y, GFX_RGB(22, 30, 42));
     for (i = 0; i < GRID_H; i++)
-        gfx_hline(0, BOARD_Y + i * CELL, 128, GFX_RGB(22, 30, 42));
+        gfx_hline(0, BOARD_Y + i * CELL, GFX_WIDTH, GFX_RGB(22, 30, 42));
 
     /* Food. */
     gfx_fill_rect(food_x * CELL + 1, BOARD_Y + food_y * CELL + 1,
@@ -111,9 +112,9 @@ static void draw_game(void)
     draw_cell(snake_x[0], snake_y[0], COLOR_HEAD);
 
     /* Score panel is separate from the board. */
-    gfx_fill_rect(0, 0, 128, BOARD_Y, COLOR_PANEL);
-    gfx_text(3, 1, "SCORE", COLOR_TEXT, GFX_NONE);
-    gfx_text(48, 1, "              ", COLOR_TEXT, GFX_NONE);
+    gfx_fill_rect(0, 0, GFX_WIDTH, BOARD_Y, COLOR_PANEL);
+    gfx_text(6, 12, "SCORE", COLOR_TEXT, GFX_NONE);
+    gfx_text(54, 12, "              ", COLOR_TEXT, GFX_NONE);
     {
         char score_text[12];
         /* Score is small enough for a simple decimal conversion. */
@@ -133,7 +134,7 @@ static void draw_game(void)
                 score_text[i] = reversed[p - 1 - i];
             score_text[p] = '\0';
         }
-        gfx_text(48, 1, score_text, COLOR_TEXT, GFX_NONE);
+        gfx_text(54, 12, score_text, COLOR_TEXT, GFX_NONE);
     }
 }
 
@@ -233,9 +234,9 @@ static void update_game(void)
 static void draw_game_over(void)
 {
     gfx_fill(COLOR_BG);
-    gfx_fill_rect(8, 34, 112, 58, COLOR_PANEL);
-    gfx_text(29, 43, "GAME OVER", COLOR_FOOD, GFX_NONE);
-    gfx_text(20, 57, "FINAL SCORE", COLOR_TEXT, GFX_NONE);
+    gfx_fill_rect(16, 68, 224, 116, COLOR_PANEL);
+    gfx_text(101, 86, "GAME OVER", COLOR_FOOD, GFX_NONE);
+    gfx_text(95, 114, "FINAL SCORE", COLOR_TEXT, GFX_NONE);
 
     {
         char text_score[12];
@@ -256,11 +257,11 @@ static void draw_game_over(void)
                 text_score[i] = reversed[p - 1 - i];
             text_score[p] = '\0';
         }
-        gfx_text(88, 57, text_score, COLOR_HEAD, GFX_NONE);
+        gfx_text(167, 114, text_score, COLOR_HEAD, GFX_NONE);
     }
 
-    gfx_text(18, 76, "PRESS R TO RESTART", COLOR_TEXT, GFX_NONE);
-    gfx_text(37, 84, "Q TO QUIT", COLOR_TEXT, GFX_NONE);
+    gfx_text(74, 152, "PRESS R TO RESTART", COLOR_TEXT, GFX_NONE);
+    gfx_text(101, 168, "Q TO QUIT", COLOR_TEXT, GFX_NONE);
 }
 
 int main(void)

@@ -214,6 +214,44 @@ int main(void)
         "100000000000000000000000000000000/2: 4294967295 1 33", "/10: 0 0 0", "zz/10: 0 0 0"], out
 
 
+def check_gfx_edges():
+    """The 256 x 256 screen: drawing reaches its last row and column, and
+    anything past an edge is clipped, not wrapped round to the other side
+    (the hardware keeps only 8 bits of x and y)."""
+    cpu, out = run_c(r"""
+#include <gfx.h>
+#include <stdio.h>
+int main(void)
+{
+    gfx_rect(0, 0, GFX_WIDTH, GFX_HEIGHT, 1);              /* the frame on the very edge */
+    gfx_pixel(256, 10, 2);  gfx_pixel(-1, 11, 2);  gfx_pixel(12, 256, 2);  gfx_pixel(13, -1, 2);
+    gfx_hline(250, 20, 20, 3);                             /* 6 pixels on, 14 clipped */
+    gfx_hline(-10, 21, 20, 3);
+    gfx_vline(30, 250, 20, 3);
+    gfx_fill_rect(200, 200, 100, 100, 4);                  /* the corner, clipped */
+    gfx_text(250, 100, "AB", 5, GFX_NONE);                 /* a character half off the screen */
+    printf("%d %d\n", GFX_WIDTH, GFX_HEIGHT);
+    return 0;
+}
+""")
+    assert out == "256 256\n", out
+    px = cpu.bus.video.pixels
+    at = lambda x, y: px[y * 256 + x]
+    assert all(at(i, 0) == 1 for i in range(256)) and all(at(0, i) == 1 for i in range(256) if i != 21)
+    assert all(at(i, 255) == 1 for i in range(256) if i != 30 and i < 200)
+    assert all(at(255, i) == 1 for i in range(1, 200) if i != 20)                 # the frame, last row and column
+    assert all(at(x, y) != 2 for x in range(256) for y in range(256))             # no stray pixel wrapped round
+    assert [at(x, 20) for x in range(250, 256)] == [3] * 6 and at(249, 20) == 0
+    assert all(at(x, 20) == 0 for x in range(1, 14))                              # the 14 clipped did not reappear at x = 0
+    assert all(at(x, 21) == 3 for x in range(10)) and at(10, 21) == 0
+    assert all(at(30, y) == 3 for y in range(250, 256)) and all(at(30, y) == 0 for y in range(1, 14))
+    assert all(at(x, y) == 4 for x in range(200, 256) for y in range(200, 256))
+    assert at(199, 200) == 0 and at(200, 199) == 0 and at(1, 1) == 0 and at(44, 44) == 0
+    five = [(x, y) for y in range(256) for x in range(256) if at(x, y) == 5]
+    assert five and all(x >= 250 and 100 <= y < 108 for x, y in five)             # only the first letter's columns
+    return None
+
+
 def check_exit_and_atexit():
     cpu, out = run_c(r"""
         #include <stdio.h>
@@ -413,6 +451,7 @@ CHECKS = [
     check_sizes,
     check_exit_and_atexit,
     check_strtol_limits,
+    check_gfx_edges,
     check_input,
     check_globals_reset,
     check_library_override,

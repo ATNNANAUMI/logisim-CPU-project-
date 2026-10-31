@@ -7,7 +7,7 @@ The .h holds `static const unsigned int picture[] = {...};` (in ROM once
 compiled); a C program does `#include "picture.h"` and
 `gfx_image(x, y, picture)`. The format is in codec.py.
 
-Pictures bigger than the screen (128 x 128) are shrunk to fit unless --size
+Pictures bigger than the screen (256 x 256) are shrunk to fit unless --size
 says otherwise. Up to 256 colours are kept exactly (as RGB565); more are
 reduced to --colors (default 256). Fewer colours = smaller; --dither looks
 smoother with few colours but compresses worse. Transparent pixels (alpha
@@ -24,7 +24,7 @@ import codec
 import imagefile
 from palette import make_palette, to888
 
-SCREEN = 128
+SCREEN = 256
 MARK = "made by compiler/src/img"       # in the first line: a file we may overwrite
 
 
@@ -84,7 +84,7 @@ def main(argv=None):
     cli.add_argument("--name", help="the C array's name (default: from the output file name)")
     cli.add_argument("--size", type=parse_size, metavar="WxH",
                      help="resize to W x H pixels; Wx or xH keeps the shape "
-                          "(default: shrink to fit 128 x 128)")
+                          "(default: shrink to fit 256 x 256)")
     cli.add_argument("--colors", type=int, default=256, metavar="N",
                      help="at most N colours, 1-256 (default 256)")
     cli.add_argument("--dither", action="store_true",

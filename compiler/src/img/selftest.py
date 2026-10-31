@@ -212,7 +212,9 @@ def check_resize():
     assert imagefile.resize(2, 2, px, 1, 1) == [(100, 0, 0, 191)]     # clear: no colour
     assert imagefile.resize(2, 2, px, 4, 2)[:4] == [px[0], px[0], px[1], px[1]]
     assert imagefile.resize(2, 2, px, 2, 2) is px
-    assert cli.target_size(300, 150, None) == (128, 64)
+    assert cli.target_size(600, 300, None) == (256, 128)
+    assert cli.target_size(300, 150, None) == (256, 128)
+    assert cli.target_size(256, 256, None) == (256, 256)
     assert cli.target_size(100, 50, None) == (100, 50)
     assert cli.target_size(100, 50, cli.parse_size("x20")) == (40, 20)
     assert cli.target_size(100, 50, cli.parse_size("30x")) == (30, 15)
@@ -289,7 +291,10 @@ def check_c_decoder():
     }
     draws = [("shapes", 0, 0), ("noise", 10, 5), ("shapes", 100, 110), ("shapes", -20, -15),
              ("one", 60, 60), ("wide", -50, 70), ("noise", 120, -3), ("shapes", 200, 10),
-             ("noise_p", 40, 40), ("dots_p", 100, 90), ("dots_p", -5, 120), ("wide_p", -100, 80)]
+             ("noise_p", 40, 40), ("dots_p", 100, 90), ("dots_p", -5, 120), ("wide_p", -100, 80),
+             # past the right and bottom edges of the 256 x 256 screen
+             ("shapes", 230, 240), ("noise", 250, -3), ("shapes", 300, 10), ("dots_p", -5, 250),
+             ("wide", 10, 200), ("wide_p", 1, 255), ("one", 255, 255), ("one", 256, 0)]
     words = {}
     for name, (w, h, indices, k, clear, form) in images.items():
         palette = [rng.randrange(1, 0x10000) for _ in range(k)]
@@ -304,13 +309,14 @@ def check_c_decoder():
     lines.append("    printf(\" %d %d\\n\", gfx_image(0, 0, bad), GFX_IMAGE_WIDTH(wide));")
     lines.append("    return 0;\n}")
 
-    screen = [0] * (128 * 128)
+    S = cli.SCREEN
+    screen = [0] * (S * S)
     for name, x0, y0 in draws:
         w, h, pixels = codec.decode(words[name])
         for i, c in enumerate(pixels):
             x, y = x0 + i % w, y0 + i // w
-            if c is not None and 0 <= x < 128 and 0 <= y < 128:
-                screen[y * 128 + x] = c
+            if c is not None and 0 <= x < S and 0 <= y < S:
+                screen[y * S + x] = c
 
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "draw.c"
@@ -318,8 +324,9 @@ def check_c_decoder():
         program, _ = driver.build([str(path)])
     cpu, out = driver.run_in_simulator(program.rom, "", 20_000_000)
     assert cpu.halted and out == "0" * len(draws) + " -1 256\n", out
-    wrong = [i for i in range(128 * 128) if cpu.bus.video.pixels[i] != screen[i]]
-    assert not wrong, f"{len(wrong)} pixels differ, the first at {wrong[0] % 128},{wrong[0] // 128}"
+    assert (cpu.bus.video.width, cpu.bus.video.height) == (S, S)
+    wrong = [i for i in range(S * S) if cpu.bus.video.pixels[i] != screen[i]]
+    assert not wrong, f"{len(wrong)} pixels differ, the first at {wrong[0] % S},{wrong[0] // S}"
     return f"{cpu.instructions} instructions"
 
 
@@ -379,12 +386,13 @@ def check_video():
             note = "and a 1 s video through ffmpeg"
     cpu, out = driver.run_in_simulator(program.rom, "", 1_000_000_000)
     assert cpu.halted and out.startswith("12 frames, ") and "(the video is 0.2 s)" in out, out
-    x0, y0 = (128 - w) // 2, (128 - h) // 2
-    expect = [0] * (128 * 128)
+    S = cli.SCREEN
+    x0, y0 = (S - w) // 2, (S - h) // 2
+    expect = [0] * (S * S)
     for p, c in enumerate(screens[-1]):
-        expect[(y0 + p // w) * 128 + x0 + p % w] = c
-    wrong = [i for i in range(128 * 128) if cpu.bus.video.pixels[i] != expect[i]]
-    assert not wrong, f"{len(wrong)} pixels differ, the first at {wrong[0] % 128},{wrong[0] // 128}"
+        expect[(y0 + p // w) * S + x0 + p % w] = c
+    wrong = [i for i in range(S * S) if cpu.bus.video.pixels[i] != expect[i]]
+    assert not wrong, f"{len(wrong)} pixels differ, the first at {wrong[0] % S},{wrong[0] // S}"
     return note
 
 
