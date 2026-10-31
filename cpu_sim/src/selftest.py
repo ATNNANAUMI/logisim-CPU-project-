@@ -319,8 +319,9 @@ def test_addr_and_jmrb():
 
 
 def test_run_matches_step():
-    # run() has its own copy of the instruction set (for speed); random code,
-    # with plenty of edge-case words, must leave it exactly where step() does
+    # run() has its own copies of the instruction set (for speed: the
+    # _interpret() loop, and translate.py's blocks once code gets hot); random
+    # code, with plenty of edge-case words, must leave it exactly where step() does
     import random
 
     def state(cpu):
@@ -369,6 +370,160 @@ def test_run_matches_step():
             assert state(chunked) == state(slow), f"run() in pieces differs, seed {seed}"
     finally:
         config.STOP_ON_STACK_WRAP = saved
+
+
+def test_translated_code_matches_step():
+    # run() translates code into Python (translate.py), here as soon as it
+    # is reached: random code shaped like a program (loops and branches,
+    # calls, the stack, memory, devices, edge-case values, each TWEAKS
+    # setting; in ROM, or in RAM where it gets written over) must leave it
+    # exactly where step() does, also in pieces
+    import random
+    import translate
+    from devices import Timer
+
+    def state(cpu):
+        return (cpu.regs, cpu.iar, cpu.flags, cpu.esp, cpu.ebp, cpu.halted, cpu.stopped,
+                cpu.instructions, cpu.mem.ram, cpu.bus.display.text, cpu.bus.hex_value,
+                cpu.bus.video.pixels, cpu.bus.video.dirty, cpu.bus.video.used,
+                cpu.bus.out_addr, cpu.bus.in_addr, list(cpu.bus.keyboard.buffer))
+
+    rng = random.Random(3)
+    values = [0, 1, 2, 3, 7, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF, 0xFFFFFFFE, 0x3F800000,
+              0xBF800000, 0x7F800000, 0x7FC00000, 0x00800000, 0x3FFF, 0x4000, RAM, RAM | 0x3FFF,
+              RAM | 0x5000, RAM | 0x5003, RAM | config.BANK_MASK, config.BANK_MASK, 0x5C, 0x3C,
+              0x6C, 0xF0, 0x7C, 0x0305F800] + [RAM | 0x5000 + i for i in (1, 5, 8, 13, 21, 34, 55)]
+
+    def program():
+        """[(words of one instruction)]; jump offsets are filled in later."""
+        code = []
+        for _ in range(rng.randrange(20, 120)):
+            pick, ra, rb = rng.random(), rng.randrange(6), rng.randrange(6)
+            if pick < 0.30:                                     # ALU, sometimes an immediate
+                word = 0x1000 | rng.randrange(16) << 8 | ra << 4 | rb
+                word |= 0x2000 if rng.random() < 0.15 else 0
+                code.append([word | 0x4000, rng.choice(values)] if rng.random() < 0.3 else [word])
+            elif pick < 0.42:                                   # DATA (often a word of the RAM copy)
+                code.append([0x0300 | rb, rng.choice(values) if rng.random() < 0.6
+                             else RAM | 0x5000 + rng.randrange(60)])
+            elif pick < 0.52:                                   # CPY LD ST ALD AST ADDR
+                code.append([rng.choice((0x0E, 0x0E, 0x01, 0x02, 0x0C, 0x0D, 0x09)) << 8 | ra << 4 | rb])
+            elif pick < 0.64:                                   # STK
+                code.append([0x0B00 | rng.choice((0, 0, 1, 1, 2, 3, 4, 5, 6)) << 4 | rb])
+            elif pick < 0.82:                                   # RJMP RJF RJNF (target later)
+                code.append([rng.choice((0x04, 0x05, 0x06, 0x06)) << 8 | rng.randrange(16), None])
+            elif pick < 0.87:                                   # CALL-like DATA R0, x ; JMRB R0
+                code.append([0x0300, None])
+                code.append([0x0A00])
+            elif pick < 0.95:                                   # COMM
+                if rng.random() < 0.3:      # a pixel: DATA RB, device ; OUTADDR RB ; OUTDATA RA
+                    code.append([0x0300 | rb, rng.choice((0x6C, 0x6C, 0x6D, 0x5C))])
+                    code.append([0x0830 | rb])
+                    code.append([0x0820 | ra])
+                else:
+                    code.append([0x0800 | rng.randrange(4) << 4 | rb])
+            else:                                               # NOP, CLF, now and then HALT
+                code.append([0x0F00 if rng.random() < 0.03 else rng.choice((0x0000, 0x0700))])
+        code.append([0x0400, None])                             # and round again
+        starts, address = [], 0
+        for words in code:
+            starts.append(address)
+            address += len(words)
+        words = []
+        for i, item in enumerate(code):
+            if item[-1] is None:                                # a jump: near, now and then far
+                ahead = rng.randrange(-12, 0) if rng.random() < 0.2 else rng.randrange(1, 12)
+                there = starts[max(0, min(len(code) - 1, i + ahead))]
+                if i == len(code) - 1:
+                    there = 0
+                elif rng.random() < 0.004:
+                    there = rng.choice((RAM | 0x5000, config.BANK_WORDS - 3, address + 5))
+                if item[0] >> 8 == 0x03:
+                    item = [item[0], there]                     # DATA R0, target
+                else:
+                    item = [item[0], (there - (starts[i] + 1)) & config.WORD_MASK]
+            words += item
+        return words
+
+    saved = (config.A_FLAG_SIGNED, config.SHR_ARITHMETIC, config.STOP_ON_STACK_WRAP,
+             translate.HOT)
+    slow, fast, chunked = CPU(), CPU(), CPU()
+    rom = slow.mem.rom
+    for cpu in (slow, fast, chunked):
+        cpu.bus.timer = Timer(clock=lambda: 0.0)
+    made = 0                                                    # blocks there at the ends
+    try:
+        translate.HOT = 1
+        for seed in range(40):
+            config.A_FLAG_SIGNED = seed % 5 != 4
+            config.SHR_ARITHMETIC = seed % 7 == 6
+            config.STOP_ON_STACK_WRAP = seed % 3 == 2
+            words = program()
+            rom[:len(words) + 8] = words + [0] * 8
+            if seed % 4 == 3:                                   # some code at the top of ROM
+                rom[config.BANK_WORDS - 3:] = [0x0302, 0xFFFFFFFF, 0x0400]
+            in_ram = seed % 3 == 1          # from RAM 0x5000, where some stores land
+            for cpu in (slow, fast, chunked):
+                cpu.reset(clear_ram=False)
+                cpu.mem.rom = rom
+                cpu.bus.keyboard.type("q\b")
+                if in_ram:
+                    cpu.mem.ram[0x5000:0x5000 + len(words)] = words
+                    cpu.iar = RAM | 0x5000
+            for _ in range(3000):
+                if slow.step() is None:
+                    break
+            fast.run(3000)
+            while chunked.instructions < 3000 and chunked.run(
+                    min(rng.randrange(1, 90), 3000 - chunked.instructions)):
+                pass
+            assert state(fast) == state(slow), f"run() differs from step(), seed {seed}"
+            assert state(chunked) == state(slow), f"run() in pieces differs, seed {seed}"
+            assert fast._code or in_ram, f"nothing was translated, seed {seed}"
+            made += len(fast._code)
+        assert made > 100, made
+    finally:
+        (config.A_FLAG_SIGNED, config.SHR_ARITHMETIC, config.STOP_ON_STACK_WRAP,
+         translate.HOT) = saved
+
+
+def test_translated_code_follows_changes():
+    # a block is made from memory words: after ROM words change (and a
+    # reset) the new words run, forget_code() drops blocks at once, and a
+    # program that writes over its own (translated) RAM code runs the new code
+    import translate
+    saved = translate.HOT
+    try:
+        translate.HOT = 1
+        # DATA R1,5 ; RJMP 4 ; (4:) ADD R1,#1 ; HALT
+        cpu = run([0x0301, 5, 0x0400, 1, 0x5010, 1, 0x0F00])
+        assert cpu.regs[0] == 6 and cpu._code
+        cpu.mem.rom[5] = 10                                     # ADD R1,#10 now
+        cpu.reset()
+        cpu.run(100)
+        assert cpu.regs[0] == 15, cpu.regs[0]
+        cpu.reset()
+        cpu.run(1)                                              # DATA R1,5 (translated, kept)
+        cpu.mem.rom[5] = 20
+        cpu.forget_code()
+        cpu.run(100)
+        assert cpu.regs[0] == 25, cpu.regs[0]
+        # in RAM: DATA R4,RAM ; DATA R1,word 9 ; DATA R0,HALT ; ST R1,R0 ;
+        # ++ R2 ; CPY R0,R2 ; (9:) JMRB R4 (the ST makes it HALT) ; HALT
+        code = [0x0304, RAM, 0x0301, RAM | 9, 0x0300, 0x0F00, 0x0210, 0x1B02, 0x0E02,
+                0x0A04, 0x0F00]
+        for fast in (False, True):
+            cpu = CPU()
+            cpu.mem.ram[:len(code)] = code
+            cpu.iar, cpu.regs[2] = RAM, 40
+            cpu.run(1000) if fast else [cpu.step() for _ in range(1000)]
+            assert cpu.halted and cpu.iar == RAM | 10 and cpu.regs[2] == 41, (fast, cpu.regs)
+            cpu.mem.ram[5] = 0x0000             # now the ST writes a NOP over that HALT
+            cpu.halted, cpu.iar = False, RAM
+            cpu.run(1000) if fast else [cpu.step() for _ in range(1000)]
+            assert cpu.halted and cpu.iar == RAM | 11 and cpu.regs[2] == 42, (fast, cpu.regs)
+    finally:
+        translate.HOT = saved
 
 
 def test_run_stops_at_breakpoints():

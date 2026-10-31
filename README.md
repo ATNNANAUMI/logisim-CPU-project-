@@ -149,7 +149,7 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 | `compiler/assembly_syntax.md` | full assembly language reference |
 | `compiler/c_language.md` | the C language and library reference |
 | `compiler/c_decisions.md` | the C compiler's design decisions, guesses and open questions |
-| `cpu_sim/src/` | Python simulator (core, GUI, self-checks) |
+| `cpu_sim/src/` | Python simulator (core, a translator of hot code into Python, GUI, self-checks, `bench.py` speed check) |
 | `run.py` | one entry point for all of the above |
 
 ## Documentation

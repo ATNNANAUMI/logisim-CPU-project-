@@ -12,6 +12,7 @@ Every ALU instruction writes its result to R0 and rewrites all four flags.
 
 import math
 import struct
+import sys
 
 import config as config
 
@@ -28,17 +29,36 @@ def to_signed(value: int) -> int:
     return value - (1 << 32) if value & SIGN else value
 
 
-def bits_to_float(bits: int) -> float:
-    return struct.unpack("<f", struct.pack("<I", bits & MASK))[0]
+# float32 <-> bits. Both ways give the same results: a NaN is 7FC00000, and
+# a number too big for a float32 is infinity (the C cast's rounding, which
+# struct reports as an OverflowError). pypy3 compiles struct.Struct calls
+# well; CPython does a 4-byte memoryview faster.
+if sys.implementation.name == "pypy":
+    _WORD, _FLOAT = struct.Struct("<I"), struct.Struct("<f")
 
+    def bits_to_float(bits: int) -> float:
+        return _FLOAT.unpack(_WORD.pack(bits & MASK))[0]
 
-def float_to_bits(value: float) -> int:
-    if math.isnan(value):
-        return 0x7FC00000
-    try:
-        return struct.unpack("<I", struct.pack("<f", value))[0]
-    except OverflowError:                       # bigger than float32 range
-        return INF_BITS if value > 0 else NEG_INF_BITS
+    def float_to_bits(value: float) -> int:
+        if value != value:                      # NaN
+            return 0x7FC00000
+        try:
+            return _WORD.unpack(_FLOAT.pack(value))[0]
+        except OverflowError:                   # bigger than float32 range
+            return INF_BITS if value > 0 else NEG_INF_BITS
+else:
+    _cell = memoryview(bytearray(4))
+    _as_word, _as_float = _cell.cast("I"), _cell.cast("f")
+
+    def bits_to_float(bits: int) -> float:
+        _as_word[0] = bits & MASK
+        return _as_float[0]
+
+    def float_to_bits(value: float) -> int:
+        if value != value:                      # NaN
+            return 0x7FC00000
+        _as_float[0] = value                    # too big: infinity
+        return _as_word[0]
 
 
 # -------------------------------------------------------------------- flags
@@ -77,10 +97,10 @@ def int_op(name: str, a: int, b: int) -> tuple[int, int]:
         carry, result = a < b, (a - b) & MASK    # C = borrow, as on the circuit
     elif name == "MULT":
         result = (sa * sb) & MASK                # no carry on overflow (circuit)
-    elif name == "DIV":                          # x DIV 0 = x (circuit)
-        result = a if sb == 0 else _divide(sa, sb)[0] & MASK
-    elif name == "MOD":                          # x MOD 0 = 0 (circuit, diag16/17)
-        result = 0 if sb == 0 else _divide(sa, sb)[1] & MASK
+    elif name == "DIV":
+        result = div(a, b)
+    elif name == "MOD":
+        result = mod(a, b)
     elif name == "SHL":
         carry, result = bool(b & SIGN), (b << 1) & MASK
     elif name == "SHR":
@@ -121,6 +141,22 @@ def _divide(sa: int, sb: int) -> tuple[int, int]:
             q = -q
         return q, sa - q * sb
     return sa // sb, sa % sb
+
+
+def div(a: int, b: int) -> int:
+    """R0 of DIV (a, b: 32-bit words). x DIV 0 = x (circuit)."""
+    sb = (b ^ SIGN) - SIGN
+    if sb == 0:
+        return a
+    return _divide((a ^ SIGN) - SIGN, sb)[0] & MASK
+
+
+def mod(a: int, b: int) -> int:
+    """R0 of MOD (a, b: 32-bit words). x MOD 0 = 0 (circuit, diag16/17)."""
+    sb = (b ^ SIGN) - SIGN
+    if sb == 0:
+        return 0
+    return _divide((a ^ SIGN) - SIGN, sb)[1] & MASK
 
 
 # ----------------------------------------------------------------- float op

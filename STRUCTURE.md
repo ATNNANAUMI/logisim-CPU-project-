@@ -119,12 +119,16 @@ logisim-CPU-project-/
     │   ├── isa.py            decode(), disassemble(), opcode tables
     │   ├── alu.py            int_op(), float_op() → (R0 value, flags)
     │   ├── memory.py         ROM/RAM banks, v2.0 raw loader
-    │   ├── devices.py        Display (0x5C; form feed clears it), Keyboard (0xF0, empty reads 0; `key_code()`: arrows 28–31, Ctrl+letter 1–26), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), Disk (0x8C seek/size, 0x8D data; mmap of a file), DeviceBus (+ hex display value, 0x3C)
-    │   ├── cpu.py            CPU: step() (traced), run() (fast loop), reset(), stack ops, COMM
+    │   ├── devices.py        Display (0x5C; form feed clears it), Keyboard (0xF0, empty reads 0; `key_code()`: arrows 28–31, Ctrl+letter 1–26), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), Disk (0x8C seek/size, 0x8D data; mmap of a file), DeviceBus (+ hex display value, 0x3C; `send` = the selected output device's function)
+    │   ├── cpu.py            CPU: step() (traced), run() (translated blocks + the _interpret() loop), reset(), forget_code(), stack ops, COMM
+    │   ├── translate.py      code jumped to 50 times -> one Python function per block (registers as locals, lazy flags);
+    │   │                     dispatcher(): an if-tree per bank calling blocks by name (pypy3 compiles it in); RAM code too
+    │   │                     (every RAM store checks a map of translated words and drops RAM blocks it hits)
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG]`
-    │   └── selftest.py       25 checks
+    │   ├── bench.py          speed check: nine example programs in run(), MHz first/best run + end-state digest
+    │   └── selftest.py       27 checks (incl. translated code against step() on random code)
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -205,7 +209,7 @@ The design follows the "But How Do It Know?" style: a single bus,
   `python compiler/src/disk`. Programs for the OS (`cc build --exe`) run
   from RAM at `0x1100000`, loaded by C's `spawnv()`.
   Videos: `compiler/src/img/video.py` -> frames that `video_player.c` draws
-  on time (about 350k instructions a 128×96 frame: pypy3 keeps up at 12 fps).
+  on time (about 350k instructions a 128×96 frame: python and pypy3 keep up at 12 fps).
 
 ## Assembler conventions
 
@@ -279,6 +283,7 @@ python compiler/src/disk format disk.img; python compiler/src/disk put disk.img 
 python os/make_disk.py; python compiler/src/cc build os/shell.c                 # the OS: os/disk.img with /bin, the shell's ROM
 python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img             # run it, type help
 pypy3 compiler/src/cc run compiler/examples/c/graphics/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
+pypy3 cpu_sim/src/bench.py [life sqrt ...]                          # simulator speed in MHz (python: --scale 0.1 by default)
 ```
 
 ## Open questions / gotchas

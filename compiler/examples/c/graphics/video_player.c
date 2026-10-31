@@ -20,8 +20,8 @@
  * simulator) is too slow for it. Frames can't be skipped, as each one draws
  * only what changed, so a late video catches up when frames get cheaper.
  *
- * Expected output (with pypy3; plain python is too slow for 12 frames a
- * second, so most frames come late and it takes longer):
+ * Expected output (pypy3 and plain python both keep up with 12 frames a
+ * second; a simulator too slow for it reports late frames and takes longer):
  *   48 frames, 0 late, 4.0 s (the video is 4.0 s)
  */
 #include <gfx.h>

@@ -143,7 +143,9 @@ class Timer:
 
 class Video:
     """RGB Video at 0x6C: one pixel per word (x bits 31-24, y bits 23-16,
-    RGB565 colour bits 15-0). 0x6D clears it. Write-only, like the circuit."""
+    RGB565 colour bits 15-0). 0x6D clears it. Write-only, like the circuit.
+    Translated code writes pixels itself (translate.py's pixel()): keep
+    the two in step."""
 
     def __init__(self, width=config.VIDEO_WIDTH, height=config.VIDEO_HEIGHT):
         self.width, self.height = width, height
@@ -234,38 +236,73 @@ class Disk:
             self.file.close()
 
 
+def _nothing(value: int) -> None:
+    """OUTDATA to an address where no device listens."""
+
+
+class _Output:
+    """An output device attribute of DeviceBus (display, video, disk):
+    putting another device there rewires send."""
+
+    def __set_name__(self, owner, name):
+        self.slot = "_" + name
+
+    def __get__(self, bus, owner=None):
+        return self if bus is None else getattr(bus, self.slot)
+
+    def __set__(self, bus, device):
+        setattr(bus, self.slot, device)
+        bus._wire()
+
+
 class DeviceBus:
+    """send is the selected output device's own function: out_address()
+    looks the device up once (in _outputs), so a word sent to it is one
+    call, and replacing an output device rewires it (_Output)."""
+
+    display = _Output()
+    video = _Output()
+    disk = _Output()                # Disk or None, attached with attach_disk()
+
     def __init__(self):
-        self.display = Display()
+        self.out_addr = self.in_addr = 0
+        self._display = Display()
+        self._video = Video()
+        self._disk: Disk | None = None
         self.keyboard = Keyboard()
-        self.video = Video()
         self.timer = Timer()
-        self.disk: Disk | None = None  # attached with attach_disk()
         self.hex_value = None          # None = nothing sent yet (display blank)
-        self.out_addr = 0
-        self.in_addr = 0
+        self._wire()
+
+    def _wire(self) -> None:
+        """Which function each output address calls."""
+        self._outputs = {
+            config.DISPLAY_ADDR: self._display.write,
+            config.HEX_DISPLAY_ADDR: self._hex,
+            config.VIDEO_ADDR: self._video.write,
+            config.VIDEO_CLEAR_ADDR: self._video_clear,
+        }
+        if self._disk is not None:
+            self._outputs[config.DISK_DATA_ADDR] = self._disk.write
+            self._outputs[config.DISK_SEEK_ADDR] = self._disk.seek
+        self.out_address(self.out_addr)
+
+    def _hex(self, value: int) -> None:
+        self.hex_value = value & config.WORD_MASK
+
+    def _video_clear(self, _value: int) -> None:
+        self._video.clear()
 
     # ------------------------------------------------------------ COMM
     def out_address(self, value: int) -> None:
         self.out_addr = value & config.WORD_MASK
+        self.send = self._outputs.get(self.out_addr, _nothing)
 
     def in_address(self, value: int) -> None:
         self.in_addr = value & config.WORD_MASK
 
     def out_data(self, value: int) -> None:
-        if self.out_addr == config.DISPLAY_ADDR:
-            self.display.write(value)
-        elif self.out_addr == config.HEX_DISPLAY_ADDR:
-            self.hex_value = value & config.WORD_MASK
-        elif self.out_addr == config.VIDEO_ADDR:
-            self.video.write(value)
-        elif self.out_addr == config.VIDEO_CLEAR_ADDR:
-            self.video.clear()
-        elif self.disk is not None:
-            if self.out_addr == config.DISK_DATA_ADDR:
-                self.disk.write(value)
-            elif self.out_addr == config.DISK_SEEK_ADDR:
-                self.disk.seek(value)
+        self.send(value)
 
     def in_data(self) -> int | None:
         """None means no input device is selected: nothing drives the bus,
@@ -274,11 +311,12 @@ class DeviceBus:
             return self.keyboard.read()
         if self.in_addr == config.TIMER_ADDR:
             return self.timer.read()
-        if self.disk is not None:
+        disk = self._disk
+        if disk is not None:
             if self.in_addr == config.DISK_DATA_ADDR:
-                return self.disk.read()
+                return disk.read()
             if self.in_addr == config.DISK_SEEK_ADDR:
-                return self.disk.words
+                return disk.words
         return None
 
     def attach_disk(self, path) -> None:
@@ -289,7 +327,8 @@ class DeviceBus:
         self.disk = disk
 
     def reset(self) -> None:
-        self.out_addr = self.in_addr = 0
+        self.out_address(0)
+        self.in_addr = 0
         self.hex_value = None
         self.display.clear()
         self.keyboard.clear()
