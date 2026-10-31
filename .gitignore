@@ -11,6 +11,7 @@ __pycache__/
 *.jar
 compiler/ROM/
 *.rom
+!logisim/microcode/microcode.rom
 *__patched.circ
 project_files/
 git_scripts

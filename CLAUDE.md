@@ -29,6 +29,8 @@ python compiler/src/asm build prog.asm --lib compiler/examples/asm/stdlib/stdlib
 python cpu_sim/src/main.py compiler/ROM/prog.rom                             # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 [--trace] [--keys $'text\n'] [--screen out.png] [--disk disk.img]
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom [--seconds N]   # real circuit, headless
+python logisim/microcode/microcode.py [--list]       # CONTROL_SECTION as a 64K x 32 microcode ROM -> logisim/microcode/microcode.rom
+python logisim/microcode/verify.py [--quick]         # that ROM against the circuit's gates, every IR/step/flags (needs javac; minutes)
 
 python compiler/src/cc run prog.c [--keys $'text\n'] [--stats] [--disk disk.img]   # C: build + run in the simulator
 python compiler/src/cc build prog.c [more.c x.asm] [-o name.rom] [--map] [--lib x.asm]   # C: links the C library itself

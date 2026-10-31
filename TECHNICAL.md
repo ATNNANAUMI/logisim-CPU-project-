@@ -420,6 +420,53 @@ has 24 address bits, `run_rom.py` runs programs again (it writes the
 matching `addr/data` header itself). Relative jumps need nothing new: the
 offset is added in 32 bits and the IAR keeps its low 25.
 
+### 2.5 The control section as a microcode ROM (`logisim/microcode/`)
+
+A replacement for `CONTROL_SECTION`'s decoding gates, for a faster copy of
+the circuit; `CPU.circ` itself doesn't use it yet. `microcode.py` holds the
+table (one list of steps per instruction, read off the circuit) and writes
+`microcode.rom`, a 64K × 32 image in the "v2.0 raw" format (load it into a
+Logisim `ROM` with 16 address bits and 32 data bits). Its docstring has the
+full bit layout.
+
+```
+python logisim/microcode/microcode.py [-o microcode.rom] [--list]   # write the image / print the table
+python logisim/microcode/verify.py [--quick] [--circ logisim/CPU.circ]  # check it against the gates
+```
+
+* **Address**: `IR[14:8]` (IMM, FLOAT, ALU, opcode), `IR[6:4]` (the STK/COMM
+  sub-operation), the step, then `JF` = any of `IR[3:0] & flags` and `JNF` =
+  any of `IR[3:0] & ~flags` (flags as `C=8 A=4 N=2 Z=1`, the `RJF`/`RJNF`
+  mask). `IR[15]` and `IR[7]` aren't used by the control section.
+* **Data**: the 10 set lines (gated with `clk_s` outside the ROM), the 7
+  enable lines (gated with `clk_e`), a 2-bit code for the register to set and
+  one for the register to enable (none/RA/RB/R0, turned into the 16-bit
+  one-hot selects by a multiplexer and a decoder), the stepper reset,
+  `in`/`out`, `STACK_OP`, two bits for the 6-bit ALU operation (the jumps'
+  "use the ALU", ORed outside with `IR[14]` and `IR[12]` into bit 5; and
+  "low 4 bits = `IR[11:8]`"; bit 4 is `IR[13]`), the halt flip-flop's preset,
+  and "step 0" for the IAR reset gate. Every bit is also ANDed with the
+  stepper's enable output, as the step decoder is now.
+* **Kept as gates**: `CLOCK`, the stepper, the halt flip-flop (a D flip-flop
+  used only through its preset and reset: preset by `HALT`, reset by
+  `RESUME`), the OR that makes `halt_output`, the clock gate in front of
+  `CLOCK`, and `iar_reset` = `RESET` AND NOT (`halt_output` AND step 0).
+* **How it was read off**: `verify.py` copies the circuit, replaces
+  `CONTROL_SECTION`'s `CLOCK` and `stepper` with pins and runs every IR, step
+  and flag value through Logisim's own simulator (`ControlSweep.java`, about
+  a minute per sweep), with all phases on, then each of `clk_s`, `clk_e` and the
+  stepper enable off. The ROM matches the gates at every step an instruction
+  can reach. Steps after an instruction's stepper reset never run, and
+  the table leaves them empty (the gates still drive a few lines there).
+
+Steps per instruction, fetch included (the circuit's clock cycles, one
+stepper count each): `NOP CLF ADDR JMRB CPY HALT` and `COMM` out 3; `LD ST`,
+`COMM INDATA`, `STK PUSH POP RET SET GET` 4; `DATA RJMP RJF RJNF ALD AST`,
+`STK CALL` and the register ALU operations 5; ALU operations with an
+immediate 6; `CMP`/`FCMP` 16. `CMP` sets the flags at step 3 but never resets
+the stepper (and never writes R0), so the stepper runs to 15 and wraps
+around to the next fetch.
+
 ---
 
 
@@ -1220,7 +1267,8 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | RGB screen `0x6C`/`0x6D` | 128×128 RGB565, the "RGB screen" tab, `--screen` | `RGB_Display` → RGB Video in `PC` (2026-10-22); the `0x6D` clear isn't built |
 | disk `0x8C`/`0x8D` | a file, `--disk` or the window's `disk` button | none (Logisim's RAM can't save itself) |
 | text display `0x5C`: control characters | `\n` new line, `\r` a carriage return (back to the start of the line; what follows overwrites it), `\b` deletes at the end of a line (after `\r` it moves back one), `\f` clears it all; others are printed | the `display` subcircuit gives the TTY 7 data bits and a write strobe (its clear pin isn't wired). Logisim 4.1.0's `TTY` (read in its code, `TtyState.add`, not run): `\n` and `\r` both start a new line, `\b` deletes, `\f` clears; other control characters are dropped. **`\r` differs, on purpose** (decided 2026-10-28, OS questionnaire round 4 Q25): a real carriage return is worth having apart from `\n`, even though the circuit's TTY can't do it. Nothing in the toolchain prints it |
-| timing | one instruction per step | several clock cycles per instruction (stepper) |
+| timing | one instruction per step | several clock cycles per instruction (stepper): 3 to 6, and 16 for `CMP`/`FCMP` (2.5) |
+| `CMP`/`FCMP`: R0 | writes 0 (1.5) | the control section never selects a register to set during `CMP` (2.5: read from its gates, 2026-10-23), so R0 should keep its old value; not yet run on the circuit |
 
 ---
 
