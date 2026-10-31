@@ -438,7 +438,7 @@ modules import each other by plain name, so run them as scripts
 | `isa.py` | opcode tables, `decode(word) -> Instr`, `disassemble(word, operand)`. `Instr.takes_operand` says whether a literal word follows |
 | `alu.py` | `int_op(name, a, b)` and `float_op(name, a, b)`, each returning `(R0 value, flag nibble)`; float32 ↔ bits helpers |
 | `memory.py` | `Memory` with two 16M-word banks (Python lists, 128 MB each, kept out of the cycle collector's sight with `gc.freeze()`: it walked their 32M items, 66 ms a time), `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
-| `devices.py` | `Display` (lines of text; `\n` new line, `\r` back to the start of the line (what follows overwrites it), `\b` deletes, `\f` clears it all, so headless output shows only what came after the last `\f`), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; (the selected input and output addresses, and `hex_value`, the last word sent to the hex display) |
+| `devices.py` | `Display` (lines of text; `\n` new line, `\r` back to the start of the line (what follows overwrites it), `\b` deletes, `\f` clears it all, so headless output shows only what came after the last `\f`), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; the selected input and output addresses, and `hex_value`, the last word sent to the hex display; `OUTADDR` looks the output device up once and keeps its function in `send`, and putting another device in `display`, `video` or `disk` rewires it) |
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()` (translated blocks, and the `_interpret()` loop), `reset()`, `resume()`, `forget_code()` |
 | `translate.py` | turns code that runs often into Python functions for `run()` (3.2): `translate()` (one block), `dispatcher()` (the loop that runs them) |
 | `gui.py` | the Tk window |
@@ -473,7 +473,10 @@ function, that goes through conditional jumps (a taken one leaves it) and
 follows `RJMP` and `CALL`'s `JMRB`, up to `RET`'s `JMRB`, `HALT` or 64
 instructions. In it the registers are local variables, operands and `DATA`
 values are constants, and the flags are only worked out where a jump or a
-way out of the block sees them. A generated dispatcher per bank, an if/else
+way out of the block sees them. An `OUTADDR` of a known address is skipped
+when that device is already selected, and an `OUTDATA` to the RGB screen
+the block's own `OUTADDR` picked is written out in the block (what
+`Video.write()` does: the pixel, `dirty`, `used`). A generated dispatcher per bank, an if/else
 tree on the address that calls each block by its own name (so pypy3 can
 compile each call in), runs one block after another. The rest runs in
 `_interpret()`, the one-instruction-at-a-time loop: code that isn't hot yet,
@@ -491,7 +494,8 @@ runs, call `forget_code()` (the window does when a word is edited).
 
 An instruction change touches `_execute()` (for `step()`), the
 `_interpret()` loop and `translate.py` (`alu.py` holds DIV, MOD and the
-float group for all three); the self-checks `test_run_matches_step` and
+float group for all three; a change to `Video.write()` also touches
+`translate.py`'s `pixel()`); the self-checks `test_run_matches_step` and
 `test_translated_code_matches_step` compare them with `step()` on random
 code. The window (when the trace is off), the headless runner (without
 `--trace`) and `python compiler/src/cc run` all use `run()`; single steps,
@@ -531,7 +535,9 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
 * middle: ROM and RAM tabs, 256 words per page, with optional disassembly and
   "follow IAR"; and a C source tab (below)
 * right: the display (`0x5C`) and the RGB screen (`0x6C`, a tab that comes
-  forward when a program first draws), the hex display, the keyboard field
+  forward when a program first draws; redrawn every tick from the pixels
+  that changed, or as one PPM picture when more than 400 did), the hex
+  display, the keyboard field
   (`0xF0`), and the last executed instructions
 
 Editing: type into any register/IAR/ESP/EBP box and press Enter, click the

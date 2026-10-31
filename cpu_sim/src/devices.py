@@ -143,7 +143,9 @@ class Timer:
 
 class Video:
     """RGB Video at 0x6C: one pixel per word (x bits 31-24, y bits 23-16,
-    RGB565 colour bits 15-0). 0x6D clears it. Write-only, like the circuit."""
+    RGB565 colour bits 15-0). 0x6D clears it. Write-only, like the circuit.
+    Translated code writes pixels itself (translate.py's pixel()): keep
+    the two in step."""
 
     def __init__(self, width=config.VIDEO_WIDTH, height=config.VIDEO_HEIGHT):
         self.width, self.height = width, height
