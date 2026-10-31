@@ -385,8 +385,8 @@ def test_translated_code_matches_step():
     def state(cpu):
         return (cpu.regs, cpu.iar, cpu.flags, cpu.esp, cpu.ebp, cpu.halted, cpu.stopped,
                 cpu.instructions, cpu.mem.ram, cpu.bus.display.text, cpu.bus.hex_value,
-                cpu.bus.video.pixels, cpu.bus.out_addr, cpu.bus.in_addr,
-                list(cpu.bus.keyboard.buffer))
+                cpu.bus.video.pixels, cpu.bus.video.dirty, cpu.bus.video.used,
+                cpu.bus.out_addr, cpu.bus.in_addr, list(cpu.bus.keyboard.buffer))
 
     rng = random.Random(3)
     values = [0, 1, 2, 3, 7, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF, 0xFFFFFFFE, 0x3F800000,
@@ -416,7 +416,12 @@ def test_translated_code_matches_step():
                 code.append([0x0300, None])
                 code.append([0x0A00])
             elif pick < 0.95:                                   # COMM
-                code.append([0x0800 | rng.randrange(4) << 4 | rb])
+                if rng.random() < 0.3:      # a pixel: DATA RB, device ; OUTADDR RB ; OUTDATA RA
+                    code.append([0x0300 | rb, rng.choice((0x6C, 0x6C, 0x6D, 0x5C))])
+                    code.append([0x0830 | rb])
+                    code.append([0x0820 | ra])
+                else:
+                    code.append([0x0800 | rng.randrange(4) << 4 | rb])
             else:                                               # NOP, CLF, now and then HALT
                 code.append([0x0F00 if rng.random() < 0.03 else rng.choice((0x0000, 0x0700))])
         code.append([0x0400, None])                             # and round again

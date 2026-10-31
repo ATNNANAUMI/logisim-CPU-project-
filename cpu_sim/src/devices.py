@@ -240,7 +240,7 @@ def _nothing(value: int) -> None:
 
 class _Output:
     """An output device attribute of DeviceBus (display, video, disk):
-    putting another device there rewires out_data."""
+    putting another device there rewires send."""
 
     def __set_name__(self, owner, name):
         self.slot = "_" + name
@@ -254,7 +254,7 @@ class _Output:
 
 
 class DeviceBus:
-    """out_data is the selected output device's own function: out_address()
+    """send is the selected output device's own function: out_address()
     looks the device up once (in _outputs), so a word sent to it is one
     call, and replacing an output device rewires it (_Output)."""
 
@@ -294,14 +294,13 @@ class DeviceBus:
     # ------------------------------------------------------------ COMM
     def out_address(self, value: int) -> None:
         self.out_addr = value & config.WORD_MASK
-        self.out_data = self._outputs.get(self.out_addr, _nothing)
+        self.send = self._outputs.get(self.out_addr, _nothing)
 
     def in_address(self, value: int) -> None:
         self.in_addr = value & config.WORD_MASK
 
     def out_data(self, value: int) -> None:
-        """Send a word to the selected output device (replaced by that
-        device's function in each DeviceBus: see out_address())."""
+        self.send(value)
 
     def in_data(self) -> int | None:
         """None means no input device is selected: nothing drives the bus,
