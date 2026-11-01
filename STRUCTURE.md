@@ -122,8 +122,8 @@ logisim-CPU-project-/
 │   ├── tree.c, du.c          a folder as a tree (-s sizes); disk KB of folders and files (-a)
 │   ├── diff.c, hexdump.c     changed lines of two text files (LCS, Unix normal format); values in hex
 │   ├── calc.c                32-bit integer calculator (C precedence; no argument: a line at a time)
-│   ├── visual_file_manager.c a two-pane yazi-like file manager on the RGB screen (j k h l, y x p, r d a, q)
-│   ├── make_disk.py          os/disk.img (git-ignored): TFS1, ed and the C examples built --exe in /bin, /readme.txt
+│   ├── visual_file_manager.c a two-pane yazi-like file manager on the RGB screen (j k h l, space select, y x p, u, r d a, ~ home, q)
+│   ├── make_disk.py          os/disk.img (git-ignored): TFS1, ed and the C examples built --exe in /bin, /readme.txt, /home/user (Documents, Downloads, ...)
 │   └── run_with_video.sh     builds the shell and the disk, puts video_player in /bin (a clip.h argument picks the video), starts the simulator
 │
 └── cpu_sim/

@@ -1612,7 +1612,7 @@ no multitasking.
 | `os/hexdump.c` | the values of files in hexadecimal (11.3; 11.6K words) |
 | `os/calc.c` | a 32-bit integer calculator (11.3; 7.6K words) |
 | `os/visual_file_manager.c` | a two-pane file manager on the RGB screen, in the style of yazi (section 11.4; 22.8K words) |
-| `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `os/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples, `ed`, `edit` and the nine tools of 11.3 and 11.4, 2.8K–22.8K words each |
+| `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `os/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; from the command line it also makes a Linux-like `/home/user` (`Desktop`, `Documents` with `welcome.txt`, `Downloads`, `Music`, `Pictures`, `Videos`) and `/tmp` when missing (`make(..., home=True)`; the self-checks leave them out); other files on the disk are kept. Twelve C examples, `ed`, `edit` and the nine tools of 11.3 and 11.4, 2.8K–22.8K words each |
 | `os/run_with_video.sh` | builds the shell and the disk (`make_disk.py`), builds `video_player.c` with `--exe` (a `clip.h` argument is passed as `-D VIDEO=...`), puts it in `/bin/video_player` and starts the simulator on it, all under pypy3 when it is installed (`PY` picks another interpreter, `SIM_ARGS` adds simulator options, `DISK` picks another image). `video_player` is not in `PROGRAMS`: its video is part of the program (17K words for the 4 s demo clip, millions for a long one) |
 
 ```
@@ -1792,7 +1792,7 @@ program needs them.
 
 Layout: row 0 the folder's path (its end when too long); then two panes, 20
 columns for the folder's entries (folders first, then by name; folders in cyan; the
-cursor is an inverted row; `+`/`x` marks the copied / cut entry) and 21 for a
+cursor is an inverted row; `*` marks a selected entry, `+` / `x` a copied / cut one) and 21 for a
 preview of the entry under the cursor (42 columns are too narrow for yazi's
 three panes): the first lines of a text file (2000 chars at most are read), a
 folder's entries, `program, N words` for a TEX1 program or `binary, N words`.
@@ -1808,26 +1808,32 @@ Directories larger than the screen scroll.
 | `j` `k`, Down Up | move; `g` `G` first / last; Ctrl-F Ctrl-B a page |
 | `h`, Left | the parent folder (the cursor on the folder it came from) |
 | `l`, Right, Enter | into a folder; open a file: text in `edit`, a TEX1 program is run, other binaries refused |
-| `y` `x` `p` | copy / cut the entry, paste it into the current folder. Never over an existing name. A cut is `rename()`: atomic, so a file cannot be lost, and a folder can be moved (not into itself). A copy is the `cp` code of `shell.c` (text or binary like the original); if it fails the half-written file is removed. A folder cannot be copied (`x` moves it) |
+| space | select the entry (`*`) and move down, as yazi does; `y`, `x` and `d` then act on all the selected entries of the folder (up to 64 for the clipboard) instead of the one under the cursor. The selection is forgotten when the folder is read again |
+| `y` `x` `p` | copy / cut, paste the whole clipboard into the current folder. `y` or `x` again on a lone entry that is already on the clipboard takes it off. Never over an existing name (it stops there; what was pasted stays pasted, a cut keeps only the items not moved yet). A cut is `rename()`: atomic, so a file cannot be lost, and a folder can be moved (not into itself). A copy is the `cp` code of `shell.c` (text or binary like the original); if it fails the half-written file is removed. A folder cannot be copied (`x` moves it) |
 | `r` | rename: the name is typed on the status line (Backspace edits, Enter does it, Ctrl-G or Ctrl-Q cancels) |
-| `d` | delete after `delete NAME? (y/n)` (`remove()`: a folder only when empty, the error is shown) |
+| `u`, Ctrl-G | forget the selection and the clipboard |
+| `~` | the home folder, `/home/user` |
+| `d` | delete after `delete NAME? (y/n)` or `delete N items? (y/n)` (`remove()`: a folder only when empty, the error is shown) |
 | `a` | a new folder, named like `r` |
 | `?` `q` | the keys on the status line; quit (the screen is cleared) |
 
 Ctrl-D is not used (Tynix's end of input). Bad paths and failed calls show
 `NAME: strerror(errno)` on the status line; there is no crash path through
-`errno`. Arguments: `visual_file_manager [dir [name [copy|cut path]]]` start in `dir` with
-the cursor on `name` and a clipboard; this is how it comes back after opening
-a file.
+`errno`. Arguments: `visual_file_manager [dir [name]]` starts in `dir` with the cursor
+on `name`; with no argument it starts in `/home/user` when that folder exists
+(`make_disk.py` makes it), else in the shell's folder. A third argument `clip`
+(only the manager itself passes it) means "load the clipboard from
+`/.clipboard`", a file it wrote just before leaving, one line `copy` or `cut`
+and then one path a line; it is deleted after reading.
 
-Opening uses the shell (the end of 11): the manager writes `/.next` with two
-lines, for example `edit /docs/a.txt` and `visual_file_manager /docs a.txt copy
-/docs/b.txt`, and exits with status 254; the shell runs them, so the program
+Opening uses the shell (the end of 11): the manager writes `/.clipboard` (if it
+holds anything) and `/.next` with two lines, for example `edit /docs/a.txt` and
+`visual_file_manager /docs a.txt clip`, and exits with status 254; the shell runs them, so the program
 or editor runs, then the manager starts again from scratch, the whole screen
 redrawn, in the same folder, on the same entry and with the same clipboard.
 Names the shell cannot pass on (with a quote, `>` or non-ASCII char) are
 refused with a message. The self-check `tools` drives it through the shell
-(copy, a refused paste over an existing name, cut, rename, a refused delete of a
+(copy, a refused paste over an existing name, cut, rename, space-select several entries then cut, copy and delete them, `y` twice and `u` taking things off the clipboard, `~` and the start in `/home/user`, a refused delete of a
 folder with files, a no to `delete?`, delete, new folder, `Enter` opening a
 file in `edit` with typed keys and coming back with the clipboard, `Enter` on a
 program) and reads the disk back with `fs.py`; it does not look at pixels

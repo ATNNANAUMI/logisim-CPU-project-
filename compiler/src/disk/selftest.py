@@ -988,6 +988,27 @@ CPU halted
 HEXDUMP_TEXT = b"hello, world\n"
 
 
+FM2_KEYS = ("visual_file_manager /m\n"
+            "j" " " " " "x"                    # space selects a.txt and b.txt, x cuts both
+            "g" "l" "p" "h"                    # into dest, paste both, back
+            "j" "y" "y" "g" "l" "p" "h"        # c.txt: copy, the same key again clears it: nothing to paste in dest
+            "jj" " " "y" "g" "l" "u" "p" "h"   # d.txt selected and copied; u forgets it in dest: nothing to paste
+            "j" " " " " "d" "y"                # select c.txt and d.txt, delete both
+            "~" "a" "tilde\n"                  # ~ goes home: a folder made there
+            "q"
+            "visual_file_manager\n"           # no argument: starts in /home/user
+            "a" "mk\n" "q"
+            "halt\n")
+
+FM2_OUTPUT = """\
+Tynix shell: help lists the commands
+/> visual_file_manager /m
+/> visual_file_manager
+/> halt
+CPU halted
+"""
+
+
 def _hexdump(data):
     lines = []
     for at in range(0, len(data), 8):
@@ -1093,6 +1114,11 @@ def check_tools():
         disk.put("/fm/one.txt", b"one\n")
         disk.put("/fm/two.txt", b"two\n")
         disk.put("/fm/zzz.txt", b"zzz\n")
+        make_disk.make_home(disk)
+        disk.mkdir("/m")
+        disk.mkdir("/m/dest")
+        for n in "abcd":
+            disk.put(f"/m/{n}.txt", f"{n}\n".encode())
     tools = cpu.instructions
     cpu, text = driver.run_in_simulator(shell.rom, FM_KEYS, 40_000_000, disk=image)
     assert cpu.halted and text == FM_OUTPUT, text
@@ -1108,7 +1134,18 @@ def check_tools():
         assert disk.get("/fm/zzz.txt") == b"zzz\n"             # a no to "delete?" keeps it
         assert disk.lookup("/fm/newdir").is_dir and disk.lookup("/.next") is None
         assert disk.check() == [], disk.check()
-    return f"{tools} + {cpu.instructions} instructions"
+    fm = cpu.instructions
+    cpu, text = driver.run_in_simulator(shell.rom, FM2_KEYS, 40_000_000, disk=image)
+    assert cpu.halted and text == FM2_OUTPUT, text
+    with FileSystem(image) as disk:
+        assert sorted(e.name for e in disk.entries(disk.lookup("/m"))) == ["dest"]
+        assert sorted(e.name for e in disk.entries(disk.lookup("/m/dest"))) == ["a.txt", "b.txt"]
+        assert disk.get("/m/dest/b.txt") == b"b\n"
+        assert disk.lookup("/home/user/tilde").is_dir and disk.lookup("/home/user/mk").is_dir
+        assert sorted(e.name for e in disk.entries(disk.lookup("/home/user")))[:6] == \
+            ["Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos"]
+        assert disk.lookup("/.clipboard") is None and disk.check() == [], disk.check()
+    return f"{tools} + {fm} + {cpu.instructions} instructions"
 
 
 CHECKS = [

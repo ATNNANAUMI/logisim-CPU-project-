@@ -2,7 +2,7 @@
  * (a program for Tynix, in /bin)
  *
  *   python os/make_disk.py                 (builds it into /bin)
- *   (in the shell)   visual_file_manager [dir [name [copy|cut path]]]
+ *   (in the shell)   visual_file_manager [dir [name]]
  *
  * Two panes on the 256 x 256 screen (42 columns by 32 rows, like edit.c):
  * the folder's entries on the left (folders first, then by name, folders in
@@ -19,10 +19,16 @@
  *   h, Left            the parent folder    Ctrl-F Ctrl-B   page down / up
  *   l, Right, Enter    go into a folder; open a file: a text file in `edit`,
  *                      a program (built --exe) runs; other binaries are refused
- *   y  x  p            copy / cut the entry; paste it here (never over an
- *                      existing name; a cut is a rename, so a file cannot be
- *                      lost; a copy that fails leaves no half file; a folder
- *                      can be cut but not copied)
+ *   space              select the entry (shown as *) and go down; y x d then
+ *                      work on all the selected entries instead of one
+ *   y  x  p            copy / cut; paste here (never over an existing name;
+ *                      a cut is a rename, so a file cannot be lost; a copy
+ *                      that fails leaves no half file; a folder can be cut but
+ *                      not copied). y or x again on the lone entry that is on
+ *                      the clipboard takes it off
+ *   u, Ctrl-G          forget the selection and the clipboard
+ *   ~                  the home folder, /home/user (also where it starts with
+ *                      no argument, when that folder exists)
  *   r                  rename (type the name, Enter; Ctrl-G or Ctrl-Q cancels)
  *   d                  delete, after asking (y); a folder only if it is empty
  *   a                  a new folder (type the name, Enter)
@@ -34,8 +40,8 @@
  * program would be loaded over this one), so it asks the shell to do it:
  * it writes the commands to run into the file /.next (the program, then this
  * manager again, started in the same folder on the same entry and with the
- * same clipboard: `visual_file_manager DIR NAME [copy|cut PATH]`) and exits with status
- * 254. os/shell.c runs those lines, so the manager comes back with the whole
+ * same clipboard, which goes through the file /.clipboard: `visual_file_manager
+ * DIR NAME clip`) and exits with status 254. os/shell.c runs those lines, so the manager comes back with the whole
  * screen drawn again, however much the program left on it.
  *
  * The screen code (the cache of what each cell shows, the 33 ms frame, key
@@ -66,6 +72,9 @@
 #define NAME_MAX 127
 #define EXIT_NEXT 254           /* os/shell.c runs the commands in /.next after this status */
 #define NEXT_FILE "/.next"
+#define CLIP_FILE "/.clipboard" /* the clipboard, carried over to the next start of this program */
+#define HOME "/home/user"       /* where it starts with no argument, and what ~ goes to */
+#define CLIP_MAX 64
 #define PREVIEW_CHARS 2000      /* at most this many chars of a text file are read for the preview */
 #define TEX1 0x31584554         /* the first word of a program (compiler/libc/spawn.c) */
 
@@ -77,6 +86,7 @@ enum mode { NORMAL, RENAME, MKDIR, DELETE };
 struct entry {
     char *name;
     int dir;
+    int sel;                    /* marked with the space bar */
 };
 
 static char *prog;              /* argv[0]: how to start this program again */
@@ -84,7 +94,8 @@ static char cwd[PATH_MAX];      /* the folder shown: absolute, "/" or without a 
 static struct entry *list;      /* sorted: folders first, then by name */
 static int count;
 static int cur, top;            /* the cursor, the first row shown */
-static char clip[PATH_MAX];     /* the copied or cut path, "" if none */
+static char *clips[CLIP_MAX];   /* the copied or cut paths, malloc'd */
+static int nclip;
 static int clip_cut;
 static enum mode mode;
 static char input[NAME_MAX + 2];                /* what is being typed */
@@ -173,6 +184,7 @@ static int read_dir(const char *path, struct entry **out, int max)
             break;
         }
         strcpy(l[n].name, e->d_name);
+        l[n].sel = 0;
         l[n++].dir = e->d_type == DT_DIR;
     }
     closedir(d);
@@ -248,6 +260,76 @@ static int is_program(const char *path)
     c = fgetc(f);
     fclose(f);
     return c == TEX1;
+}
+
+/* ---- the selection and the clipboard ---- */
+
+static int selected(void)
+{
+    int i, n = 0;
+    for (i = 0; i < count; i++)
+        n += list[i].sel;
+    return n;
+}
+
+static void unselect_all(void)
+{
+    int i;
+    for (i = 0; i < count; i++)
+        list[i].sel = 0;
+}
+
+static void clip_clear(void)
+{
+    while (nclip > 0)
+        free(clips[--nclip]);
+}
+
+static int in_clip(const char *path)
+{
+    int i;
+    for (i = 0; i < nclip; i++)
+        if (strcmp(clips[i], path) == 0)
+            return 1;
+    return 0;
+}
+
+static void clip_add(const char *path)
+{
+    char *p;
+    if (nclip == CLIP_MAX)
+        return;
+    if ((p = malloc(strlen(path) + 1)) == 0) {
+        no_memory = 1;
+        return;
+    }
+    strcpy(p, path);
+    clips[nclip++] = p;
+}
+
+/* a deleted path leaves the clipboard */
+static void clip_forget(const char *path)
+{
+    int i, j = 0;
+    for (i = 0; i < nclip; i++)
+        if (strcmp(clips[i], path) == 0)
+            free(clips[i]);
+        else
+            clips[j++] = clips[i];
+    nclip = j;
+}
+
+/* a renamed path stays on the clipboard under its new name */
+static void clip_rename(const char *from, const char *to)
+{
+    int i;
+    char *p;
+    for (i = 0; i < nclip; i++)
+        if (strcmp(clips[i], from) == 0 && (p = malloc(strlen(to) + 1)) != 0) {
+            strcpy(p, to);
+            free(clips[i]);
+            clips[i] = p;
+        }
 }
 
 /* ---- the right pane ---- */
@@ -376,9 +458,11 @@ static void compose(void)
         sprintf(full, "%s%s", list[i].name, list[i].dir ? "/" : "");
         if (i == cur)
             fill(1 + r, 0, LEFT, attr);
-        if (clip[0]) {                                          /* the copied or cut entry */
+        if (list[i].sel)                                        /* * selected, + copied, x cut */
+            want[1 + r][0] = '*' | attr;
+        else if (nclip) {
             char path[PATH_MAX];
-            if (join(path, cwd, list[i].name) == 0 && strcmp(path, clip) == 0)
+            if (join(path, cwd, list[i].name) == 0 && in_clip(path))
                 want[1 + r][0] = (clip_cut ? 'x' : '+') | attr;
         }
         if (strlen(full) > LEFT - 1) {
@@ -409,12 +493,19 @@ static void compose(void)
         put(STATUS_ROW, strlen(prompt), input_len > room ? input + input_len - room : input, room, INVERT);
         want[STATUS_ROW][strlen(prompt) + (input_len > room ? room : input_len)] = '_' | INVERT;
     } else if (mode == DELETE) {
-        snprintf(text, sizeof text, "delete %s? (y/n)", list[cur].name);
+        if (selected() > 1)
+            snprintf(text, sizeof text, "delete %d items? (y/n)", selected());
+        else
+            snprintf(text, sizeof text, "delete %s? (y/n)", selected() ? "the selected one" : list[cur].name);
         put(STATUS_ROW, 0, text, COLS, INVERT);
     } else if (message)
         put(STATUS_ROW, 0, message, COLS, INVERT);
     else {
-        sprintf(text, "%d/%d  %u KB free", count ? cur + 1 : 0, count, free_kb);
+        n = sprintf(text, "%d/%d  %u KB free", count ? cur + 1 : 0, count, free_kb);
+        if (selected())
+            n += sprintf(text + n, "  %d sel", selected());
+        if (nclip)
+            sprintf(text + n, "  %d %s", nclip, clip_cut ? "cut" : "copied");
         put(STATUS_ROW, 0, text, COLS, INVERT);
     }
 }
@@ -490,26 +581,74 @@ static void go_up(void)
     update_free();
 }
 
+/* show another folder, the cursor on its first entry */
+static void go_to(const char *path)
+{
+    if (load_dir(path) == 0)
+        select_name("");
+    update_free();
+}
+
+/* the clipboard into CLIP_FILE (for the next start of this program); 0, or -1 with the message set */
+static int save_clip(void)
+{
+    FILE *f = fopen(CLIP_FILE, "w");
+    int i;
+    if (f == 0) {
+        fail(CLIP_FILE);
+        return -1;
+    }
+    fprintf(f, "%s\n", clip_cut ? "cut" : "copy");
+    for (i = 0; i < nclip; i++)
+        fprintf(f, "%s\n", clips[i]);
+    if (fclose(f) || ferror(f)) {
+        remove(CLIP_FILE);
+        say("", CLIP_FILE, "could not write (disk full?)");
+        return -1;
+    }
+    return 0;
+}
+
+/* the clipboard another start of this program left in CLIP_FILE, which is deleted */
+static void load_clip(void)
+{
+    static char line[PATH_MAX + 2];
+    FILE *f = fopen(CLIP_FILE, "r");
+    int first = 1;
+    if (f == 0)
+        return;
+    while (fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\n")] = 0;
+        if (first)
+            clip_cut = strcmp(line, "cut") == 0;
+        else if (line[0])
+            clip_add(line);
+        first = 0;
+    }
+    fclose(f);
+    remove(CLIP_FILE);
+}
+
 /* leave for the shell: it runs cmd, then this program again where we are */
 static void open_with(const char *cmd, const char *path)
 {
     FILE *f;
-    int again = strlen(prog) + strlen(cwd) + strlen(list[cur].name) + strlen(clip) + 16;
-    int keep = clip[0] && shell_safe(clip) && again < 250;
+    int again = strlen(prog) + strlen(cwd) + strlen(list[cur].name) + 16;
     if (!shell_safe(path) || !shell_safe(cwd) || !shell_safe(list[cur].name) || again > 250) {
         say("", list[cur].name, "a name the shell cannot pass on");
         return;
     }
+    if (nclip && save_clip())
+        return;
     if ((f = fopen(NEXT_FILE, "w")) == 0) {
         fail(NEXT_FILE);
+        remove(CLIP_FILE);
         return;
     }
-    fprintf(f, "%s\n%s %s %s", cmd, prog, cwd, list[cur].name);
-    if (keep)
-        fprintf(f, " %s %s", clip_cut ? "cut" : "copy", clip);
-    fputc('\n', f);
+    fprintf(f, "%s\n%s %s %s%s\n", cmd, prog, cwd, list[cur].name, nclip ? " clip" : "");
     if (fclose(f) || ferror(f)) {
         remove(NEXT_FILE);
+        remove(CLIP_FILE);
         say("", NEXT_FILE, "could not write (disk full?)");
         return;
     }
@@ -526,11 +665,7 @@ static void open_entry(void)
         return;
     }
     if (list[cur].dir) {
-        char from[1];
-        from[0] = 0;
-        if (load_dir(path) == 0)
-            select_name(from);
-        update_free();
+        go_to(path);
         return;
     }
     if (stat(path, &st)) {
@@ -579,47 +714,70 @@ static int copy_file(const char *from, const char *to)
     return 0;
 }
 
-static void paste(void)
+/* paste one path here: 0 done, 1 the source is gone (drop it), -1 stop with the message set */
+static int paste_one(const char *src, char *name)
 {
     char to[PATH_MAX];
     struct stat st;
-    const char *name = base_of(clip);
-    if (!clip[0]) {
-        message = "nothing to paste (y copy, x cut)";
-        return;
-    }
+    strcpy(name, base_of(src));
     if (join(to, cwd, name)) {
         message = "path too long";
-        return;
+        return -1;
     }
     if (stat(to, &st) == 0) {
         say("", name, "already exists here");
-        return;
+        return -1;
     }
-    if (stat(clip, &st)) {
-        fail(clip);
-        clip[0] = 0;
-        return;
+    if (stat(src, &st)) {
+        fail(src);
+        return 1;
     }
     if (clip_cut) {
-        if (rename(clip, to)) {
+        if (rename(src, to)) {
             if (errno == EINVAL)
                 message = "a folder cannot go inside itself";
             else
                 fail(name);
-            return;
+            return -1;
         }
-        clip[0] = 0;
     } else if (S_ISDIR(st.st_mode)) {
         message = "cannot copy a folder (x moves it)";
-        return;
-    } else if (copy_file(clip, to)) {
+        return -1;
+    } else if (copy_file(src, to)) {
         fail(name);
         update_free();
+        return -1;
+    }
+    return 0;
+}
+
+/* paste the whole clipboard; a cut leaves it as the items are moved, a copy keeps it */
+static void paste(void)
+{
+    static int gone[CLIP_MAX];
+    char name[NAME_MAX + 1] = "";
+    int i, r = 0, done = 0, j = 0;
+    if (nclip == 0) {
+        message = "nothing to paste (y copy, x cut)";
         return;
     }
-    reload(name);
-    say("pasted", name, "");
+    memset(gone, 0, sizeof gone);
+    for (i = 0; i < nclip; i++) {
+        r = paste_one(clips[i], name);
+        if (r < 0)
+            break;
+        gone[i] = r == 1 || clip_cut;
+        done += r == 0;
+    }
+    for (i = 0; i < nclip; i++)                 /* items that moved or vanished leave the clipboard */
+        if (gone[i])
+            free(clips[i]);
+        else
+            clips[j++] = clips[i];
+    nclip = j;
+    reload(name[0] ? name : 0);
+    if (r >= 0 && done)
+        say("pasted", done == 1 ? name : "items", "");
 }
 
 static void start_input(enum mode m)
@@ -652,8 +810,7 @@ static void finish_input(void)
             fail(list[cur].name);
             return;
         }
-        if (strcmp(clip, path) == 0)
-            strcpy(clip, to);
+        clip_rename(path, to);
     } else if (mkdir(to)) {
         fail(input);
         return;
@@ -661,23 +818,33 @@ static void finish_input(void)
     reload(input);
 }
 
+/* delete the selected entries, or the one under the cursor */
 static void delete_entry(void)
 {
     char path[PATH_MAX];
-    int at = cur;
+    int at = cur, i, n = selected(), deleted = 0, bad = 0;
+    static char text[24];
     mode = NORMAL;
-    if (!cur_path(path) || remove(path)) {
-        fail(list[cur].name);
-        return;
+    for (i = 0; i < count; i++) {
+        if (n ? !list[i].sel : i != cur)
+            continue;
+        if (join(path, cwd, list[i].name) || remove(path)) {
+            bad++;
+            fail(list[i].name);
+        } else {
+            deleted++;
+            clip_forget(path);
+        }
     }
-    if (strcmp(clip, path) == 0)
-        clip[0] = 0;
     reload("");
     cur = at < count ? at : count - 1;
     if (cur < 0)
         cur = 0;
     preview_ok = 0;
-    message = "deleted";
+    if (!bad) {
+        sprintf(text, "deleted %d", deleted);
+        message = text;
+    }
 }
 
 static void move_to(int i)
@@ -688,6 +855,39 @@ static void move_to(int i)
         i = 0;
     cur = i;
     preview_ok = 0;
+}
+
+/* copy (cut = 0) or cut the selected entries, or the one under the cursor; the same key
+   again on a lone entry that is already on the clipboard takes it off */
+static void yank(int cut)
+{
+    char path[PATH_MAX];
+    static char text[32];
+    int i, n = selected();
+    if (n == 0) {
+        if (!cur_path(path)) {
+            message = "path too long";
+            return;
+        }
+        if (nclip == 1 && clip_cut == cut && strcmp(clips[0], path) == 0) {
+            clip_clear();
+            message = "clipboard cleared";
+            return;
+        }
+    }
+    clip_clear();
+    clip_cut = cut;
+    for (i = 0; i < count; i++)
+        if ((n ? list[i].sel : i == cur) && join(path, cwd, list[i].name) == 0)
+            clip_add(path);
+    unselect_all();
+    if (no_memory) {
+        no_memory = 0;
+        message = "out of memory";
+        return;
+    }
+    sprintf(text, "%s %d item%s", cut ? "cut" : "copied", nclip, nclip == 1 ? "" : "s");
+    message = text;
 }
 
 static void key_normal(int k)
@@ -712,17 +912,23 @@ static void key_normal(int k)
     else if (k == 'q')
         quit = 1;
     else if (k == '?')
-        message = "hjkl move  y x p copy cut paste  r d a  q";
+        message = "hjkl move  space select  y x p  r d a  u ~ q";
     else if (count == 0 && (k == 'y' || k == 'x' || k == 'r' || k == 'd'))
         message = "nothing here";
-    else if (k == 'y' || k == 'x') {
-        if (!cur_path(clip))
-            message = "path too long";
-        else {
-            clip_cut = k == 'x';
-            say(clip_cut ? "cut" : "copied", list[cur].name, "");
+    else if (k == ' ') {                        /* select it and go down, as yazi does */
+        if (count) {
+            list[cur].sel ^= 1;
+            move_to(cur + 1);
         }
-    } else if (k == 'p')
+    } else if (k == 'y' || k == 'x')
+        yank(k == 'x');
+    else if (k == 'u' || k == KEY_CTRL('g')) {   /* forget the selection and the clipboard */
+        unselect_all();
+        clip_clear();
+        message = "selection and clipboard cleared";
+    } else if (k == '~')
+        go_to(HOME);
+    else if (k == 'p')
         paste();
     else if (k == 'r')
         start_input(RENAME);
@@ -752,8 +958,8 @@ int main(int argc, char **argv)
     int k, stale = 1;
     unsigned int last = 0;
     prog = argv[0];
-    if (argc > 5 || argc == 4) {
-        printf("usage: visual_file_manager [dir [name [copy|cut path]]]\n");
+    if (argc > 4 || (argc == 4 && strcmp(argv[3], "clip") != 0)) {
+        printf("usage: visual_file_manager [dir [name]]\n");
         return 1;
     }
     getcwd(cwd, sizeof cwd);
@@ -763,10 +969,10 @@ int main(int argc, char **argv)
         printf("visual_file_manager: %s: %s\n", argv[1], strerror(errno));
         return 1;
     }
-    if (argc == 5 && strlen(argv[4]) < PATH_MAX) {
-        strcpy(clip, argv[4]);
-        clip_cut = strcmp(argv[3], "cut") == 0;
-    }
+    else if (chdir(HOME) == 0)                  /* no argument: the home folder, if there is one */
+        getcwd(cwd, sizeof cwd);
+    if (argc == 4)
+        load_clip();
     if (load_dir(cwd)) {
         printf("visual_file_manager: %s: %s\n", cwd, strerror(errno));
         return 1;
