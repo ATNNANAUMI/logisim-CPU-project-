@@ -21,6 +21,15 @@ void _set_stdout(int (*put)(int, FILE *))
     out_file.put = put;
 }
 
+/* unistd.h: 1 for the keyboard and the display; 0 for stdout once a shell's
+   `>` gave the program a file (spawnv_to), so a program can tell */
+int isatty(int fd)
+{
+    if (fd == 1)
+        return out_file.put == 0;
+    return fd == 0 || fd == 2;
+}
+
 int fputc(int c, FILE *stream)
 {
     if (stream->put)

@@ -28,7 +28,9 @@ DEFAULT_IMAGE = ROOT / "os" / "disk.img"
 # compiler/examples/c/*/NAME.c -> /bin/NAME. Each one ends by itself, on
 # Ctrl-D or on q, so the shell gets the CPU back.
 PROGRAMS = ["echo", "hello", "primes", "structs", "guess", "gfx_demo", "image_demo",
-            "snake", "game_of_life", "grapher", "qr", "disk_notes", "ed", "edit"]
+            "snake", "game_of_life", "grapher", "qr", "disk_notes", "ed", "edit",
+            "more", "grep", "find", "tree", "du", "diff", "hexdump", "calc",
+            "visual_file_manager"]
 
 README = """\
 This disk was made by os/make_disk.py for the shell in os/shell.c.
@@ -41,10 +43,19 @@ This disk was made by os/make_disk.py for the shell in os/shell.c.
   ed notes.txt     edit a text file by lines (h lists its commands)
   edit notes.txt   full-screen editor on the RGB screen (^G lists the keys)
   cp from to       copy a file, text or program
+  more /readme.txt  a page at a time (space: page, Enter: line, q)
+  grep -n disk /readme.txt   the lines with a word (-i -v too; a folder works)
+  find / txt       paths whose name contains txt
+  tree /           the folders and files as a tree (-s: sizes)
+  du /bin          disk KB of each folder (-a: files too)
+  diff a.txt b.txt   what changed between two text files
+  hexdump /readme.txt   the values in hex
+  calc 0x1100000 + 256   integer calculator (calc alone: a line at a time)
 
 On the RGB screen (the simulator window's tab): snake and
 game_of_life (q quits), gfx_demo, image_demo, grapher and qr
-(Ctrl-D quits these two).
+(Ctrl-D quits these two), and visual_file_manager (j k h l move,
+y x p copy cut paste, r d a rename delete new folder, q quits).
 """
 
 

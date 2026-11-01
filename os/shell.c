@@ -20,6 +20,12 @@
  * puts; its input is still the keyboard, and its own errors the display). `cat` with no
  * file copies the keyboard up to Ctrl-D, so `cat > notes.txt` writes a
  * file. Ctrl-D at the prompt, or `halt`, stops the CPU.
+ *
+ * A program can't start another (spawnv() would load the child over it). One
+ * that wants to leave and come back, like visual_file_manager, writes command
+ * lines into /.next and ends with exit status 254 (EXIT_NEXT): the shell reads
+ * and deletes the file and runs each line as if typed, once it is back at its
+ * prompt loop (a loop, not a nested call, so the stack does not grow).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +40,9 @@
 #define LINE_MAX 256
 #define MAX_ARGS 32
 #define WIDTH 64                /* the text display's columns (the circuit's TTY) */
+#define EXIT_NEXT 254           /* a program that ends with this status asks the shell to run */
+#define NEXT_FILE "/.next"      /* the command lines in this file (visual_file_manager does) */
+#define NEXT_MAX 1024
 
 static char line[LINE_MAX];
 static char *args[MAX_ARGS + 1];
@@ -42,6 +51,7 @@ static char cwd[512];
 static FILE *out;               /* where a built-in writes: stdout, or a file after > */
 static char *redirect;          /* the file after > or >>, or 0 */
 static int append;              /* >> */
+static char *next_text;         /* the lines a program left in NEXT_FILE, to run when it is back */
 
 /* "cmd: what: No such file or directory"; returns the command's status, 1 */
 static int fail(const char *cmd, const char *what)
@@ -342,6 +352,30 @@ static int cmd_help(int argc, char **argv)
 
 /* ---------------------------------------------------------------- programs */
 
+/* a program cannot start another (spawnv() would load it over itself), so
+   one that wants to leave and come back writes command lines into NEXT_FILE
+   and ends with EXIT_NEXT: the shell runs the lines, the last one usually
+   starting the program again. Returns the file's text (deleted from the
+   disk, malloc'd), or 0 if there is none. */
+static char *take_next(void)
+{
+    FILE *f = fopen(NEXT_FILE, "r");
+    char *text;
+    int c, n = 0;
+    if (f == 0)
+        return 0;
+    if ((text = malloc(NEXT_MAX + 1)) == 0) {
+        fclose(f);
+        return 0;
+    }
+    while (n < NEXT_MAX && (c = fgetc(f)) != EOF)
+        text[n++] = c;
+    text[n] = 0;
+    fclose(f);
+    remove(NEXT_FILE);
+    return text;
+}
+
 static int run_program(int argc, char **argv)
 {
     int status;
@@ -363,6 +397,8 @@ static int run_program(int argc, char **argv)
             printf("%s: %s\n", path, strerror(errno));
         return 127;
     }
+    if (status == EXIT_NEXT && (next_text = take_next()))
+        return 0;                       /* the lines run when this one is done: no loop in the stack */
     if (status)
         printf("[%s: exit status %d]\n", argv[0], status);
     return status;
@@ -473,6 +509,20 @@ int main(void)
         if (fgets(line, sizeof line, stdin) == 0)
             break;                      /* Ctrl-D */
         run_line(line);
+        while (next_text) {
+            char *text = next_text, *nl;
+            next_text = 0;
+            for (nl = text; *nl; ) {
+                char *start = nl;
+                while (*nl && *nl != '\n')
+                    nl++;
+                if (*nl)
+                    *nl++ = 0;
+                if (strlen(start) < LINE_MAX)
+                    run_line(start);
+            }
+            free(text);
+        }
     }
     printf("\nCPU halted\n");
     return 0;

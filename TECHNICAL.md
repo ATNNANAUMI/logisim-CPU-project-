@@ -1113,7 +1113,7 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 16 checks: format (sparse, the superblock), text and
+python compiler/src/disk/selftest.py  # 17 checks: format (sparse, the superblock), text and
                                       # binary round trips (block edges), overwriting frees
                                       # blocks, a directory past one block (entries reused),
                                       # subdirectories, . and .., mv, name rules, disk full, CLI,
@@ -1125,7 +1125,13 @@ python compiler/src/disk/selftest.py  # 16 checks: format (sparse, the superbloc
                                       # the caller's directory and heap, load errors), and
                                       # os/shell.c on a disk from os/make_disk.py: a session
                                       # of every built-in, > and >>, quotes, a /bin program's
-                                      # arguments and exit status, the error messages
+                                      # arguments and exit status, the error messages;
+                                      # `tools`: more grep find tree du diff hexdump calc run by
+                                      # the shell on known files (exact output, errors, exit
+                                      # statuses, du against fs.py's block chains, > to a file),
+                                      # then visual_file_manager's copy, cut, paste, rename,
+                                      # delete, new folder, opening a file in `edit` and a program
+                                      # through the shell, read back with fs.py (11.3, 11.4)
 python check_docs.py                  # 3 checks on the docs: every repo path they name
                                       # exists, every example (.asm, .c) and os/*.c is
                                       # listed (5.3, 11), every TWEAKS switch is in 3.4
@@ -1512,7 +1518,7 @@ leads to after an unconditional jump.
   address to go back to, its current directory, and a `put` function for
   stdout (0: the display; `spawnv_to(path, argv, out)` gives one that writes
   to the caller's open `FILE`, which is how the shell's `>` works for
-  programs). That crt0 keeps the block, calls the `_init_` routines,
+  programs; `isatty(1)` in `file.c` is false exactly when `put` is set). That crt0 keeps the block, calls the `_init_` routines,
   `_fs_inherit(cwd)` (when `fs.c` is linked) and `_set_stdout(put)` (when
   `file.c` is), then `main(argc, argv)`; its `_Exit` jumps back to `spawn.asm`'s
   `_spawn_return` with R0 = the status, which `longjmp`s to the stack
@@ -1594,10 +1600,19 @@ no multitasking.
 
 | file | what it is |
 | --- | --- |
-| `os/shell.c` | the OS's ROM: a command shell, built like any C program (18,793 words of ROM, 2,925 of RAM) |
+| `os/shell.c` | the OS's ROM: a command shell, built like any C program (19,380 words of ROM, 2,927 of RAM) |
 | `os/ed.c` | a line editor for text files, a program for `/bin` (15.8K words; section 11.1) |
 | `os/edit.c` | a full-screen editor on the RGB screen, a program for `/bin` (section 11.2) |
-| `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `os/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples, `ed` and `edit`, 2.8K–17.4K words each, in under a second |
+| `os/more.c` | show text files a page at a time, a program for `/bin` (11.3; 12.4K words) |
+| `os/grep.c` | print the lines of files and folders that contain some text (11.3; 13.8K words) |
+| `os/find.c` | list the paths under a folder whose names contain some text (11.3; 9.1K words) |
+| `os/tree.c` | a folder as an indented tree (11.3; 9.5K words) |
+| `os/du.c` | disk space of folders and files, in KB (11.3; 9.4K words) |
+| `os/diff.c` | the lines that differ between two text files (11.3; 13.2K words) |
+| `os/hexdump.c` | the values of files in hexadecimal (11.3; 11.6K words) |
+| `os/calc.c` | a 32-bit integer calculator (11.3; 7.6K words) |
+| `os/visual_file_manager.c` | a two-pane file manager on the RGB screen, in the style of yazi (section 11.4; 22.8K words) |
+| `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `os/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples, `ed`, `edit` and the nine tools of 11.3 and 11.4, 2.8K–22.8K words each |
 | `os/run_with_video.sh` | builds the shell and the disk (`make_disk.py`), builds `video_player.c` with `--exe` (a `clip.h` argument is passed as `-D VIDEO=...`), puts it in `/bin/video_player` and starts the simulator on it, all under pypy3 when it is installed (`PY` picks another interpreter, `SIM_ARGS` adds simulator options, `DISK` picks another image). `video_player` is not in `PROGRAMS`: its video is part of the program (17K words for the 4 s demo clip, millions for a long one) |
 
 ```
@@ -1656,6 +1671,19 @@ A program that never ends keeps the CPU: nothing can stop it from the
 outside. The examples `make_disk.py` puts in `/bin` end by themselves, on
 Ctrl-D (`grapher`, `qr`) or on `q` (`snake`, `game_of_life`).
 
+A program cannot start another program: `spawnv()` loads the child over
+the caller at `0x1100000`, so the build refuses it (10.4). One that wants to
+run something and come back (`visual_file_manager`, 11.4) writes command
+lines into the file `/.next`, one per line (the program to run, then itself
+again with the arguments that restore its state), and ends with exit status
+254 (`EXIT_NEXT` in `shell.c`). When the shell sees that status and finds
+`/.next` it reads and deletes the file (at most 1024 chars), prints no
+`[NAME: exit status 254]`, and, back at its prompt loop, runs each line as if
+typed, so redirects and built-ins work. This is a loop in `main`, not a call
+inside `run_program`: a long session of open-and-return does not deepen the
+stack. A program that exits with 254 and leaves no `/.next` gets the usual
+status message.
+
 ### 11.1 The editor: `ed` (`os/ed.c`)
 
 A line editor in the style of Unix's `ed`, a program in `/bin` (the text
@@ -1709,3 +1737,100 @@ visible. The window ignores characters outside ASCII 32-126 (keyboard and font a
 through the shell, reads the file back with `fs.py`, and checks the screen
 holds text while it runs and is blank after.
 
+
+### 11.3 The tools (`os/more.c` ... `os/calc.c`)
+
+Eight small programs for `/bin`, one file each, written like `ed.c`: a header
+comment (what, how built, usage), errors as `NAME: PATH: reason` (the
+`strerror` of `errno`) with the other arguments still processed and exit
+status 1 (the shell then shows `[NAME: exit status 1]`), wrong arguments
+print the usage and exit 1. A tool that reads text refuses a binary file
+(`stat()` without `S_ISTEXT`, as `ed` does). The text display is 7-bit ASCII
+and 64 columns wide, so output uses plain characters. There are no pipes: tools
+take paths, and `>` works after a program (11). The tools that walk folders
+copy a folder's entry names, close it and then go into the subfolders, because
+only 4 directories can be open at once; the few helpers they share are copied
+into each file (a program for the OS has no shared code but the C library).
+
+| tool | usage | what it does, exit status |
+| --- | --- | --- |
+| `more` | `more [-n N] file...` | N lines (default `PAGE_LINES`), then `--more-- (space: page, Enter: line, q: quit)` and one key from `wait_key()` (no echo, no Enter; Ctrl-D quits too). With several files each starts under `::::: name`. A line over 64 chars counts for the rows it wraps to. With stdout redirected (`isatty(1)` false) it copies the files, no prompt. Exit 0, or 1 if a file failed |
+| `grep` | `grep [-i] [-n] [-v] text [path...]` | the lines containing `text` (plain text, no regex; flags may be joined, `-in`). A folder is searched through all its subfolders, skipping binary files; a binary file named on the command line is an error. With several paths, or a folder, each line starts with `path:` (then `N:` with `-n`), as `grep -r`. No path: the keyboard up to Ctrl-D. Lines of any length. Exit 0 if a line was printed, 1 if none, 2 on an error |
+| `find` | `find [dir] text` | every path under `dir` (default `.`) whose last name contains `text`, folders with a `/` at the end, `dir` itself not listed. Paths start with `dir` as typed. Exit 0, or 1 on an error |
+| `tree` | `tree [-s] [dir]` | `dir`, then its contents indented, with `\|-- ` before each name and a backquote and `-- ` before the last of a folder, ending with `N directories, M files` (singular `1 directory`, `1 file` as in Unix; what is under `dir`, not `dir` itself). `-s` puts `[size]` in front of a name: chars for a text file, words for a binary, `<dir>` for a folder (as `ls -l`). Names in the order the disk keeps them. Exit 0, or 1 on an error |
+| `du` | `du [-a] [path...]` | size in disk KB, one block (256 words) each: a text file holds 4 chars a word (1024 per block), a binary 256 words, an empty file 0 blocks; a folder also counts its own directory file (`stat()`'s `st_blocks`). One line `KB path` per folder (subfolders first, the folder last, so the last line is the total), per file with `-a`, like `du -k`; a file as the path gets one line. Exit 0, or 1 |
+| `diff` | `diff from to` | Unix's normal format (`2c2`, `5a6`, `3d2`; `< old`, `---`, `> new`) from a longest common subsequence of the lines: a table of (n+1) x (m+1) words from `malloc`, after skipping the lines the files share at the start and the end. Both files may have at most 1000 lines (1M table words); more is refused with `diff: PATH: more than 1000 lines, too big to compare`, never cut. A missing newline at the end of a file is not reported. Exit 0 the same, 1 different, 2 error |
+| `hexdump` | `hexdump file...` | 8 values a line: `%06x:` (the number of the first value), the values as `%08x`, two spaces and a column with each value as a char (`.` outside 32-126). A text file gives its chars (`fgetc` unpacks the 4 a word), a binary file its whole words. With several files each starts with `name:`. A full line is 89 columns, wider than the circuit's 64-column display (it wraps there); `PER_LINE` is 8 as asked, and 4 would fit. Exit 0, or 1 |
+| `calc` | `calc expr` or `calc` | a 32-bit integer expression as decimal, and the unsigned value after it when the number is negative (`-1 (4294967295 unsigned)`). Numbers: decimal, `0x`, `0b`, `'c'` (with `\n \t \\ \' \0`). Operators with C precedence: `( )`, unary `- + ~`, `* / %`, `+ -`, `<< >>`, `&`, `^`, `\|`. 32-bit wrap-around; `/` and `%` signed, truncating; `>>` arithmetic; a shift count is 0 to 31; division by zero, numbers past 32 bits and bad characters print `calc: ...` (no crash; `INT_MIN / -1` gives `INT_MIN`). The shell's words are joined with spaces, so `calc 2 * (3 + 4)` works; the shell itself takes a `>` (a redirect: write `calc "256 >> 4"`) and removes quotes (write `calc "'a'"`). With no argument it reads a line at a time up to Ctrl-D. Exit 0, or 1 for an error in `calc expr` |
+
+`PAGE_LINES` is 7 in `more.c`: the circuit's TTY has `cols=64` and no `rows`
+attribute, so Logisim's default of 8 rows applies and 7 lines plus the prompt
+fill it. **This is a guess** (nobody counted rows on the circuit): `-n`
+overrides it. The simulator's display does not scroll in rows at all.
+
+`more` needs to know whether its output goes to a file, which the C library
+could not tell, so `unistd.h` gained `isatty(fd)` (`file.c`): 1 for the keyboard
+and display, and for stdout unless the shell's `>` gave the program a file.
+
+Not done on purpose: `wc`, `head`, `tail`, `touch`. The self-check `tools`
+(disk suite) runs every tool through the shell on known files and compares the
+whole transcript (the `grep` and `diff` texts were compared with the real Unix
+tools on the same files), and reads the redirected files and `du`'s block counts
+back with `fs.py`.
+
+### 11.4 The file manager: `visual_file_manager` (`os/visual_file_manager.c`)
+
+A yazi-like file manager on the RGB screen, built like `edit.c`: 42 columns x
+32 rows of 6 x 8 cells, keys polled with `key_pressed()`, `shown[][]` remembering
+what each cell displays, only changed cells redrawn, at most every 33 ms
+(`FRAME_MS`). `edit.c` draws from a function of (row, column); here the whole
+grid is composed into `want[][]` first and compared with `shown[][]`; the
+cache, the inverted-cell attribute, the frame timing and the key loop are the
+same pattern, written again because they are `static` in `edit.c`. They could
+move into the library (a "text grid on the RGB screen" module) if a third
+program needs them.
+
+Layout: row 0 the folder's path (its end when too long); then two panes, 20
+columns for the folder's entries (folders first, then by name; folders in cyan; the
+cursor is an inverted row; `+`/`x` marks the copied / cut entry) and 21 for a
+preview of the entry under the cursor (42 columns are too narrow for yazi's
+three panes): the first lines of a text file (2000 chars at most are read), a
+folder's entries, `program, N words` for a TEX1 program or `binary, N words`.
+Under them the full name of the entry (a name too long for the list takes up
+to 4 rows, and shrinks the panes accordingly; one that fits shows its size on
+the right: `36 chars`), and the status line: `entry/count  N KB free`
+(`statvfs()`, read at the start and after each change: it reads the whole FAT)
+or the last message. Names are cut for display only (`~` at the end).
+Directories larger than the screen scroll.
+
+| keys | action |
+| --- | --- |
+| `j` `k`, Down Up | move; `g` `G` first / last; Ctrl-F Ctrl-B a page |
+| `h`, Left | the parent folder (the cursor on the folder it came from) |
+| `l`, Right, Enter | into a folder; open a file: text in `edit`, a TEX1 program is run, other binaries refused |
+| `y` `x` `p` | copy / cut the entry, paste it into the current folder. Never over an existing name. A cut is `rename()`: atomic, so a file cannot be lost, and a folder can be moved (not into itself). A copy is the `cp` code of `shell.c` (text or binary like the original); if it fails the half-written file is removed. A folder cannot be copied (`x` moves it) |
+| `r` | rename: the name is typed on the status line (Backspace edits, Enter does it, Ctrl-G or Ctrl-Q cancels) |
+| `d` | delete after `delete NAME? (y/n)` (`remove()`: a folder only when empty, the error is shown) |
+| `a` | a new folder, named like `r` |
+| `?` `q` | the keys on the status line; quit (the screen is cleared) |
+
+Ctrl-D is not used (Tynix's end of input). Bad paths and failed calls show
+`NAME: strerror(errno)` on the status line; there is no crash path through
+`errno`. Arguments: `visual_file_manager [dir [name [copy|cut path]]]` start in `dir` with
+the cursor on `name` and a clipboard; this is how it comes back after opening
+a file.
+
+Opening uses the shell (the end of 11): the manager writes `/.next` with two
+lines, for example `edit /docs/a.txt` and `visual_file_manager /docs a.txt copy
+/docs/b.txt`, and exits with status 254; the shell runs them, so the program
+or editor runs, then the manager starts again from scratch, the whole screen
+redrawn, in the same folder, on the same entry and with the same clipboard.
+Names the shell cannot pass on (with a quote, `>` or non-ASCII char) are
+refused with a message. The self-check `tools` drives it through the shell
+(copy, a refused paste over an existing name, cut, rename, a refused delete of a
+folder with files, a no to `delete?`, delete, new folder, `Enter` opening a
+file in `edit` with typed keys and coming back with the clipboard, `Enter` on a
+program) and reads the disk back with `fs.py`; it does not look at pixels
+beyond the screen being blank after `q`, and the screen layout was checked by
+eye from a saved screenshot, not on the circuit (the circuit cannot run these
+programs yet: 16-bit banks).
