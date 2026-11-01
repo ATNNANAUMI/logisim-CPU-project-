@@ -1,6 +1,6 @@
 /* hexdump.c - show the values in files as hexadecimal (a program for Tynix, in /bin)
  *
- *   python os/make_disk.py                 (builds it into /bin)
+ *   python tynix/make_disk.py              (builds it into /bin)
  *   (in the shell)   hexdump file...
  *
  *   000000: 00000068 00000065 0000006c 0000006c 0000006f 0000000a 00000000 00000000  hello.

@@ -366,7 +366,7 @@ refuses); to start another program and come back it asks the shell
 (TECHNICAL 11.4). `isatty(fd)` (not standard in what it covers) says whether
 `fd` 0, 1 or 2 is the console: 1 is not when the shell's `>` gave the program a
 file, so a program can leave out a prompt that would end up in the file
-(`more` does). `os/shell.c` (TECHNICAL §11) is a shell built on it.
+(`more` does). `tynix/shell.c` (TECHNICAL §11) is a shell built on it.
 
 **stdlib.h:** `malloc`, `calloc`, `realloc`, `free` (first fit, from
 `_end` to the end of RAM, or to `0x1100000` with `spawnv`); `exit`, `atexit`, `_Exit`, `abort`; `abs`,

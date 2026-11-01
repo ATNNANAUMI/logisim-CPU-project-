@@ -1,7 +1,7 @@
 /* visual_file_manager.c - a file manager on the RGB screen, in the style of yazi
  * (a program for Tynix, in /bin)
  *
- *   python os/make_disk.py                 (builds it into /bin)
+ *   python tynix/make_disk.py              (builds it into /bin)
  *   (in the shell)   visual_file_manager [dir [name]]
  *
  * Two panes on the 256 x 256 screen (42 columns by 32 rows, like edit.c):
@@ -43,7 +43,7 @@
  * it writes the commands to run into the file /.next (the program, then this
  * manager again, started in the same folder on the same entry and with the
  * same clipboard, which goes through the file /.clipboard: `visual_file_manager
- * DIR NAME clip`) and exits with status 254. os/shell.c runs those lines, so the manager comes back with the whole
+ * DIR NAME clip`) and exits with status 254. tynix/shell.c runs those lines, so the manager comes back with the whole
  * screen drawn again, however much the program left on it.
  *
  * The screen code (the cache of what each cell shows, the 33 ms frame, key
@@ -72,7 +72,7 @@
 #define PREVIEW_W (COLS - PREVIEW_X)                    /* 21 */
 #define PATH_MAX 512
 #define NAME_MAX 127
-#define EXIT_NEXT 254           /* os/shell.c runs the commands in /.next after this status */
+#define EXIT_NEXT 254           /* tynix/shell.c runs the commands in /.next after this status */
 #define NEXT_FILE "/.next"
 #define CLIP_FILE "/.clipboard" /* the clipboard, carried over to the next start of this program */
 #define HOME "/home/user"       /* where it starts with no argument, and what ~ goes to */

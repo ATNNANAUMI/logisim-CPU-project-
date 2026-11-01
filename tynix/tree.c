@@ -1,7 +1,7 @@
 /* tree.c - show a folder and everything in it as a tree (a program for Tynix,
  * in /bin)
  *
- *   python os/make_disk.py                 (builds it into /bin)
+ *   python tynix/make_disk.py              (builds it into /bin)
  *   (in the shell)   tree [-s] [dir]
  *
  *   /docs

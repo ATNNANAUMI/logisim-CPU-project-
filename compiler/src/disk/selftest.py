@@ -617,19 +617,19 @@ CPU halted
 
 
 def check_shell():
-    """os/shell.c on a disk made by os/make_disk.py: built-in commands, >
+    """tynix/shell.c on a disk made by tynix/make_disk.py: built-in commands, >
     and >>, quotes, a program from /bin with its arguments and exit status,
     the errors, cat from the keyboard up to Ctrl-D, df against fs.py."""
     import sys
     root = HERE.parent.parent.parent
-    sys.path.append(str(root / "os"))
+    sys.path.append(str(root / "tynix"))
     sys.path.append(str(HERE.parent / "cc"))
     import driver                       # compiler/src/cc
-    import make_disk                    # os/
+    import make_disk                    # tynix/
 
     image = os.path.join(TMP.name, "shell.img")
     sizes = make_disk.make(image, programs=["echo"], new=True, size_mb=1, log=lambda _: None)
-    shell, _ = driver.build([str(root / "os" / "shell.c")])
+    shell, _ = driver.build([str(root / "tynix" / "shell.c")])
     cpu, text = driver.run_in_simulator(shell.rom, SHELL_KEYS, 50_000_000, disk=image)
     assert cpu.halted, text
     help_text, sep, rest = text.partition("/> mkdir docs\n")
@@ -719,19 +719,19 @@ CPU halted
 
 
 def check_editor():
-    """os/ed.c as a program from /bin, started by the shell: add, delete,
+    """tynix/ed.c as a program from /bin, started by the shell: add, delete,
     substitute, find, insert, the unsaved-changes warning (q and Ctrl-D), a
     binary file refused, and the file on the disk read back with fs.py."""
     import sys
     root = HERE.parent.parent.parent
-    sys.path.append(str(root / "os"))
+    sys.path.append(str(root / "tynix"))
     sys.path.append(str(HERE.parent / "cc"))
     import driver                       # compiler/src/cc
-    import make_disk                    # os/
+    import make_disk                    # tynix/
 
     image = os.path.join(TMP.name, "editor.img")
     make_disk.make(image, programs=["echo", "ed"], new=True, size_mb=1, log=lambda _: None)
-    shell, _ = driver.build([str(root / "os" / "shell.c")])
+    shell, _ = driver.build([str(root / "tynix" / "shell.c")])
     cpu, text = driver.run_in_simulator(shell.rom, EDITOR_KEYS, 80_000_000, disk=image)
     assert cpu.halted and text == EDITOR_OUTPUT, text
     with FileSystem(image) as disk:
@@ -761,20 +761,20 @@ SCREEN_KEYS = ("edit /s.txt\n"
 
 
 def check_screen_editor():
-    """os/edit.c as a program from /bin: insert, arrows, Enter, Backspace
+    """tynix/edit.c as a program from /bin: insert, arrows, Enter, Backspace
     (also joining lines), Ctrl-K, Ctrl-S, the unsaved-changes warning, a
     binary file refused; the file read back with fs.py, text drawn on the
     RGB screen while it runs and the screen blank after it quits."""
     import sys
     root = HERE.parent.parent.parent
-    sys.path.append(str(root / "os"))
+    sys.path.append(str(root / "tynix"))
     sys.path.append(str(HERE.parent / "cc"))
     import driver                       # compiler/src/cc
-    import make_disk                    # os/
+    import make_disk                    # tynix/
 
     image = os.path.join(TMP.name, "screen_editor.img")
     make_disk.make(image, programs=["echo", "edit"], new=True, size_mb=1, log=lambda _: None)
-    shell, _ = driver.build([str(root / "os" / "shell.c")])
+    shell, _ = driver.build([str(root / "tynix" / "shell.c")])
     # while it runs: stop inside the editor and look at the screen
     cpu, _ = driver.run_in_simulator(shell.rom, "edit /s.txt\nabc\ndef", 12_000_000, disk=image)
     assert not cpu.halted and any(cpu.bus.video.pixels), "nothing drawn"
@@ -1087,17 +1087,17 @@ CPU halted
 
 
 def check_tools():
-    """The eight command-line tools in os/ (more grep find tree du diff hexdump
+    """The eight command-line tools in tynix/ (more grep find tree du diff hexdump
     calc) as programs from /bin, run by the shell on known files, with their
     exact output, exit status messages and errors; then visual_file_manager's
     copy, cut, paste, rename, delete and new folder, and opening a file through
     the shell (edit) and a program; all read back with fs.py."""
     import sys
     root = HERE.parent.parent.parent
-    sys.path.append(str(root / "os"))
+    sys.path.append(str(root / "tynix"))
     sys.path.append(str(HERE.parent / "cc"))
     import driver                       # compiler/src/cc
-    import make_disk                    # os/
+    import make_disk                    # tynix/
 
     names = ["echo", "edit", "more", "grep", "find", "tree", "du", "diff", "hexdump", "calc",
              "visual_file_manager"]
@@ -1123,7 +1123,7 @@ def check_tools():
             du_a="\n".join(f"{_kb(disk, p):<6} {p}" for p in
                            ("/docs/a.txt", "/docs/b.txt", "/docs/sub/c.txt")),
             hex=_hexdump(HEXDUMP_TEXT))
-    shell, _ = driver.build([str(root / "os" / "shell.c")])
+    shell, _ = driver.build([str(root / "tynix" / "shell.c")])
     cpu, text = driver.run_in_simulator(shell.rom, TOOLS_KEYS, 30_000_000, disk=image)
     assert cpu.halted, text
     assert text == expected, "\n".join(

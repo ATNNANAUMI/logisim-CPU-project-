@@ -1,10 +1,10 @@
 /* shell.c - the OS (Tynix): a command shell in ROM for the files and programs on
  * the disk (simulator only)
  *
- *   python os/make_disk.py                (once: os/disk.img, the examples in /bin)
- *   python compiler/src/cc build os/shell.c
- *   python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img
- *   (or: python compiler/src/cc run os/shell.c --disk os/disk.img
+ *   python tynix/make_disk.py             (once: tynix/disk.img, the examples in /bin)
+ *   python compiler/src/cc build tynix/shell.c
+ *   python cpu_sim/src/main.py compiler/ROM/shell.rom --disk tynix/disk.img
+ *   (or: python compiler/src/cc run tynix/shell.c --disk tynix/disk.img
  *    --keys $'ls /bin\nprimes\nhalt\n')
  *
  * It checks the disk, then shows a prompt with the current directory. The
@@ -500,7 +500,7 @@ int main(void)
     if (!is_dir("/")) {
         if (errno == ENODEV)
             printf("no disk, or not formatted: start the simulator with --disk FILE\n"
-                   "(python os/make_disk.py makes one)\n");
+                   "(python tynix/make_disk.py makes one)\n");
         else
             printf("disk: %s\n", strerror(errno));
     }

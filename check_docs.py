@@ -13,16 +13,16 @@ DOCS = ["README.md", "STRUCTURE.md", "TECHNICAL.md", "CLAUDE.md",
         "compiler/assembly_syntax.md", "compiler/c_language.md", "compiler/c_decisions.md",
         ".claude/skills/circuit-check/SKILL.md"]
 EXAMPLES = ROOT / "compiler" / "examples"
-OS = ROOT / "os"
+OS = ROOT / "tynix"
 
-# repo paths as the docs write them: compiler/..., cpu_sim/..., logisim/..., os/...
+# repo paths as the docs write them: compiler/..., cpu_sim/..., logisim/..., tynix/...
 # ("logisim/cpu datas/" has a space), .claude/..., run.py, *.md at the root
-PATH = re.compile(r"(?<![\w./-])((?:compiler|cpu_sim|logisim|os|\.claude)/"
+PATH = re.compile(r"(?<![\w./-])((?:compiler|cpu_sim|logisim|tynix|\.claude)/"
                   r"(?:cpu datas/?)?[\w./*-]*|run\.py|[A-Z]+\.md)")
 
 
 def generated_or_placeholder(path):
-    # compiler/ROM/ and disk images (os/disk.img) are git-ignored, made by scripts
+    # compiler/ROM/ and disk images (tynix/disk.img) are git-ignored, made by scripts
     return path.startswith("compiler/ROM/") or path.endswith(".img") or "NN" in path
 
 
@@ -68,7 +68,7 @@ def check_paths_exist():
 
 
 def check_examples_listed():
-    """Every .asm and .c under compiler/examples/ and os/ is listed in TECHNICAL.md (5.2/5.3, 11)."""
+    """Every .asm and .c under compiler/examples/ and tynix/ is listed in TECHNICAL.md (5.2/5.3, 11)."""
     text = (ROOT / "TECHNICAL.md").read_text()
     sources = sorted(EXAMPLES.rglob("*.asm")) + sorted(EXAMPLES.rglob("*.c")) + sorted(OS.rglob("*.c"))
     unlisted = [str(p.relative_to(ROOT)) for p in sources

@@ -80,7 +80,7 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       17 checks (incl. the C library's files on the simulator against fs.py, stat, spawnv, os/shell.c, os/ed.c, os/edit.c, the nine tools)
+│   │   └── selftest.py       17 checks (incl. the C library's files on the simulator against fs.py, stat, spawnv, tynix/shell.c, tynix/ed.c, tynix/edit.c, the nine tools)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), memory.asm (memcpy, memset), setjmp.asm,
 │   │                         spawn.c + spawn.asm (spawnv: load a --exe program from the disk, run it, come back)
@@ -110,7 +110,7 @@ logisim-CPU-project-/
 │   └── ROM/                  build output (.obj/.rom/.map/.asm), git-ignored, created on first build;
 │                             ROM/libc/ caches the compiled C library
 │
-├── os/                       the OS, Tynix (simulator only), CP/M / DOS style: one program at a time
+├── tynix/                    the OS, Tynix (simulator only), CP/M / DOS style: one program at a time
 │   ├── shell.c               the OS's ROM: checks the disk, prompts with the current directory; built-ins help ls
 │   │                         cd pwd cat echo rm mv cp mkdir rmdir df clear halt (> and >> to a file); any other
 │   │                         name runs /bin/NAME (or a path) with spawnv() and waits; a program that exits 254
@@ -123,7 +123,7 @@ logisim-CPU-project-/
 │   ├── diff.c, hexdump.c     changed lines of two text files (LCS, Unix normal format); values in hex
 │   ├── calc.c                32-bit integer calculator (C precedence; no argument: a line at a time)
 │   ├── visual_file_manager.c a two-pane yazi-like file manager on the RGB screen (j k h l, space select, y x p, u, r d a, ~ home, q)
-│   ├── make_disk.py          os/disk.img (git-ignored): TFS1, ed and the C examples built --exe in /bin, /readme.txt, /home/user (Documents, Downloads, ...)
+│   ├── make_disk.py          tynix/disk.img (git-ignored): TFS1, ed and the C examples built --exe in /bin, /readme.txt, /home/user (Documents, Downloads, ...)
 │   └── run_with_video.sh     builds the shell and the disk, puts video_player in /bin (a clip.h argument picks the video), starts the simulator
 │
 └── cpu_sim/
@@ -271,7 +271,7 @@ The design follows the "But How Do It Know?" style: a single bus,
   argv)` loads one from the disk, runs it with argc/argv and returns its exit
   status (longjmp back). crt0 holds `_Exit` and `_heap_end` (the OS's heap stops
   at `0x1100000` when `spawnv` is linked). Each program has its own libc copy.
-  `os/shell.c` is the shell that runs them (built-ins + `/bin/NAME`).
+  `tynix/shell.c` is the shell that runs them (built-ins + `/bin/NAME`).
 * Tests: `compiler/src/cc/tests/*.c` must print exactly gcc's output
   (`.expected`); `difftest.py` checks with gcc.
 
@@ -295,9 +295,9 @@ python compiler/src/cc/tests/difftest.py [--update]                # C tests aga
 python compiler/src/img pic.png [--colors 16] [--size 64x]         # PNG -> pic.h for gfx_image(x, y, pic)
 python compiler/src/img/video.py clip.mp4 [--fps 10] [--seconds 5]  # video -> clip.h for video_player.c (needs ffmpeg)
 python compiler/src/disk format disk.img; python compiler/src/disk put disk.img notes.txt   # disk images (ls get cat rm mkdir mv df fsck)
-python os/make_disk.py; python compiler/src/cc build os/shell.c                 # the OS: os/disk.img with /bin, the shell's ROM
-python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img             # run it, type help
-os/run_with_video.sh [clip.h]                                                    # the same with video_player in /bin: type /bin/video_player
+python tynix/make_disk.py; python compiler/src/cc build tynix/shell.c           # the OS: tynix/disk.img with /bin, the shell's ROM
+python cpu_sim/src/main.py compiler/ROM/shell.rom --disk tynix/disk.img          # run it, type help
+tynix/run_with_video.sh [clip.h]                                                 # the same with video_player in /bin: type /bin/video_player
 pypy3 compiler/src/cc run compiler/examples/c/graphics/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
 pypy3 cpu_sim/src/bench.py [life sqrt ...]                          # simulator speed in MHz (python: --scale 0.1 by default)
 ```

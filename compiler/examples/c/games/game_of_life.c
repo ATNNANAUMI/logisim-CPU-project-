@@ -28,7 +28,7 @@
  * Keys (the simulator window's keyboard): 1-7 a scene, n the next one,
  * r restart this one (a new soup for 7), space pause/continue, s one
  * generation while paused, q quit (back to the OS's shell when it was run
- * from there: os/shell.c).
+ * from there: tynix/shell.c).
  *
  *   -D SCENE=n        start with scene n (default 1)
  *   -D FULL_TEST      also check that scenes 1-3 repeat (27 checks, about

@@ -1,7 +1,7 @@
 /* find.c - list the files and folders whose names contain some text (a program
  * for Tynix, in /bin)
  *
- *   python os/make_disk.py                 (builds it into /bin)
+ *   python tynix/make_disk.py              (builds it into /bin)
  *   (in the shell)   find [dir] text
  *
  * Every path under dir (default `.`, all the subfolders too, dir itself not

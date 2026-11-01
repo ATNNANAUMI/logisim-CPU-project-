@@ -13,7 +13,7 @@ file has the details.
 8. [Simulator vs. circuit: open questions](#8-simulator-vs-circuit-open-questions)
 9. [Outdated files and stale information](#9-outdated-files-and-stale-information)
 10. [The C compiler (`compiler/src/cc/`) and the C library (`compiler/libc/`)](#10-the-c-compiler-compilersrccc-and-the-c-library-compilerlibc)
-11. [The OS (`os/`)](#11-the-os-os)
+11. [The OS (`tynix/`)](#11-the-os-tynix-tynix)
 
 ---
 
@@ -949,7 +949,7 @@ line is empty (so it can't erase the prompt).
 
 ### 5.3 Example programs (`compiler/examples/`)
 
-Assembly is under `asm/` (`programs/`, `stdlib/`, `two_files/`, `tests/` for circuit diagnostics); C is under `c/` in folders by kind: `basics/`, `games/`, `graphics/` (with `images/` and `videos/`), `tests/` and `os/` (programs for the disk). `os/make_disk.py` finds a program by name in any of them.
+Assembly is under `asm/` (`programs/`, `stdlib/`, `two_files/`, `tests/` for circuit diagnostics); C is under `c/` in folders by kind: `basics/`, `games/`, `graphics/` (with `images/` and `videos/`), `tests/` and `os/` (programs for the disk). `tynix/make_disk.py` finds a program by name in any of them.
 
 | path | what it shows |
 | --- | --- |
@@ -980,7 +980,7 @@ Assembly is under `asm/` (`programs/`, `stdlib/`, `two_files/`, `tests/` for cir
 | `c/graphics/grapher.c` | C: a graphing calculator on the RGB screen. Type a function of x on the bottom line (`+ - * / ^`, implied products like `2x`, `\|x\|`, `sin cos tan sqrt ln log exp ...`, `pi`, `e`) and Enter: it is parsed into a small stack program and drawn, up to six functions in different colours, two pixels thick, over a grid with numbers on the axes; gaps where the value is not a number, jumps like tan's left unjoined. Commands `clear`, `reset`, `zoom f`, `in`, `out`, `move dx dy`, `view x0 x1 y0 y1`, `demo`, `help` (the list of what can be typed, also on the screen at the start). 100–200 ms a function in the simulator |
 | `c/graphics/qr.c` | C: a QR code encoder written from the standard, drawn on the RGB screen as big as it fits. Starts with this project's GitHub link; type any text and Enter for a new code (an empty line goes back to the link). Byte mode, versions 1–10, levels L/M/Q/H (`-D LEVEL=n`, M by default), Reed-Solomon over GF(256) with the blocks interleaved, and all eight masks scored by the standard's penalty rules (`-D MASK=n` forces one). `-D TEXT="..."` the first text, `-D DARK=c` the module colour. Every version and level decodes with `zbarimg` and matches `qrencode` module for module with the same mask. About 2.6 million instructions for the link (0.9 s in the simulator) |
 | `c/games/snake.c` | C: Snake on the RGB screen, a 16×14 grid of 8×8 cells under a score panel; `W`/`A`/`S`/`D` steer, `R` restarts after a game over, `Q` quits (`key_pressed()`, `wait_ms()`) |
-| `c/os/loader.c` | C: runs programs from the disk (simulator only): type a name and arguments, it runs `/bin/<name>` with `spawnv()` and shows the exit status; an empty line lists `/bin`. The first step towards the OS's shell, `os/shell.c` (11) |
+| `c/os/loader.c` | C: runs programs from the disk (simulator only): type a name and arguments, it runs `/bin/<name>` with `spawnv()` and shows the exit status; an empty line lists `/bin`. The first step towards the OS's shell, `tynix/shell.c` (11) |
 | `c/os/echo.c` | C: a program for the OS (`cc build --exe`, then `disk put` into `/bin`): prints its arguments, like Unix `echo` |
 | `c/os/disk_notes.c` | C: files on the disk (simulator only, `--disk FILE` on a disk made by `python compiler/src/disk format`): prints `/notes.txt`, then adds each typed line to it (`!help` lists the commands: `!show`, `!ls`, `!clear`, `!quit`), so the next run shows them again |
 | `c/tests/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, `~` on registers, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
@@ -1123,7 +1123,7 @@ python compiler/src/disk/selftest.py  # 17 checks: format (sparse, the superbloc
                                       # and spawnv(): a --exe program put on the disk, run
                                       # three times (arguments, exit status, fresh variables,
                                       # the caller's directory and heap, load errors), and
-                                      # os/shell.c on a disk from os/make_disk.py: a session
+                                      # tynix/shell.c on a disk from tynix/make_disk.py: a session
                                       # of every built-in, > and >>, quotes, a /bin program's
                                       # arguments and exit status, the error messages;
                                       # `tools`: more grep find tree du diff hexdump calc run by
@@ -1133,7 +1133,7 @@ python compiler/src/disk/selftest.py  # 17 checks: format (sparse, the superbloc
                                       # delete, new folder, opening a file in `edit` and a program
                                       # through the shell, read back with fs.py (11.3, 11.4)
 python check_docs.py                  # 3 checks on the docs: every repo path they name
-                                      # exists, every example (.asm, .c) and os/*.c is
+                                      # exists, every example (.asm, .c) and tynix/*.c is
                                       # listed (5.3, 11), every TWEAKS switch is in 3.4
 ```
 
@@ -1253,7 +1253,7 @@ the program's clock keeps going, and every frame that falls due in a pause
 comes late. A model of that (the window's rhythm, with a made-up Tk cost,
 headless) gave 34 late frames with no Tk cost, 50 with 25 ms, 189 with 45 ms,
 and 22 with 200 ms slices and a 1 ms pause. Run the window with pypy3 (it has
-`tkinter`): `os/run_with_video.sh` does.
+`tkinter`): `tynix/run_with_video.sh` does.
 
 Measured on 4 s clips, 128×96 (12 288 words a frame at one word per pixel):
 
@@ -1591,7 +1591,7 @@ files only) and four assembly files: `runtime.asm` (`_pow2`, `_udiv`,
 
 ---
 
-## 11. The OS: Tynix (`os/`)
+## 11. The OS: Tynix (`tynix/`)
 
 The OS is called Tynix (after tiny C; the shell's banner says `Tynix
 shell`). Simulator only (it needs the disk, 1.7 and 7.6). One program at a time,
@@ -1600,26 +1600,26 @@ no multitasking.
 
 | file | what it is |
 | --- | --- |
-| `os/shell.c` | the OS's ROM: a command shell, built like any C program (19,380 words of ROM, 2,927 of RAM) |
-| `os/ed.c` | a line editor for text files, a program for `/bin` (15.8K words; section 11.1) |
-| `os/edit.c` | a full-screen editor on the RGB screen, a program for `/bin` (section 11.2) |
-| `os/more.c` | show text files a page at a time, a program for `/bin` (11.3; 12.4K words) |
-| `os/grep.c` | print the lines of files and folders that contain some text (11.3; 13.8K words) |
-| `os/find.c` | list the paths under a folder whose names contain some text (11.3; 9.1K words) |
-| `os/tree.c` | a folder as an indented tree (11.3; 9.5K words) |
-| `os/du.c` | disk space of folders and files, in KB (11.3; 9.4K words) |
-| `os/diff.c` | the lines that differ between two text files (11.3; 13.2K words) |
-| `os/hexdump.c` | the values of files in hexadecimal (11.3; 11.6K words) |
-| `os/calc.c` | a 32-bit integer calculator (11.3; 7.6K words) |
-| `os/visual_file_manager.c` | a two-pane file manager on the RGB screen, in the style of yazi (section 11.4; 22.8K words) |
-| `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `os/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; from the command line it also makes a Linux-like `/home/user` (`Desktop`, `Documents` with `welcome.txt`, `Downloads`, `Music`, `Pictures`, `Videos`) and `/tmp` when missing (`make(..., home=True)`; the self-checks leave them out); other files on the disk are kept. Twelve C examples, `ed`, `edit` and the nine tools of 11.3 and 11.4, 2.8K–22.8K words each |
-| `os/run_with_video.sh` | builds the shell and the disk (`make_disk.py`), builds `video_player.c` with `--exe` (a `clip.h` argument is passed as `-D VIDEO=...`), puts it in `/bin/video_player` and starts the simulator on it, all under pypy3 when it is installed (`PY` picks another interpreter, `SIM_ARGS` adds simulator options, `DISK` picks another image). `video_player` is not in `PROGRAMS`: its video is part of the program (17K words for the 4 s demo clip, millions for a long one) |
+| `tynix/shell.c` | the OS's ROM: a command shell, built like any C program (19,380 words of ROM, 2,927 of RAM) |
+| `tynix/ed.c` | a line editor for text files, a program for `/bin` (15.8K words; section 11.1) |
+| `tynix/edit.c` | a full-screen editor on the RGB screen, a program for `/bin` (section 11.2) |
+| `tynix/more.c` | show text files a page at a time, a program for `/bin` (11.3; 12.4K words) |
+| `tynix/grep.c` | print the lines of files and folders that contain some text (11.3; 13.8K words) |
+| `tynix/find.c` | list the paths under a folder whose names contain some text (11.3; 9.1K words) |
+| `tynix/tree.c` | a folder as an indented tree (11.3; 9.5K words) |
+| `tynix/du.c` | disk space of folders and files, in KB (11.3; 9.4K words) |
+| `tynix/diff.c` | the lines that differ between two text files (11.3; 13.2K words) |
+| `tynix/hexdump.c` | the values of files in hexadecimal (11.3; 11.6K words) |
+| `tynix/calc.c` | a 32-bit integer calculator (11.3; 7.6K words) |
+| `tynix/visual_file_manager.c` | a two-pane file manager on the RGB screen, in the style of yazi (section 11.4; 22.8K words) |
+| `tynix/make_disk.py` | makes `tynix/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `tynix/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; from the command line it also makes a Linux-like `/home/user` (`Desktop`, `Documents` with `welcome.txt`, `Downloads`, `Music`, `Pictures`, `Videos`) and `/tmp` when missing (`make(..., home=True)`; the self-checks leave them out); other files on the disk are kept. Twelve C examples, `ed`, `edit` and the nine tools of 11.3 and 11.4, 2.8K–22.8K words each |
+| `tynix/run_with_video.sh` | builds the shell and the disk (`make_disk.py`), builds `video_player.c` with `--exe` (a `clip.h` argument is passed as `-D VIDEO=...`), puts it in `/bin/video_player` and starts the simulator on it, all under pypy3 when it is installed (`PY` picks another interpreter, `SIM_ARGS` adds simulator options, `DISK` picks another image). `video_player` is not in `PROGRAMS`: its video is part of the program (17K words for the 4 s demo clip, millions for a long one) |
 
 ```
-python os/make_disk.py [IMG] [--new] [--size MB]
-python compiler/src/cc build os/shell.c
-python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img
-python compiler/src/cc run os/shell.c --disk os/disk.img --keys $'ls /bin\nprimes\nhalt\n'
+python tynix/make_disk.py [IMG] [--new] [--size MB]
+python compiler/src/cc build tynix/shell.c
+python cpu_sim/src/main.py compiler/ROM/shell.rom --disk tynix/disk.img
+python compiler/src/cc run tynix/shell.c --disk tynix/disk.img --keys $'ls /bin\nprimes\nhalt\n'
 ```
 
 At start the shell prints a line and checks for a formatted disk
@@ -1684,7 +1684,7 @@ inside `run_program`: a long session of open-and-return does not deepen the
 stack. A program that exits with 254 and leaves no `/.next` gets the usual
 status message.
 
-### 11.1 The editor: `ed` (`os/ed.c`)
+### 11.1 The editor: `ed` (`tynix/ed.c`)
 
 A line editor in the style of Unix's `ed`, a program in `/bin` (the text
 display is a teletype: append only, no cursor positioning, so a screen
@@ -1714,7 +1714,7 @@ A range is `N`, `N,M`, `.` (the current line), `$` (the last), or `,`
 line). The self-check `editor` (disk suite) drives it through the shell and
 reads the file back with `fs.py`.
 
-### 11.2 The full-screen editor: `edit` (`os/edit.c`)
+### 11.2 The full-screen editor: `edit` (`tynix/edit.c`)
 
 `edit notes.txt` shows the text on the RGB screen (256 x 256, 6 x 8 cells:
 42 columns, 31 text lines and a status line in inverted colours with the
@@ -1738,7 +1738,7 @@ through the shell, reads the file back with `fs.py`, and checks the screen
 holds text while it runs and is blank after.
 
 
-### 11.3 The tools (`os/more.c` ... `os/calc.c`)
+### 11.3 The tools (`tynix/more.c` ... `tynix/calc.c`)
 
 Eight small programs for `/bin`, one file each, written like `ed.c`: a header
 comment (what, how built, usage), errors as `NAME: PATH: reason` (the
@@ -1778,7 +1778,7 @@ whole transcript (the `grep` and `diff` texts were compared with the real Unix
 tools on the same files), and reads the redirected files and `du`'s block counts
 back with `fs.py`.
 
-### 11.4 The file manager: `visual_file_manager` (`os/visual_file_manager.c`)
+### 11.4 The file manager: `visual_file_manager` (`tynix/visual_file_manager.c`)
 
 A yazi-like file manager on the RGB screen, built like `edit.c`: 42 columns x
 32 rows of 6 x 8 cells, keys polled with `key_pressed()`, `shown[][]` remembering

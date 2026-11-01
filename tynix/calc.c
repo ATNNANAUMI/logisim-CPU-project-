@@ -1,6 +1,6 @@
 /* calc.c - a 32-bit integer calculator (a program for Tynix, in /bin)
  *
- *   python os/make_disk.py                 (builds it into /bin)
+ *   python tynix/make_disk.py              (builds it into /bin)
  *   (in the shell)   calc expr        calc 2 * (3 + 4)  ->  14
  *                    calc             type an expression a line, Ctrl-D ends
  *
