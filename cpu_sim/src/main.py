@@ -67,6 +67,9 @@ def main() -> None:
     parser.add_argument("--keys", default="", help="preload the keyboard buffer")
     parser.add_argument("--screen", default="", metavar="FILE.png",
                         help="save the RGB screen (device 0x6C) as a PNG at the end")
+    parser.add_argument("--screen-fps", type=int, default=30, metavar="N",
+                        help="the window draws the RGB screen N times a second at most while a "
+                             "program runs (default 30, 0 = at every tick)")
     parser.add_argument("--disk", metavar="FILE",
                         help="disk image for devices 0x8C/0x8D (created, 64 MB sparse, if missing)")
     args = parser.parse_args()
@@ -81,7 +84,7 @@ def main() -> None:
             return
 
         from gui import SimulatorWindow
-        SimulatorWindow(cpu, rom_path=args.rom).mainloop()
+        SimulatorWindow(cpu, rom_path=args.rom, screen_fps=args.screen_fps).mainloop()
     finally:
         cpu.bus.attach_disk(None)
 

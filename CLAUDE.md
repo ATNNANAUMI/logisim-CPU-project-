@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # five self-check suites (assembler 20, simulator 30, C compiler 17, image tool 10, disk tool 16), then check_docs.py
+python run.py test                                   # five self-check suites (assembler 20, simulator 31, C compiler 17, image tool 10, disk tool 16), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
@@ -28,6 +28,7 @@ python compiler/src/asm build prog.asm compiler/examples/asm/stdlib/stdlib.asm [
 python compiler/src/asm build prog.asm --lib compiler/examples/asm/stdlib/stdlib.asm   # link only the stdlib functions used
 python cpu_sim/src/main.py compiler/ROM/prog.rom                             # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 [--trace] [--keys $'text\n'] [--screen out.png] [--disk disk.img]
+python cpu_sim/src/main.py compiler/ROM/prog.rom [--screen-fps 30]            # the window: the RGB screen is drawn at most this often while a program runs
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom [--seconds N]   # real circuit, headless
 python logisim/microcode/microcode.py [--list]       # CONTROL_SECTION as a 64K x 32 microcode ROM -> logisim/microcode/microcode.rom
 python logisim/microcode/verify.py [--quick]         # that ROM against the circuit's gates, every IR/step/flags (needs javac; minutes)

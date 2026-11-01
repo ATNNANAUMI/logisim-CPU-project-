@@ -501,7 +501,7 @@ modules import each other by plain name, so run them as scripts
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 30 checks on the core |
+| `selftest.py` | 31 checks on the core |
 | `bench.py` | the simulator's speed on nine example programs (3.3) |
 
 ### 3.2 Execution model
@@ -569,7 +569,7 @@ runs fast, so a program that ends within a few million instructions runs at
 ### 3.3 Running it
 
 ```
-python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--trace] [--keys TEXT] [--screen FILE.png] [--disk FILE]
+python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--trace] [--keys TEXT] [--screen FILE.png] [--disk FILE] [--screen-fps N]
 ```
 
 * without `--headless`: opens the window with the ROM loaded
@@ -581,6 +581,9 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
   at twice the size)
 * `--disk FILE`: attaches a disk image (devices `0x8C`/`0x8D`, 1.7); a
   missing file is created, 64 MB and sparse
+* `--screen-fps N`: the window draws the RGB screen at most N times a second
+  while a program runs (default 30; 0 = at every tick). See "How the window
+  paces itself" below
 
 **The window:**
 
@@ -592,10 +595,40 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
 * middle: ROM and RAM tabs, 256 words per page, with optional disassembly and
   "follow IAR"; and a C source tab (below)
 * right: the display (`0x5C`) and the RGB screen (`0x6C`, a tab that comes
-  forward when a program first draws; redrawn every tick from the pixels
-  that changed, or as one PPM picture when more than 400 did), the hex
+  forward when a program first draws; redrawn from the pixels that changed,
+  or as one PPM picture when more than 400 did, at most `--screen-fps` times
+  a second while a program runs), the hex
   display, the keyboard field
   (`0xF0`), and the last executed instructions
+
+**How the window paces itself** (2026-11-01; `gui.py`). The simulator and the
+window share one thread, and the program's clock (the timer, 1.7) goes on
+while the window works, so every redraw is time the program loses: a frame
+that falls due in a pause comes late. At `max`:
+
+* a tick is one screen period long (1/`--screen-fps`): the program runs for
+  that minus what drawing took, and for at least three times what drawing
+  took, so the window never uses more than a quarter of the time (`GUI_SHARE`;
+  a slow Tk lowers the redraw rate instead of starving the program). The
+  pause between ticks is 1 ms (it was 20 ms)
+* the registers, flags and memory panes are redrawn at most 10 times a second
+  (`STATE_FPS`); in between only the picture is
+* before drawing, the program runs on, a chunk of 2000 instructions at a
+  time, while it is still adding pixels (`settle()`): the screen is shown at
+  the first chunk that drew nothing new, so a frame that the program draws in
+  a burst is not shown half done. A program that never stops drawing is shown
+  after at most 10 ms (`SETTLE_MAX`). The test is a growing set of changed
+  pixels, so redrawing pixels already changed in the same interval looks quiet
+* at a fixed speed (1 Hz … 1 MHz) ticks stay 20 ms apart with a budget of
+  instructions each, and the screen is only held back to `--screen-fps`; a
+  paused program always shows its screen exactly
+
+Measured with a model of this (headless, a made-up Tk cost per redraw, a
+41.5 s clip at 30 fps under pypy3; late frames of 1245): 19, 25, 30 and 160
+late at 0, 10, 25 and 45 ms of Tk time, against 34, 39, 50 and 189 with the old
+rhythm (50 ms of running, then 20 ms and the redraw). Nearly all of them are
+the first 30 frames (the translator and pypy's JIT warming up behind a full
+first frame). Not measured in the real window, which needs a display.
 
 Editing: type into any register/IAR/ESP/EBP box and press Enter, click the
 flags, or double-click a memory word. Values accept `0x1F`, `31`, `-5`,
@@ -1050,7 +1083,7 @@ python compiler/src/asm/selftest.py   # 20 checks: encodings, values, strings, j
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 30 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 31 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
                                       # floats, FCMP flags, keyboard, backspace, key codes (arrows, Ctrl), the display's
                                       # backspace and form feed, ADDR/JMRB,
@@ -1061,7 +1094,7 @@ python cpu_sim/src/selftest.py        # 30 checks: immediates, flags, carry flag
                                       # memory changes, run() stopping at breakpoints,
                                       # the top of both 16M-word banks, the timer,
                                       # the disk (kept in its file, size, past the end),
-                                      # the LD trace note when RA == RB, step_line (C line
+                                      # the LD trace note when RA == RB, the window's pacing (settle(), screen_due()), step_line (C line
                                       # stepping: line, breakpoint, halt, limit), isa.py against the assembler's
                                       # encoding.py tables (names, groups, one/two-word shapes)
 python compiler/src/cc/selftest.py    # 17 checks: preprocessor, error messages (several per run), warnings,

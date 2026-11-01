@@ -132,9 +132,9 @@ logisim-CPU-project-/
     │   │                     (every RAM store checks a map of translated words and drops RAM blocks it hits)
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
-    │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG]`
+    │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG --screen-fps N]`
     │   ├── bench.py          speed check: nine example programs in run(), MHz first/best run + end-state digest
-    │   └── selftest.py       30 checks (incl. translated code against step() on random code)
+    │   └── selftest.py       31 checks (incl. translated code against step() on random code)
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)

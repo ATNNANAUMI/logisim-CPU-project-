@@ -124,6 +124,50 @@ def test_isa_agrees_with_the_assemblers_tables():
     assert enc.FLAGS == isa.FLAG_BITS
 
 
+def test_window_pacing():
+    """gui.py's settle() and screen_due(): the window shows the RGB screen
+    between bursts of drawing, and not more often than asked."""
+    try:
+        import gui
+    except ImportError:                 # no tkinter: the window cannot run here either
+        return
+
+    class Screen:
+        dirty, cleared = set(), False
+
+    def program(draws):                 # draws(k): does chunk number k add pixels?
+        video, calls, now = Screen(), [], [0.0]
+        video.dirty = set()
+
+        def execute(count):
+            calls.append(count)
+            if draws(len(calls)):
+                video.dirty |= {(len(calls), i) for i in range(3)}
+            now[0] += 0.001
+        return video, execute, calls, lambda: now[0]
+
+    video, execute, calls, clock = program(lambda k: k <= 5)       # draws for 5 chunks, then stops
+    assert gui.settle(execute, video, clock, until=1.0) is True and len(calls) == 6
+    video, execute, calls, clock = program(lambda k: False)        # quiet already: one look
+    assert gui.settle(execute, video, clock, until=1.0) is True and len(calls) == 1
+    video, execute, calls, clock = program(lambda k: True)         # never quiet: gives up at the limit
+    assert gui.settle(execute, video, clock, until=0.0105) is False and len(calls) == 11
+    assert gui.settle(execute, video, clock, until=9.0, running=lambda: False) is False
+    assert len(calls) == 11                                        # a stopped program is not run on
+    video, execute, calls, clock = program(lambda k: False)        # a clear in the middle counts as drawing
+    inner = execute
+    video.cleared = False
+
+    def clearing(count):
+        inner(count)
+        video.cleared = len(calls) <= 2
+    assert gui.settle(clearing, video, clock, until=1.0) is True and len(calls) == 2
+
+    assert gui.screen_due(False, 0.0, 0.0, 1 / 30)                 # paused: always
+    assert not gui.screen_due(True, 0.020, 0.0, 1 / 30) and gui.screen_due(True, 0.034, 0.0, 1 / 30)
+    assert gui.screen_due(True, 0.0, 0.0, 0.0)                     # no limit: every time
+
+
 def test_rom_write_is_ignored():
     # DATA R1,0x100 (ROM) ; DATA R2,5 ; ST R1,R2
     cpu = run([0x0301, 0x100, 0x0302, 5, 0x0212, 0x0F00])
