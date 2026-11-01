@@ -1200,6 +1200,22 @@ last frame. A frame can't be skipped, since each one draws only what changed,
 so a player that falls behind stays behind until frames get cheaper; it
 counts the frames drawn more than one frame late.
 
+A long clip is a speed test of the simulator (2026-10-31, a 41.5 s clip,
+144×256 at 30 fps, run from the shell): the decode is the same work for
+every frame, since each row refers to the row above, about 1.6 million
+simulated instructions a frame, so 48 million a second. Under pypy3 that is
+2.5 ms of a frame's 33 ms (all 1245 frames decode in 3.2 s); plain python is
+not fast enough. The late frames are not a steady shortfall: headless under
+pypy3 9 to 12 come late, all in the first ten frames (the translator and
+pypy's JIT warming up, lag 190 ms at frame 1, then caught up). In the window
+there are more (30 to 60), because the window pauses the simulator between
+its slices (50 ms of running at "max", then `after(20)` and the redraw) while
+the program's clock keeps going, and every frame that falls due in a pause
+comes late. A model of that (the window's rhythm, with a made-up Tk cost,
+headless) gave 34 late frames with no Tk cost, 50 with 25 ms, 189 with 45 ms,
+and 22 with 200 ms slices and a 1 ms pause. Run the window with pypy3 (it has
+`tkinter`): `os/run_with_video.sh` does.
+
 Measured on 4 s clips, 128×96 (12 288 words a frame at one word per pixel):
 
 | clip | fps | colours | words a frame | instructions a frame |
@@ -1549,7 +1565,7 @@ no multitasking.
 | `os/ed.c` | a line editor for text files, a program for `/bin` (15.8K words; section 11.1) |
 | `os/edit.c` | a full-screen editor on the RGB screen, a program for `/bin` (section 11.2) |
 | `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `os/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples, `ed` and `edit`, 2.8K–17.4K words each, in under a second |
-| `os/run_with_video.sh` | builds the shell and the disk (`make_disk.py`), builds `video_player.c` with `--exe` (a `clip.h` argument is passed as `-D VIDEO=...`), puts it in `/bin/video_player` and starts the simulator on it (`SIM_ARGS` adds simulator options, `DISK` picks another image). `video_player` is not in `PROGRAMS`: its video is part of the program (17K words for the 4 s demo clip, millions for a long one) |
+| `os/run_with_video.sh` | builds the shell and the disk (`make_disk.py`), builds `video_player.c` with `--exe` (a `clip.h` argument is passed as `-D VIDEO=...`), puts it in `/bin/video_player` and starts the simulator on it, all under pypy3 when it is installed (`PY` picks another interpreter, `SIM_ARGS` adds simulator options, `DISK` picks another image). `video_player` is not in `PROGRAMS`: its video is part of the program (17K words for the 4 s demo clip, millions for a long one) |
 
 ```
 python os/make_disk.py [IMG] [--new] [--size MB]

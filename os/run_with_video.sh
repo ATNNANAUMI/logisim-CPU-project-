@@ -7,6 +7,12 @@
 #   SIM_ARGS="--headless --keys \$'/bin/video_player\nhalt\n' --steps 400000000" os/run_with_video.sh
 #                                        extra options for the simulator (here: no window)
 #   DISK=other.img os/run_with_video.sh  another disk image (default os/disk.img)
+#   PY=python os/run_with_video.sh       another interpreter (default pypy3, else python)
+#
+# pypy3 matters: the player needs about 50 million simulated instructions a
+# second (1.6 million a frame at 30 fps), which plain python does not reach.
+# Even so a few frames at the start come late (pypy's warm-up), and more in
+# the window, which pauses the simulator between its 50 ms slices.
 #
 # Builds the shell and os/disk.img (what is already on the disk stays; delete
 # the file for a fresh one), builds video_player as a program for the OS and
@@ -15,6 +21,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 DISK="${DISK:-os/disk.img}"
+PY="${PY:-$(command -v pypy3 || command -v python)}"
 
 CLIP_ARGS=()
 if [ $# -ge 1 ]; then
@@ -23,9 +30,9 @@ if [ $# -ge 1 ]; then
     CLIP_ARGS=(-I "$(dirname "$clip")" -D "VIDEO=\"$clip\"")
 fi
 
-python compiler/src/cc build os/shell.c
-python os/make_disk.py "$DISK"
-python compiler/src/cc build compiler/examples/c/graphics/video_player.c --exe \
+"$PY" compiler/src/cc build os/shell.c
+"$PY" os/make_disk.py "$DISK"
+"$PY" compiler/src/cc build compiler/examples/c/graphics/video_player.c --exe \
     -o compiler/ROM/video_player.exe "${CLIP_ARGS[@]}"
-python compiler/src/disk put "$DISK" compiler/ROM/video_player.exe /bin/video_player --binary
-eval "python cpu_sim/src/main.py compiler/ROM/shell.rom --disk \"$DISK\" ${SIM_ARGS:-}"
+"$PY" compiler/src/disk put "$DISK" compiler/ROM/video_player.exe /bin/video_player --binary
+eval "\"$PY\" cpu_sim/src/main.py compiler/ROM/shell.rom --disk \"$DISK\" ${SIM_ARGS:-}"
