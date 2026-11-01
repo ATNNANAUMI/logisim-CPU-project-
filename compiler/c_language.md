@@ -238,7 +238,7 @@ register; it can't name C variables. At file scope it adds assembly to the
 file, for example a whole function with its label. Only this basic form of
 `asm` is supported.
 
-`<gfx.h>`: drawing on the 128×128 RGB screen (devices `0x6C`/`0x6D`, see
+`<gfx.h>`: drawing on the 256×256 RGB screen (devices `0x6C`/`0x6D`, see
 the header for the wiring). Colours are RGB565 (`GFX_RGB(r, g, b)` from
 0–255 parts, `GFX_RED`, `GFX_WHITE`, ...); everything is clipped to the
 screen, which can't be read back.
@@ -269,7 +269,7 @@ compiled), so a program can do
 
 The picture is stored with a palette of up to 256 colours and runs of
 pixels copied from a neighbour: about 10–60 times smaller than one word per
-pixel (a 128×128 picture: 270–1800 words instead of 16 384), and never more
+pixel (a 256×256 picture: about 300–7000 words instead of 65 536), and never more
 than the bits a palette index needs (black and white: 32 pixels a word, as
 for a dithered photo, where runs don't help). Pictures with
 more colours are reduced (`--colors N` for fewer and smaller, `--dither`);

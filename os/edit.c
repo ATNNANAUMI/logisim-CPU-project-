@@ -3,7 +3,7 @@
  *   python os/make_disk.py                 (builds it into /bin)
  *   (in the shell)   edit notes.txt
  *
- * The text shows on the 128 x 128 RGB screen, 21 columns by 15 lines, with a
+ * The text shows on the 256 x 256 RGB screen, 42 columns by 31 lines, with a
  * status line under it (file name, * when unsaved, line and column, or the
  * last message). Keys go to the keyboard device, so type with the simulator
  * window focused. A missing file starts empty and is made by Ctrl-S; a binary
@@ -32,8 +32,8 @@
 
 #define FRAME_MS 33             /* the screen is redrawn at most every 33 ms (30 fps) */
 #define LINE_MAX 255            /* chars in a line */
-#define COLS (GFX_WIDTH / GFX_CHAR_WIDTH)               /* 21 */
-#define ROWS (GFX_HEIGHT / GFX_CHAR_HEIGHT - 1)         /* 15 text lines + the status line */
+#define COLS (GFX_WIDTH / GFX_CHAR_WIDTH)               /* 42 */
+#define ROWS (GFX_HEIGHT / GFX_CHAR_HEIGHT - 1)         /* 31 text lines + the status line */
 #define STATUS_ROW ROWS
 
 struct line {

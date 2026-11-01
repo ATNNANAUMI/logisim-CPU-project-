@@ -36,13 +36,13 @@ KEYBOARD_ADDR = 0xF0           # its decoder wants bits 0-3 = 0, bits 4-7 = 1
 
 # RGB Video (565 colour), RGB_Display on the circuit (2026-10-22): each word
 # sent to VIDEO_ADDR is one pixel, x in bits 31-24, y in 23-16, colour in
-# 15-0; only the low bits of x and y that fit the screen are wired. Any word
+# 15-0: with 256 x 256 pixels (2026-10-31) all 32 bits are used. Any word
 # sent to VIDEO_CLEAR_ADDR pulses the component's reset (all black); that
 # one isn't built on the circuit yet.
 VIDEO_ADDR = 0x6C
 VIDEO_CLEAR_ADDR = 0x6D
-VIDEO_WIDTH = 128              # powers of two (the extra x/y bits are not wired)
-VIDEO_HEIGHT = 128
+VIDEO_WIDTH = 256              # powers of two, 256 at most (x and y are 8 bits each)
+VIDEO_HEIGHT = 256
 
 # Timer (planned wiring, not on the circuit yet): INDATA from TIMER_ADDR
 # reads milliseconds since reset, wrapping at 32 bits (C's clock()). The

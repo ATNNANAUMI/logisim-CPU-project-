@@ -7,7 +7,7 @@ the project root:
     python compiler/src/img/video.py frames/ --fps 12     (PNGs, in name order)
 
 ffmpeg (it has to be installed) reads the video at --fps frames a second
-(default 10), shrunk to fit the 128 x 128 screen unless --size says
+(default 10), shrunk to fit the 256 x 256 screen unless --size says
 otherwise; --start and --seconds take a part of it. All frames share one
 palette of --colors colours (default 32), so a pixel that keeps its colour
 keeps its palette entry. Frame 0 is drawn whole. Every later frame draws
@@ -195,7 +195,7 @@ def main(argv=None):
     cli.add_argument("-o", "--output", help="the .h to write (default: the video's name, .h)")
     cli.add_argument("--fps", type=int, default=10, help="frames a second, 1-60 (default 10)")
     cli.add_argument("--size", type=img_cli.parse_size, metavar="WxH",
-                     help="frame size; Wx or xH keeps the shape (default: fit 128 x 128)")
+                     help="frame size; Wx or xH keeps the shape (default: fit 256 x 256)")
     cli.add_argument("--colors", type=int, default=32, metavar="N",
                      help="colours shared by all frames, 1-255 (default 32)")
     cli.add_argument("--tolerance", type=int, default=16, metavar="T",

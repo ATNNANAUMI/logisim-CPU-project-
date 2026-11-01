@@ -63,7 +63,7 @@ logisim-CPU-project-/
 │   │   ├── peephole.py       clean-ups per function
 │   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0 (ROM or --exe), link, TEX1 .exe, run in simulator
 │   │   ├── cerror.py         CError (file:line:col: error: ...)
-│   │   ├── selftest.py       16 checks (incl. every tests/ program against gcc's output)
+│   │   ├── selftest.py       17 checks (incl. every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
 │   │                         fuzz.py: random programs, gcc vs tiny C
 │   ├── src/img/              PNG -> compressed image for gfx_image() (run as `python compiler/src/img pic.png`)
@@ -116,7 +116,8 @@ logisim-CPU-project-/
 │   │                         name runs /bin/NAME (or a path) with spawnv() and waits
 │   ├── ed.c                  a line editor for text files (a program for /bin: a, i, c, d, p, s, /find, w, q)
 │   ├── edit.c                a full-screen editor on the RGB screen (a program for /bin: arrows, ^S save, ^Q quit)
-│   └── make_disk.py          os/disk.img (git-ignored): TFS1, ed and the C examples built --exe in /bin, /readme.txt
+│   ├── make_disk.py          os/disk.img (git-ignored): TFS1, ed and the C examples built --exe in /bin, /readme.txt
+│   └── run_with_video.sh     builds the shell and the disk, puts video_player in /bin (a clip.h argument picks the video), starts the simulator
 │
 └── cpu_sim/
     ├── src/                  simulator (modules import each other by plain name: run as scripts)
@@ -131,9 +132,9 @@ logisim-CPU-project-/
     │   │                     (every RAM store checks a map of translated words and drops RAM blocks it hits)
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
-    │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG]`
+    │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG --screen-fps N]`
     │   ├── bench.py          speed check: nine example programs in run(), MHz first/best run + end-state digest
-    │   └── selftest.py       30 checks (incl. translated code against step() on random code)
+    │   └── selftest.py       31 checks (incl. translated code against step() on random code)
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -152,7 +153,7 @@ PC (top)                  has the output pin `halt` that ends headless runs at H
 ├── display               text TTY at 0x5C
 ├── NUMBER_DISPLAY        8 hex digits at 0x3C
 ├── KEYBOARD              keyboard at 0xF0
-└── RGB_Display           RGB Video at 0x6C (x, y, colour from one word; Video's enable tied to 1). No 0x6D clear yet
+└── RGB_Display           RGB Video at 0x6C, 256×256 (x, y: 8 bits each, colour from one word; Video's enable tied to 1). No 0x6D clear yet
 Unused subcircuits: ROM, program_loader, sign_controller, teste
 ```
 
@@ -289,6 +290,7 @@ python compiler/src/img/video.py clip.mp4 [--fps 10] [--seconds 5]  # video -> c
 python compiler/src/disk format disk.img; python compiler/src/disk put disk.img notes.txt   # disk images (ls get cat rm mkdir mv df fsck)
 python os/make_disk.py; python compiler/src/cc build os/shell.c                 # the OS: os/disk.img with /bin, the shell's ROM
 python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img             # run it, type help
+os/run_with_video.sh [clip.h]                                                    # the same with video_player in /bin: type /bin/video_player
 pypy3 compiler/src/cc run compiler/examples/c/graphics/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
 pypy3 cpu_sim/src/bench.py [life sqrt ...]                          # simulator speed in MHz (python: --scale 0.1 by default)
 ```

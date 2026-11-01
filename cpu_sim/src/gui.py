@@ -17,10 +17,37 @@ from memory import load_image
 PAGE_WORDS = 256
 MONO = "TkFixedFont"
 MAX_PER_TICK = 100_000         # keeps the window responsive at high speeds
-MAX_SLICE = 0.05               # seconds of running per window tick at "max"
+MIN_SLICE = 0.004              # seconds of running per window tick at "max", at least
+SCREEN_FPS = 30                # the RGB screen is redrawn this many times a second at most (0: every tick)
+STATE_FPS = 10                 # registers, flags, memory panes: at most this often while running at "max"
+GUI_SHARE = 0.25               # at "max" the window takes at most this share of the time (the rest is the program's)
+SETTLE_CHUNK = 2_000           # instructions run between two looks at whether pixels are still being drawn
+SETTLE_MAX = 0.010             # seconds of running on, at most, to reach a moment with no pixels being drawn
 STATE_CHARS = 30               # fixed width of the status block, so it never resizes the window
 FULL_REDRAW = 400              # more changed pixels than this: redraw the whole RGB screen
                                # (one put of every pixel costs about as much as 400 puts of one)
+
+
+def settle(execute, video, clock, until, running=lambda: True, chunk=SETTLE_CHUNK):
+    """Run on, a chunk of instructions at a time, while the program is still
+    drawing: a chunk that added pixels to the screen's changed set (or cleared
+    it) means the picture may be half drawn. Stops at the first chunk that
+    drew nothing (returns True: a good moment to show the screen), or when
+    clock() reaches `until` or the program stops (False: a program that draws
+    all the time gets shown anyway)."""
+    while running() and clock() < until:
+        before = (len(video.dirty), video.cleared)
+        execute(chunk)
+        if (len(video.dirty), video.cleared) == before:
+            return True
+    return False
+
+
+def screen_due(running, now, last, period):
+    """Is it time to draw the RGB screen? Always when the program is not
+    running (what is on it must be what the window shows); while it runs, at
+    most once a `period` seconds (0: every time asked)."""
+    return not running or now - last >= period
 
 
 class _Colors(dict):
@@ -368,10 +395,14 @@ class SourcePane(ttk.Frame):
 
 
 class SimulatorWindow(tk.Tk):
-    def __init__(self, cpu: CPU, rom_path: str | None = None):
+    def __init__(self, cpu: CPU, rom_path: str | None = None, screen_fps: int = SCREEN_FPS):
         super().__init__()
         self.cpu = cpu
         self.rom_path = rom_path
+        self._screen_period = 1 / screen_fps if screen_fps > 0 else 0.0
+        self._screen_drawn = 0.0        # when the RGB screen was last drawn
+        self._state_drawn = 0.0         # when the registers and panels were last drawn
+        self._gui_cost = 0.01           # seconds a tick spends drawing the window (the average of the last ticks)
         self.info = DebugInfo.for_rom(rom_path)
         self.running = False
         self.cpu.bus.timer.pause()      # the timer only runs while the program does
@@ -549,7 +580,7 @@ class SimulatorWindow(tk.Tk):
         screen_box = ttk.Frame(self.outputs)
         self.outputs.add(screen_box, text=f"RGB screen (0x{config.VIDEO_ADDR:02X})")
         self.screen_tab = screen_box
-        self.screen_zoom = max(1, 384 // max(video.width, video.height))
+        self.screen_zoom = max(1, 512 // max(video.width, video.height))
         self.screen_image = tk.PhotoImage(width=video.width, height=video.height)
         self.screen_big = self.screen_image.zoom(self.screen_zoom)
         # placed, not packed: the picture follows the tab's size (_fit_screen)
@@ -725,17 +756,24 @@ class SimulatorWindow(tk.Tk):
         finally:
             # booked even when the tick failed: an error must not stop the
             # program for good (Tk prints it and the window carries on);
-            # booked last, so the window gets 20 ms to redraw between ticks
-            self.after(20, self._tick)
+            # booked last, so the window gets time to redraw between ticks:
+            # 20 ms, but 1 ms at "max", where the program's own clock goes on
+            # while the window works
+            self.after(1 if self.running and self.hz == 0 else 20, self._tick)
 
     def _run_tick(self) -> None:
         if self.running:
             hz = self.hz
             now = time.perf_counter()
-            if hz == 0:                     # "max": run for MAX_SLICE seconds
-                count = 0
-                while self.running and time.perf_counter() - now < MAX_SLICE:
+            if hz == 0:                     # "max": a slice that makes a tick one screen period long,
+                count = 0                   # and long enough that drawing takes at most GUI_SHARE of it
+                cost = self._gui_cost
+                end = now + max(MIN_SLICE, self._screen_period - cost, cost * (1 - GUI_SHARE) / GUI_SHARE)
+                while self.running and time.perf_counter() < end:
                     self._execute(10_000)
+                ran = time.perf_counter()
+                settle(self._execute, self.cpu.bus.video, time.perf_counter,
+                       ran + SETTLE_MAX, running=lambda: self.running)
                 self._last_time = now
             else:
                 self._budget += hz * (now - self._last_time)
@@ -746,7 +784,16 @@ class SimulatorWindow(tk.Tk):
                 self._execute(count)
             self._ticks += 1
             slow = hz and hz <= 256
-            self.refresh(memory=slow or self._ticks % 5 == 0)
+            if hz == 0:
+                drawing = time.perf_counter()
+                if drawing - self._state_drawn >= 1 / STATE_FPS:
+                    self._state_drawn = drawing
+                    self.refresh(memory=True)
+                else:
+                    self._draw_screen()         # just the picture, between the panels' turns
+                self._gui_cost += (time.perf_counter() - drawing - self._gui_cost) * 0.3
+            else:
+                self.refresh(memory=slow or self._ticks % 5 == 0)
 
     @property
     def hz(self) -> int:
@@ -879,6 +926,10 @@ class SimulatorWindow(tk.Tk):
         video = self.cpu.bus.video
         if not (video.dirty or video.cleared):
             return
+        now = time.perf_counter()
+        if not screen_due(self.running, now, self._screen_drawn, self._screen_period):
+            return                          # drawn a moment ago: the changes wait for the next turn
+        self._screen_drawn = now
         image = self.screen_image
         if video.cleared or len(video.dirty) > FULL_REDRAW:
             # the whole screen as one binary PPM: Tk reads it far faster

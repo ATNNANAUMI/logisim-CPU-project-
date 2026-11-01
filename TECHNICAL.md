@@ -215,7 +215,7 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 | `0x5C` | text display (TTY) | prints the low 7 bits as ASCII; `0x0A` newline, `0x08` backspace, `0x0C` (form feed) clears it (Logisim's `TTY` does this; read in its code, not run on the circuit) |
 | `0x3C` | number display | latches the 32-bit word and shows it on 8 hex digits (the simulator shows it in the window, and as `HEX DISPLAY:` in headless output) |
 | `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08`, printable ASCII as itself; simulator only so far: arrows up/down/left/right = 28/29/30/31, Ctrl-A … Ctrl-Z = 1 … 26 (Ctrl-D = 4; Ctrl-H, Ctrl-J, Ctrl-M are Backspace and Enter; Ctrl-C and Ctrl-V stay with the window) |
-| `0x6C` | RGB screen | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; on the 128×128 RGB Video only the low 7 bits of x and y are wired. Write-only |
+| `0x6C` | RGB screen | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; a 256×256 RGB Video uses all 32 bits (a smaller one would wire only the low bits of x and y). Write-only |
 | `0x6D` | RGB screen clear (*simulator only*) | any word pulses the RGB Video's reset: all black. Not built on the circuit yet, where it does nothing |
 | `0x7C` | timer (*planned*) | `INDATA` reads the milliseconds since reset, wrapping at 32 bits; C's `clock()` |
 | `0x8C` | disk seek (*simulator only*) | `OUTDATA` sets the disk's word position; `INDATA` reads the disk's size in words |
@@ -379,8 +379,18 @@ from the Keyboard's buffer.
 
 **RGB_Display** — address decoder for `0x6C` and the same select flip-flop
 and write strobe as `display`. Splitters take the colour from bus bits 15–0,
-y from bits 22–16 and x from bits 30–24; they and the strobe (on the clock
-input) go to the `RGB Video` in `PC`. The Video's write-enable input is tied
+y from bits 23–16 and x from bits 31–24; they and the strobe (on the clock
+input) go to the `RGB Video` in `PC`. Since 2026-10-31 the screen is
+256×256 and x and y are 8 bits each (the `X_coord` and `Y_coord` pins are 8
+bits wide; the two splitters used to drop bit 7, leaving 7 bits for the
+128×128 Video). The `RGB Video` in `PC` has resolution `256x256` at scale 2
+(the same size on the schematic as 128×128 at scale 4). Logisim only takes
+that resolution from the file when `width` and `height` are written there
+too (`resolution` alone loads as 128×128), so all three are in `CPU.circ`.
+Checked with Logisim's own loader and simulator, not by running a program:
+the Video loads as 256×256 with 8-bit X and Y ports on the wires that were
+already there, `PC` has no width mismatches, and `RGB_Display` turns the word
+`0xA55A1234` into X `0xA5`, Y `0x5A`, colour `0x1234` (it gave X `0x25` before). The Video's write-enable input is tied
 to a constant 1 there: left unconnected, nothing is drawn. There is no clear
 (`0x6D`) yet.
 
@@ -491,7 +501,7 @@ modules import each other by plain name, so run them as scripts
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 30 checks on the core |
+| `selftest.py` | 31 checks on the core |
 | `bench.py` | the simulator's speed on nine example programs (3.3) |
 
 ### 3.2 Execution model
@@ -559,7 +569,7 @@ runs fast, so a program that ends within a few million instructions runs at
 ### 3.3 Running it
 
 ```
-python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--trace] [--keys TEXT] [--screen FILE.png] [--disk FILE]
+python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--trace] [--keys TEXT] [--screen FILE.png] [--disk FILE] [--screen-fps N]
 ```
 
 * without `--headless`: opens the window with the ROM loaded
@@ -571,6 +581,9 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
   at twice the size)
 * `--disk FILE`: attaches a disk image (devices `0x8C`/`0x8D`, 1.7); a
   missing file is created, 64 MB and sparse
+* `--screen-fps N`: the window draws the RGB screen at most N times a second
+  while a program runs (default 30; 0 = at every tick). See "How the window
+  paces itself" below
 
 **The window:**
 
@@ -582,10 +595,40 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
 * middle: ROM and RAM tabs, 256 words per page, with optional disassembly and
   "follow IAR"; and a C source tab (below)
 * right: the display (`0x5C`) and the RGB screen (`0x6C`, a tab that comes
-  forward when a program first draws; redrawn every tick from the pixels
-  that changed, or as one PPM picture when more than 400 did), the hex
+  forward when a program first draws; redrawn from the pixels that changed,
+  or as one PPM picture when more than 400 did, at most `--screen-fps` times
+  a second while a program runs), the hex
   display, the keyboard field
   (`0xF0`), and the last executed instructions
+
+**How the window paces itself** (2026-11-01; `gui.py`). The simulator and the
+window share one thread, and the program's clock (the timer, 1.7) goes on
+while the window works, so every redraw is time the program loses: a frame
+that falls due in a pause comes late. At `max`:
+
+* a tick is one screen period long (1/`--screen-fps`): the program runs for
+  that minus what drawing took, and for at least three times what drawing
+  took, so the window never uses more than a quarter of the time (`GUI_SHARE`;
+  a slow Tk lowers the redraw rate instead of starving the program). The
+  pause between ticks is 1 ms (it was 20 ms)
+* the registers, flags and memory panes are redrawn at most 10 times a second
+  (`STATE_FPS`); in between only the picture is
+* before drawing, the program runs on, a chunk of 2000 instructions at a
+  time, while it is still adding pixels (`settle()`): the screen is shown at
+  the first chunk that drew nothing new, so a frame that the program draws in
+  a burst is not shown half done. A program that never stops drawing is shown
+  after at most 10 ms (`SETTLE_MAX`). The test is a growing set of changed
+  pixels, so redrawing pixels already changed in the same interval looks quiet
+* at a fixed speed (1 Hz … 1 MHz) ticks stay 20 ms apart with a budget of
+  instructions each, and the screen is only held back to `--screen-fps`; a
+  paused program always shows its screen exactly
+
+Measured with a model of this (headless, a made-up Tk cost per redraw, a
+41.5 s clip at 30 fps under pypy3; late frames of 1245): 19, 25, 30 and 160
+late at 0, 10, 25 and 45 ms of Tk time, against 34, 39, 50 and 189 with the old
+rhythm (50 ms of running, then 20 ms and the redraw). Nearly all of them are
+the first 30 frames (the translator and pypy's JIT warming up behind a full
+first frame). Not measured in the real window, which needs a display.
 
 Editing: type into any register/IAR/ESP/EBP box and press Enter, click the
 flags, or double-click a memory word. Values accept `0x1F`, `31`, `-5`,
@@ -927,7 +970,7 @@ Assembly is under `asm/` (`programs/`, `stdlib/`, `two_files/`, `tests/` for cir
 | `c/basics/hello.c` | C: `printf("hello, world\n")` |
 | `c/basics/primes.c` | C: a sieve, `printf` with a width, the hex display (`cpu.h`) |
 | `c/graphics/gfx_demo.c` | C: the RGB screen with `gfx.h`: gradient, text, shapes, a sine wave (`--screen` saves the picture) |
-| `c/graphics/image_demo.c` | C: compressed pictures with `gfx_image` (7.4): a 128×128 Mandelbrot picture and a transparent 16×16 sprite from `c/graphics/images/` (the PNGs and the `.h` files made from them), clipped at the edges |
+| `c/graphics/image_demo.c` | C: compressed pictures with `gfx_image` (7.4): a 256×256 Mandelbrot picture and a transparent 16×16 sprite from `c/graphics/images/` (the PNGs and the `.h` files made from them), clipped at the edges |
 | `c/basics/structs.c` | C: an array of structs, `qsort`, `malloc`, `printf("%.2f")` |
 | `c/games/guess.c` | C: guess the number with `scanf`; seeded by how long the first key takes (`key_pressed`); the header has a transcript |
 | `c/tests/benchmark.c` | C: twelve square roots (the old bit-by-bit `sqrt` as the reference, Quake III's inverse square root with two constants, one or two Newton steps or a residual correction, Newton's method from `y = x` or from two bit-based first guesses) timed with `clock()` over 20 000 inputs and checked against the reference: max absolute and relative error, how many results differ. `-D ONLY_ALGORITHM=n` runs one; `-D COUNT_ONLY` drops the timing so `--stats` gives that one's instruction count. Needs `--steps 600000000` with `cc run` |
@@ -1040,7 +1083,7 @@ python compiler/src/asm/selftest.py   # 20 checks: encodings, values, strings, j
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 30 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 31 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
                                       # floats, FCMP flags, keyboard, backspace, key codes (arrows, Ctrl), the display's
                                       # backspace and form feed, ADDR/JMRB,
@@ -1051,11 +1094,12 @@ python cpu_sim/src/selftest.py        # 30 checks: immediates, flags, carry flag
                                       # memory changes, run() stopping at breakpoints,
                                       # the top of both 16M-word banks, the timer,
                                       # the disk (kept in its file, size, past the end),
-                                      # the LD trace note when RA == RB, step_line (C line
+                                      # the LD trace note when RA == RB, the window's pacing (settle(), screen_due()), step_line (C line
                                       # stepping: line, breakpoint, halt, limit), isa.py against the assembler's
                                       # encoding.py tables (names, groups, one/two-word shapes)
-python compiler/src/cc/selftest.py    # 16 checks: preprocessor, error messages (several per run), warnings,
-                                      # type sizes, exit/atexit, strtoul overflow limits, keyboard input, globals
+python compiler/src/cc/selftest.py    # 17 checks: preprocessor, error messages (several per run), warnings,
+                                      # type sizes, exit/atexit, strtoul overflow limits, the 256 x 256 screen's edges (clipped, not
+                                      # wrapped), keyboard input, globals
                                       # after a reset, library override, reserved names,
                                       # mixing C and assembly, memory past 64K words (ROM
                                       # table, RAM array, malloc, far code), CLI, C line
@@ -1102,7 +1146,7 @@ turns a PNG into a compressed image that `gfx_image(x, y, img)` (`gfx.h`,
 holding `static const unsigned int picture[] = {...};`, which a C program
 `#include`s (so the words end up in ROM). It won't overwrite a file it
 didn't write. The defaults: the array is named after the file; a picture
-bigger than the screen is shrunk to fit 128×128 (area average), `--size`
+bigger than the screen is shrunk to fit 256×256 (area average), `--size`
 picks the size (`64x` or `x48` keeps the shape); pixels with alpha below
 128 become transparent. `--preview` saves what the screen will show (2×).
 
@@ -1131,7 +1175,7 @@ one word per pixel):
 | --- | --- | --- |
 | `gfx_demo.c`'s screen | 22 | 268 |
 | a logo | 194 | 516 |
-| the Mandelbrot picture of `image_demo.c` | 230 | 1734 |
+| the Mandelbrot picture of `image_demo.c` (128×128 then; 256×256 now: 70 colours, 1707 words) | 230 | 1734 |
 | a cartoon, reduced to 256 / 16 colours | 1096 | 1359 / 469 |
 | a logo / a cartoon, thresholded to black and white | 2 | 106 / 155 |
 | a page of text, black on white | 2 | 306 |
@@ -1161,7 +1205,7 @@ python compiler/src/img/video.py frames/ ...      (a folder of PNGs, in name ord
 turns a video into a `.h` of compressed frames that
 `compiler/examples/c/graphics/video_player.c` plays at the video's speed. `ffmpeg`
 and `ffprobe` read the video (they must be installed; a folder of PNG frames
-needs neither): `--fps` frames a second (1–60), shrunk to fit 128×128 unless
+needs neither): `--fps` frames a second (1–60), shrunk to fit 256×256 unless
 `--size` says otherwise, `--start`/`--seconds` take a part.
 
 * **One palette for every frame:** `--colors` (default 32) chosen over all
@@ -1188,6 +1232,22 @@ The player clears the screen, then draws frame `i` with `gfx_image` when
 last frame. A frame can't be skipped, since each one draws only what changed,
 so a player that falls behind stays behind until frames get cheaper; it
 counts the frames drawn more than one frame late.
+
+A long clip is a speed test of the simulator (2026-10-31, a 41.5 s clip,
+144×256 at 30 fps, run from the shell): the decode is the same work for
+every frame, since each row refers to the row above, about 1.6 million
+simulated instructions a frame, so 48 million a second. Under pypy3 that is
+2.5 ms of a frame's 33 ms (all 1245 frames decode in 3.2 s); plain python is
+not fast enough. The late frames are not a steady shortfall: headless under
+pypy3 9 to 12 come late, all in the first ten frames (the translator and
+pypy's JIT warming up, lag 190 ms at frame 1, then caught up). In the window
+there are more (30 to 60), because the window pauses the simulator between
+its slices (50 ms of running at "max", then `after(20)` and the redraw) while
+the program's clock keeps going, and every frame that falls due in a pause
+comes late. A model of that (the window's rhythm, with a made-up Tk cost,
+headless) gave 34 late frames with no Tk cost, 50 with 25 ms, 189 with 45 ms,
+and 22 with 200 ms slices and a 1 ms pause. Run the window with pypy3 (it has
+`tkinter`): `os/run_with_video.sh` does.
 
 Measured on 4 s clips, 128×96 (12 288 words a frame at one word per pixel):
 
@@ -1264,7 +1324,7 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | carry flag | as in 1.5 | confirmed (`diag12.asm`, `diag13.asm`, 2026-10-10). The simulator used to set C on `SUB`/`CMP` when there was *no* borrow, and on `MULT` overflow; it now matches the circuit |
 | float division by zero, NaN, `INT` out of range | as in 1.5 | confirmed (`diag14.asm`, `diag15.asm`, 2026-10-10). The simulator used to give `0.0/0.0 = +inf`, `1.0/-0.0 = +inf` and `INT(inf) = 0`; it now matches the circuit |
 | number display `0x3C` | shows the last word sent (window and headless output) | 8 hex digits in `PC` |
-| RGB screen `0x6C`/`0x6D` | 128×128 RGB565, the "RGB screen" tab, `--screen` | `RGB_Display` → RGB Video in `PC` (2026-10-22); the `0x6D` clear isn't built |
+| RGB screen `0x6C`/`0x6D` | 256×256 RGB565 (`VIDEO_WIDTH`/`VIDEO_HEIGHT` in `config.py`), the "RGB screen" tab, `--screen` | `RGB_Display` → RGB Video in `PC` (2026-10-22); the `0x6D` clear isn't built. The circuit's screen was 128×128 until 2026-10-31: see 2.2 for the 256×256 change, which no program has run on yet (the circuit still has 16-bit banks, so `run_rom.py` refuses current programs) |
 | disk `0x8C`/`0x8D` | a file, `--disk` or the window's `disk` button | none (Logisim's RAM can't save itself) |
 | text display `0x5C`: control characters | `\n` new line, `\r` a carriage return (back to the start of the line; what follows overwrites it), `\b` deletes at the end of a line (after `\r` it moves back one), `\f` clears it all; others are printed | the `display` subcircuit gives the TTY 7 data bits and a write strobe (its clear pin isn't wired). Logisim 4.1.0's `TTY` (read in its code, `TtyState.add`, not run): `\n` and `\r` both start a new line, `\b` deletes, `\f` clears; other control characters are dropped. **`\r` differs, on purpose** (decided 2026-10-28, OS questionnaire round 4 Q25): a real carriage return is worth having apart from `\n`, even though the circuit's TTY can't do it. Nothing in the toolchain prints it |
 | timing | one instruction per step | several clock cycles per instruction (stepper): 3 to 6, and 16 for `CMP`/`FCMP` (2.5) |
@@ -1538,6 +1598,7 @@ no multitasking.
 | `os/ed.c` | a line editor for text files, a program for `/bin` (15.8K words; section 11.1) |
 | `os/edit.c` | a full-screen editor on the RGB screen, a program for `/bin` (section 11.2) |
 | `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `os/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples, `ed` and `edit`, 2.8K–17.4K words each, in under a second |
+| `os/run_with_video.sh` | builds the shell and the disk (`make_disk.py`), builds `video_player.c` with `--exe` (a `clip.h` argument is passed as `-D VIDEO=...`), puts it in `/bin/video_player` and starts the simulator on it, all under pypy3 when it is installed (`PY` picks another interpreter, `SIM_ARGS` adds simulator options, `DISK` picks another image). `video_player` is not in `PROGRAMS`: its video is part of the program (17K words for the 4 s demo clip, millions for a long one) |
 
 ```
 python os/make_disk.py [IMG] [--new] [--size MB]
@@ -1627,8 +1688,8 @@ reads the file back with `fs.py`.
 
 ### 11.2 The full-screen editor: `edit` (`os/edit.c`)
 
-`edit notes.txt` shows the text on the RGB screen (128 x 128, 6 x 8 cells:
-21 columns, 15 text lines and a status line in inverted colours with the
+`edit notes.txt` shows the text on the RGB screen (256 x 256, 6 x 8 cells:
+42 columns, 31 text lines and a status line in inverted colours with the
 name, `*` when unsaved and `line:column`, or the last message). Keys come
 from the keyboard device (arrows 28-31 and Ctrl-A..Z 1..26, simulator only,
 8): printable keys insert, Enter splits, Backspace deletes or joins lines,
