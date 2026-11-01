@@ -23,14 +23,16 @@
  *                      work on all the selected entries instead of one
  *   y  x  p            copy / cut; paste here (never over an existing name;
  *                      a cut is a rename, so a file cannot be lost; a copy
- *                      that fails leaves no half file; a folder can be cut but
- *                      not copied). y or x again on the lone entry that is on
- *                      the clipboard takes it off
+ *                      that fails leaves no half file or folder; a folder is
+ *                      copied with everything in it, but not into itself).
+ *                      y or x again on the lone entry that is on the
+ *                      clipboard takes it off
  *   u, Ctrl-G          forget the selection and the clipboard
  *   ~                  the home folder, /home/user (also where it starts with
  *                      no argument, when that folder exists)
  *   r                  rename (type the name, Enter; Ctrl-G or Ctrl-Q cancels)
- *   d                  delete, after asking (y); a folder only if it is empty
+ *   d                  delete, after asking (y), a folder with everything in it
+ *                      (the question says how many things; there is no undo)
  *   a                  a new folder (type the name, Enter)
  *   ?                  the keys on the status line         q   quit
  *
@@ -75,6 +77,7 @@
 #define CLIP_FILE "/.clipboard" /* the clipboard, carried over to the next start of this program */
 #define HOME "/home/user"       /* where it starts with no argument, and what ~ goes to */
 #define CLIP_MAX 64
+#define MAX_DEPTH 32            /* folders inside folders that copy and delete will go down (the stack is small) */
 #define PREVIEW_CHARS 2000      /* at most this many chars of a text file are read for the preview */
 #define TEX1 0x31584554         /* the first word of a program (compiler/libc/spawn.c) */
 
@@ -102,6 +105,7 @@ static char input[NAME_MAX + 2];                /* what is being typed */
 static int input_len;
 static const char *message;     /* on the status line until the next key */
 static char note[COLS + 40];    /* where a message with a name in it is written */
+static char delete_prompt[COLS + 40];           /* "delete NAME + 12 inside? (y/n)" */
 static unsigned free_kb;        /* free blocks, read after each change of the disk */
 static int no_memory;           /* malloc failed in read_dir: errno has no code for it */
 static int status;              /* the exit status */
@@ -493,11 +497,7 @@ static void compose(void)
         put(STATUS_ROW, strlen(prompt), input_len > room ? input + input_len - room : input, room, INVERT);
         want[STATUS_ROW][strlen(prompt) + (input_len > room ? room : input_len)] = '_' | INVERT;
     } else if (mode == DELETE) {
-        if (selected() > 1)
-            snprintf(text, sizeof text, "delete %d items? (y/n)", selected());
-        else
-            snprintf(text, sizeof text, "delete %s? (y/n)", selected() ? "the selected one" : list[cur].name);
-        put(STATUS_ROW, 0, text, COLS, INVERT);
+        put(STATUS_ROW, 0, delete_prompt, COLS, INVERT);
     } else if (message)
         put(STATUS_ROW, 0, message, COLS, INVERT);
     else {
@@ -685,6 +685,75 @@ static void open_entry(void)
         say("", list[cur].name, "not a text file or a program");
 }
 
+/* ---- folders and everything in them ---- */
+
+/* dir/name in a malloc'd string, or 0 with errno (or no_memory) set */
+static char *child(const char *dir, const char *name)
+{
+    char *p;
+    if (strlen(dir) + strlen(name) + 2 > PATH_MAX) {
+        errno = ENAMETOOLONG;
+        return 0;
+    }
+    if ((p = malloc(strlen(dir) + strlen(name) + 2)) == 0) {
+        no_memory = 1;
+        return 0;
+    }
+    sprintf(p, "%s%s%s", dir, dir[1] ? "/" : "", name);
+    return p;
+}
+
+/* how many files and folders are under path (a file: 0) */
+static int tree_count(const char *path, int depth)
+{
+    struct entry *l;
+    char *c;
+    int n, i, total = 0;
+    if (depth >= MAX_DEPTH || (n = read_dir(path, &l, 1 << 30)) < 0) {
+        no_memory = 0;
+        return 0;
+    }
+    for (i = 0; i < n; i++) {
+        total++;
+        if (l[i].dir && (c = child(path, l[i].name)) != 0) {
+            total += tree_count(c, depth + 1);
+            free(c);
+        }
+    }
+    free_list(l, n);
+    return total;
+}
+
+/* delete path and, for a folder, everything in it, deepest first; 0, or -1 with errno set
+   (the first thing that could not be deleted stops it) */
+static int remove_tree(const char *path, int depth)
+{
+    struct stat st;
+    struct entry *l;
+    char *c;
+    int n, i, bad = 0;
+    if (stat(path, &st))
+        return -1;
+    if (S_ISDIR(st.st_mode)) {
+        if (depth >= MAX_DEPTH) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        if ((n = read_dir(path, &l, 1 << 30)) < 0)
+            return -1;
+        for (i = 0; i < n && !bad; i++) {
+            c = child(path, l[i].name);
+            bad = c == 0 || remove_tree(c, depth + 1);
+            if (c)
+                free(c);
+        }
+        free_list(l, n);
+        if (bad)
+            return -1;
+    }
+    return remove(path);
+}
+
 /* a copy of the file at from; a failed copy leaves nothing at to */
 static int copy_file(const char *from, const char *to)
 {
@@ -714,6 +783,42 @@ static int copy_file(const char *from, const char *to)
     return 0;
 }
 
+/* copy a file, or a folder with everything in it; the caller removes what a failed
+   copy left (remove_tree). A folder cannot be copied into itself (EINVAL) */
+static int copy_tree(const char *src, const char *dst, int depth)
+{
+    struct stat st;
+    struct entry *l;
+    char *a, *b;
+    int n, i, bad = 0;
+    if (stat(src, &st))
+        return -1;
+    if (!S_ISDIR(st.st_mode))
+        return copy_file(src, dst);
+    n = strlen(src);
+    if (strncmp(dst, src, n) == 0 && (dst[n] == '/' || dst[n] == 0)) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (depth >= MAX_DEPTH) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    if (mkdir(dst) || (n = read_dir(src, &l, 1 << 30)) < 0)
+        return -1;
+    for (i = 0; i < n && !bad; i++) {
+        a = child(src, l[i].name);
+        b = child(dst, l[i].name);
+        bad = a == 0 || b == 0 || copy_tree(a, b, depth + 1);
+        if (a)
+            free(a);
+        if (b)
+            free(b);
+    }
+    free_list(l, n);
+    return bad ? -1 : 0;
+}
+
 /* paste one path here: 0 done, 1 the source is gone (drop it), -1 stop with the message set */
 static int paste_one(const char *src, char *name)
 {
@@ -740,13 +845,24 @@ static int paste_one(const char *src, char *name)
                 fail(name);
             return -1;
         }
-    } else if (S_ISDIR(st.st_mode)) {
-        message = "cannot copy a folder (x moves it)";
-        return -1;
-    } else if (copy_file(src, to)) {
-        fail(name);
-        update_free();
-        return -1;
+    } else {
+        int dir = S_ISDIR(st.st_mode), e;
+        if (dir) {
+            message = "copying...";                 /* it takes a while: show that now */
+            refresh();
+        }
+        if (copy_tree(src, to, 0)) {
+            e = errno;
+            if (dir)
+                remove_tree(to, 0);                 /* what was copied so far */
+            errno = e;
+            if (errno == EINVAL)
+                message = "a folder cannot go inside itself";
+            else
+                fail(name);
+            update_free();
+            return -1;
+        }
     }
     return 0;
 }
@@ -825,10 +941,12 @@ static void delete_entry(void)
     int at = cur, i, n = selected(), deleted = 0, bad = 0;
     static char text[24];
     mode = NORMAL;
+    message = "deleting...";
+    refresh();
     for (i = 0; i < count; i++) {
         if (n ? !list[i].sel : i != cur)
             continue;
-        if (join(path, cwd, list[i].name) || remove(path)) {
+        if (join(path, cwd, list[i].name) || remove_tree(path, 0)) {
             bad++;
             fail(list[i].name);
         } else {
@@ -855,6 +973,27 @@ static void move_to(int i)
         i = 0;
     cur = i;
     preview_ok = 0;
+}
+
+/* the question before a delete: what goes, and how much is inside the folders */
+static void ask_delete(void)
+{
+    char path[PATH_MAX];
+    int i, n = selected(), targets = 0, inside = 0;
+    for (i = 0; i < count; i++)
+        if ((n ? list[i].sel : i == cur) && list[i].dir && join(path, cwd, list[i].name) == 0)
+            inside += tree_count(path, 0);
+    for (i = 0; i < count; i++)
+        targets += n ? list[i].sel : i == cur;
+    if (targets > 1)
+        snprintf(delete_prompt, sizeof delete_prompt, "delete %d items%s? (y/n)", targets,
+                 inside ? " and what is inside" : "");
+    else if (inside)
+        snprintf(delete_prompt, sizeof delete_prompt, "delete %s + %d inside? (y/n)",
+                 list[cur].name, inside);
+    else
+        snprintf(delete_prompt, sizeof delete_prompt, "delete %s? (y/n)", list[cur].name);
+    mode = DELETE;
 }
 
 /* copy (cut = 0) or cut the selected entries, or the one under the cursor; the same key
@@ -935,7 +1074,7 @@ static void key_normal(int k)
     else if (k == 'a')
         start_input(MKDIR);
     else if (k == 'd')
-        mode = DELETE;
+        ask_delete();
 }
 
 static void key_input(int k)

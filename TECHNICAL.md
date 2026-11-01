@@ -1809,11 +1809,11 @@ Directories larger than the screen scroll.
 | `h`, Left | the parent folder (the cursor on the folder it came from) |
 | `l`, Right, Enter | into a folder; open a file: text in `edit`, a TEX1 program is run, other binaries refused |
 | space | select the entry (`*`) and move down, as yazi does; `y`, `x` and `d` then act on all the selected entries of the folder (up to 64 for the clipboard) instead of the one under the cursor. The selection is forgotten when the folder is read again |
-| `y` `x` `p` | copy / cut, paste the whole clipboard into the current folder. `y` or `x` again on a lone entry that is already on the clipboard takes it off. Never over an existing name (it stops there; what was pasted stays pasted, a cut keeps only the items not moved yet). A cut is `rename()`: atomic, so a file cannot be lost, and a folder can be moved (not into itself). A copy is the `cp` code of `shell.c` (text or binary like the original); if it fails the half-written file is removed. A folder cannot be copied (`x` moves it) |
+| `y` `x` `p` | copy / cut, paste the whole clipboard into the current folder. `y` or `x` again on a lone entry that is already on the clipboard takes it off. Never over an existing name (it stops there; what was pasted stays pasted, a cut keeps only the items not moved yet). A cut is `rename()`: atomic, so a file cannot be lost, and a folder can be moved (not into itself). A copy is the `cp` code of `shell.c` (text or binary like the original); a folder is copied with everything in it (`copy_tree`, down to `MAX_DEPTH` 32 levels, each level's names read first and the directory closed, since only 4 can be open), but not into itself. If a copy fails (disk full), the half-written file or folder is removed (`remove_tree`) |
 | `r` | rename: the name is typed on the status line (Backspace edits, Enter does it, Ctrl-G or Ctrl-Q cancels) |
 | `u`, Ctrl-G | forget the selection and the clipboard |
 | `~` | the home folder, `/home/user` |
-| `d` | delete after `delete NAME? (y/n)` or `delete N items? (y/n)` (`remove()`: a folder only when empty, the error is shown) |
+| `d` | delete after asking: `delete NAME? (y/n)`, `delete NAME + 14 inside? (y/n)` for a folder (the files and folders under it are counted first), or `delete N items? (y/n)`. A folder goes with everything in it, deepest first (`remove_tree`); the first thing that cannot be deleted stops it and the error is shown. There is no undo and no trash |
 | `a` | a new folder, named like `r` |
 | `?` `q` | the keys on the status line; quit (the screen is cleared) |
 
@@ -1833,8 +1833,7 @@ or editor runs, then the manager starts again from scratch, the whole screen
 redrawn, in the same folder, on the same entry and with the same clipboard.
 Names the shell cannot pass on (with a quote, `>` or non-ASCII char) are
 refused with a message. The self-check `tools` drives it through the shell
-(copy, a refused paste over an existing name, cut, rename, space-select several entries then cut, copy and delete them, `y` twice and `u` taking things off the clipboard, `~` and the start in `/home/user`, a refused delete of a
-folder with files, a no to `delete?`, delete, new folder, `Enter` opening a
+(copy, a refused paste over an existing name, cut, rename, space-select several entries then cut, copy and delete them, `y` twice and `u` taking things off the clipboard, `~` and the start in `/home/user`, a no to `delete?`, delete (a nested folder, its blocks freed), a nested folder copied and one copied into itself refused, a copy that runs out of disk leaving nothing behind, new folder, `Enter` opening a
 file in `edit` with typed keys and coming back with the clipboard, `Enter` on a
 program) and reads the disk back with `fs.py`; it does not look at pixels
 beyond the screen being blank after `q`, and the screen layout was checked by

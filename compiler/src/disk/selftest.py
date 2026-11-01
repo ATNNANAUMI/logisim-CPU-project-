@@ -1009,6 +1009,35 @@ CPU halted
 """
 
 
+FM3_KEYS = ("visual_file_manager /r\n"
+            "jj" "y" "g" "l" "p" "h"           # copy the folder tree (nested) into dest, back
+            "j" "d" "y"                        # delete junk, nested files and all
+            "y" "l" "p"                        # copy tree into itself: refused
+            "q"
+            "halt\n")
+
+FM4_KEYS = ("visual_file_manager /q\n"
+            "j" "y" "g" "l" "p"                # copy t (9 blocks) into d on a disk with 4 free: fails half way
+            "q"
+            "halt\n")
+
+FM3_OUTPUT = """\
+Tynix shell: help lists the commands
+/> visual_file_manager /r
+/> halt
+CPU halted
+"""
+FM4_OUTPUT = FM3_OUTPUT.replace("/r", "/q")
+
+
+def _tree(disk, path):
+    """A folder as nested dicts of name -> contents, to compare two copies."""
+    node = disk.lookup(path)
+    if not node.is_dir:
+        return disk.get(path)
+    return {e.name: _tree(disk, path.rstrip("/") + "/" + e.name) for e in disk.entries(node)}
+
+
 def _hexdump(data):
     lines = []
     for at in range(0, len(data), 8):
@@ -1035,7 +1064,7 @@ FM_KEYS = ("visual_file_manager /fm\n"
            "j" "x" "kk" "l" "p" "h"           # cut one.txt, enter dest, paste: moved
            "jj" "y" "kk" "l" "p" "h"          # copy two.txt, paste into dest: dest has one, refused
            "j" "r" "x\b2\n"                   # rename: the name is there to edit; sub -> sub2
-           "d" "y"                            # sub2 holds files: it is not deleted
+           "d" "n"                            # sub2 holds files: asked, no, it stays
            "jj" "d" "n" "k" "d" "y"           # zzz.txt: asked, no; two.txt: asked, yes
            "a" "newdir\n"                     # a new folder
            "k" "l" "y" "\n"                   # in dest: copy one.txt, Enter opens it in edit:
@@ -1119,6 +1148,13 @@ def check_tools():
         disk.mkdir("/m/dest")
         for n in "abcd":
             disk.put(f"/m/{n}.txt", f"{n}\n".encode())
+        for folder in ("/r", "/r/dest", "/r/tree", "/r/tree/sub", "/r/tree/sub/deep", "/r/junk", "/r/junk/s"):
+            disk.mkdir(folder)
+        disk.put("/r/tree/top.txt", b"top\n")
+        disk.put("/r/tree/sub/mid.txt", b"mid\n" * 300)         # more than a block
+        disk.put("/r/tree/sub/deep/bottom.txt", b"bottom\n")
+        disk.put("/r/junk/j1.txt", b"j1\n")
+        disk.put("/r/junk/s/j2.txt", b"j2\n" * 400)
     tools = cpu.instructions
     cpu, text = driver.run_in_simulator(shell.rom, FM_KEYS, 40_000_000, disk=image)
     assert cpu.halted and text == FM_OUTPUT, text
@@ -1145,7 +1181,31 @@ def check_tools():
         assert sorted(e.name for e in disk.entries(disk.lookup("/home/user")))[:6] == \
             ["Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos"]
         assert disk.lookup("/.clipboard") is None and disk.check() == [], disk.check()
-    return f"{tools} + {fm} + {cpu.instructions} instructions"
+    fm2 = cpu.instructions
+    cpu, text = driver.run_in_simulator(shell.rom, FM3_KEYS, 60_000_000, disk=image)
+    assert cpu.halted and text == FM3_OUTPUT, text
+    with FileSystem(image) as disk:
+        assert sorted(e.name for e in disk.entries(disk.lookup("/r"))) == ["dest", "tree"], \
+            "junk was not deleted"
+        assert _tree(disk, "/r/dest/tree") == _tree(disk, "/r/tree")     # the whole folder, copied
+        assert _tree(disk, "/r/tree")["sub"]["mid.txt"] == b"mid\n" * 300
+        assert "tree" not in _tree(disk, "/r/tree")                       # not into itself
+        assert disk.check() == [], disk.check()                           # the blocks of junk are free
+        disk.mkdir("/q")
+        disk.mkdir("/q/d")
+        disk.mkdir("/q/t")
+        for n in "abc":
+            disk.put(f"/q/t/{n}.txt", (n * 99 + "\n").encode() * 30)     # 3000 chars: 3 blocks each
+        disk.put("/fill", bytes(4 * 256 * (disk.free_blocks() - 4)), binary=True)
+        assert 1 <= disk.free_blocks() <= 5, disk.free_blocks()
+    fm3 = cpu.instructions
+    cpu, text = driver.run_in_simulator(shell.rom, FM4_KEYS, 60_000_000, disk=image)
+    assert cpu.halted and text == FM4_OUTPUT, text
+    with FileSystem(image) as disk:
+        assert disk.entries(disk.lookup("/q/d")) == [], "a failed copy left a half folder"
+        assert len(disk.entries(disk.lookup("/q/t"))) == 3
+        assert disk.check() == [], disk.check()
+    return f"{tools} + {fm} + {fm2} + {fm3} + {cpu.instructions} instructions"
 
 
 CHECKS = [
