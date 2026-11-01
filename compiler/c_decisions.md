@@ -257,6 +257,37 @@ The language itself is described in [`c_language.md`](c_language.md).
     control codes (see TECHNICAL 8), so on the circuit only the arrow-less,
     printable part would work.
 
+51. **Interrupts (Phase 6).** The C library's handlers are ordinary C
+    functions, `unsigned fn(void)`, entered through a stub in
+    `interrupt.asm` that saves all 16 registers (the CPU saves only the
+    return word with the flags) and calls the function through a RAM slot.
+    The value it returns is 0, or the address RTI returns to: that is how the
+    shell's NMI handler kills a program without a way to change the saved
+    word from C. A handler runs with interrupts off. The vectors are fixed
+    ROM words that jump to `_nmi` `_irq` `_trap` `_fault` if a file has them;
+    `set_interrupt_handler` names all four, so linking one links them all.
+    A C name like `trap` or `wait` is fine in C (the compiler prefixes names
+    that are mnemonics), but the assembler reserved five more words:
+    `rti`, `ei`, `di`, `trap`, `wait`. One label in `echo.asm` was renamed.
+52. **No fixed stack area.** The linker reserves the stack (16K words) after
+    the program's data and a start-up code sets ESP, EBP and the stack limit;
+    `_end`, where malloc's heap starts, is the first word after it (the
+    linker defines it, `END_SOURCE` is gone). `setjmp`/`longjmp` and the
+    code generator's frame tricks needed no change: they only use
+    `STK CALL`/`GET`/`RET`, which work on any RAM index. A program for the OS
+    still shares the stack of the program that started it.
+53. **An interrupt saves the selected devices.** `COMM`'s OUTADDR and INADDR
+    are global: a handler that calls `irq_ack()` (an OUTADDR to `0xAC`) would
+    leave the program's next OUTDATA going to the controller instead of the
+    display, if it came between the program's OUTADDR and OUTDATA (the
+    compiler emits them back to back for every `putchar`, so a timer tick
+    would corrupt output now and then). The CPU pushes both selections with
+    the return word and RTI restores them (`test_trap_and_rti`).
+54. **The fault vector switches the stack limit off.** A handler that needs
+    stack to run (a C handler needs a few hundred words) would fault again
+    on its own first push otherwise. The OS (Phase 7) switches stacks in the
+    handler and sets the limit of the next task.
+
 ## Measured on the circuit while doing this
 
 * `diag12`/`diag13`: the carry flag is a *borrow* for `SUB`, and `CMP`,

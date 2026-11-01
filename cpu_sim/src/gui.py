@@ -472,6 +472,8 @@ class SimulatorWindow(tk.Tk):
         self.run_button = ttk.Button(row2, text="run", command=self.toggle_run)
         self.run_button.pack(side="left", padx=2)
         ttk.Button(row2, text="resume", command=self.resume).pack(side="left")
+        ttk.Button(row2, text="NMI (Esc)", command=self.nmi).pack(side="left", padx=2)
+        self.winfo_toplevel().bind("<Escape>", lambda _e: self.nmi())
 
         row2b = ttk.Frame(box)
         row2b.pack(fill="x", padx=4, pady=2)
@@ -552,9 +554,9 @@ class SimulatorWindow(tk.Tk):
             if name == "IAR":
                 self.cpu.iar = value & config.ADDR_MASK
             elif name == "ESP":
-                self.cpu.esp = value & config.STACK_MASK
+                self.cpu.esp = value & config.BANK_MASK
             else:
-                self.cpu.ebp = value & config.STACK_MASK
+                self.cpu.ebp = value & config.BANK_MASK
         except ValueError:
             pass
         self._show_pointer(name)
@@ -726,8 +728,18 @@ class SimulatorWindow(tk.Tk):
         self.cpu.resume()
         self.refresh()
 
+    def nmi(self) -> None:
+        """The non-maskable interrupt: the OS's kill switch (Esc)."""
+        self.cpu.nmi()
+        if not self.running:
+            self.set_running(True)
+        self.refresh()
+
     def on_key(self, event) -> str | None:
         """A key typed into the keyboard field goes into the buffer at once."""
+        if event.keysym == "Escape":
+            self.nmi()
+            return "break"
         code = key_code(event.keysym, event.char)
         if code is None:
             return None                     # let Tk handle Tab, Ctrl+V, ...
@@ -861,7 +873,9 @@ class SimulatorWindow(tk.Tk):
         if self.cpu.stopped:
             status = f"STOPPED ({self.cpu.error})"
         elif self.cpu.halted:
-            status = "HALTED - press resume"
+            status = "HALTED - press resume (NMI wakes it)"
+        elif self.cpu.waiting:
+            status = "waiting for an interrupt (WAIT)"
         elif self.running:
             status = "running"
         else:

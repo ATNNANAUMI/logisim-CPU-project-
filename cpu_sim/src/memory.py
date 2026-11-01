@@ -44,8 +44,8 @@ class Memory:
         return True
 
     # -------------------------------------------------- stack helpers
-    # Stack slot i is RAM word i. ESP and EBP only reach the 16K stack area,
-    # but STK SET/GET's EBP + RB can land anywhere in RAM.
+    # Stack slot i is RAM word i. ESP and EBP are 24-bit indices (the stack
+    # can be anywhere), and so is STK SET/GET's EBP + RB.
     def stack_read(self, index: int) -> int:
         return self.ram[index & config.STACK_INDEX_MASK]
 

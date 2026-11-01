@@ -15,10 +15,10 @@ start:  DATA R1, KEYBOARD
         COMM INADDR, R1
         DATA R1, DISPLAY
         COMM OUTADDR, R1
-wait:   COMM INDATA, R2         ; 0 = nothing typed yet
+wait_key:   COMM INDATA, R2         ; 0 = nothing typed yet
         TEST R2
-        RJF Z, wait
+        RJF Z, wait_key
         COMM OUTDATA, R2        ; echo it
         CMP R2, #'\n'
-        RJNF Z, wait            ; Enter ends it
+        RJNF Z, wait_key            ; Enter ends it
         HALT

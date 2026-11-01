@@ -27,7 +27,9 @@ file has the details.
 | `IAR` | 25 bits | instruction address register (program counter) |
 | `IR` | 16 bits | instruction register (low 16 bits of the fetched word) |
 | flags | 4 bits | `C A N Z` (bit 3 … bit 0) |
-| `ESP`, `EBP` | 14 bits each | stack pointer and frame pointer, indices into the stack area |
+| `ESP`, `EBP` | 24 bits each | stack pointer and frame pointer: indices into RAM (RAM word `i` is at `0x1000000 + i`), so the stack can be anywhere. **The circuit still has 14-bit ones** (2.6 lists the change) |
+| stack limit | 24 bits | `SLIM`: a `PUSH`/`CALL` with `ESP` at or past it is not executed, it takes the FAULT vector (1.8). Reset value: the last RAM word |
+| enable latch, in-NMI latch | 1 bit each | interrupts on/off (`EI`, `DI`; off at reset) and "inside the NMI handler" (1.8) |
 | `MAR` | 25 bits | memory address register (inside the `RAM` subcircuit) |
 | `ACC`, `TMP` | 32 bits each | internal ALU latches, not visible to programs |
 
@@ -38,8 +40,9 @@ chooses the bank:
 
 ```
 0x0000000 ─ 0x0FFFFFF   ROM  16M × 32   program and constant data, read only
-0x1000000 ─ 0x1003FFF   RAM  stack area (16K words, indexed by ESP/EBP)
-0x1004000 ─ 0x1FFFFFF   RAM  free; the linker puts .ram data here
+0x1000000 ─ 0x1FFFFFF   RAM  free: the linker puts .ram data from 0x1000000, then the stack
+                        (16K words by default, `_stack_base` … `_stack_limit`), then
+                        the heap (`_end` on); no fixed stack area
 0x1100000 ─ 0x1FFFFFF   RAM  (by convention) where spawnv() loads programs for the OS
 ```
 
@@ -51,10 +54,12 @@ before it can run these programs, and `logisim/run_rom.py` refuses until then.
 * Reads work on both banks. Writes to ROM are dropped (the circuit raises a
   "tried writing in ROM" error line; the simulator ignores the write and notes
   it in the trace).
-* The stack is the first 16K words of RAM (`RAM[0x0000..0x3FFF]`). `ESP`
-  and `EBP` are 14-bit indices into it, so they wrap at 16K. `STK SET/GET`
-  addresses are not limited to the stack area: they wrap across the whole
-  RAM (see 1.6).
+* There is no stack area. `ESP` and `EBP` are 24-bit indices into RAM; whoever
+  starts a program decides where its stack is: the linker's start-up code for
+  a ROM image (after the program's data, `ESP = EBP = _stack_base`, the limit
+  `_stack_limit`), the OS for a program it loads (Phase 7 gives each its own).
+  A program for the OS runs on the stack of the program that started it.
+  `STK SET/GET` add `EBP` and `RB` and wrap across the whole RAM (see 1.6).
 * The IAR is 25 bits, so the CPU *can* fetch from RAM. The linker puts code
   there only for a program for the OS (`cc build --exe`, 4.6 and 10.4),
   which `spawnv()` loads from the disk at `0x1100000`.
@@ -99,7 +104,9 @@ followed by one 32-bit literal word, so they take 2 words.
 | C | `ALD RA, RB` | `R0 = mem[RA + RB]` (array load) |
 | D | `AST RA, RB` | `mem[RA + RB] = R0` (array store) |
 | E | `CPY RA, RB` | `RB = RA` |
-| F | `HALT` | stop until RESUME |
+| F | `HALT` | shutdown: stop until RESUME (in the simulator) or an NMI or a reset; see 1.8 |
+
+The free group `0x2` holds `RTI EI DI TRAP WAIT GSP SSP GBP SBP SLIM` (1.8).
 
 Jumps are **relative to the offset word itself**, not to the word after it.
 The flag mask for `RJF`/`RJNF` sits in the RB field (`C=8 A=4 N=2 Z=1`).
@@ -189,8 +196,8 @@ The sub-operation is in the RA field.
 
 The stack grows **upward** from RAM index 0. `SET`/`GET` are relative to
 `EBP`; negative `RB` reaches arguments below the frame. `EBP + RB` wraps at
-the RAM's address width, across the **entire RAM**, not just the 16K stack
-area: with `EBP = 0`, index `-1` reads or writes the last word of RAM
+the RAM's address width, across the **entire RAM** (the stack is not an
+area of its own any more): with `EBP = 0`, index `-1` reads or writes the last word of RAM
 (`0x1FFFFFF`) and index `0x8000` reaches `0x1008000`; bits of `RB` above 23
 are dropped. Measured on the 16-bit circuit with `diag11.asm` and
 `diag16.asm` (there it wraps at 16 bits: `-1` reaches `0x1FFFF`); the
@@ -250,6 +257,106 @@ number with a gate decoder (the keyboard: bits 0–3 must be 0, bits 4–7 must
 be 1).
 
 ---
+
+### 1.8 Interrupts, the stack registers and the stack limit (Phase 6)
+
+Built in the simulator and the toolchain (self-checks, the C library, the
+shell); **not on the circuit yet**: 2.6 is the list of what to build there.
+Nothing in this section has been measured on the circuit, it is the
+specification.
+
+**Instructions** (the free group `0x2`: prefix `010`, FLOAT bit on, ALU bit
+off; `0x2n` in the opcode field; no flags change):
+
+| op | mnemonic | effect |
+| --- | --- | --- |
+| 0 | `RTI` | pop the saved word: `IAR`, flags, enable bit and in-NMI bit come back; one instruction runs before the next interrupt |
+| 1 | `EI` | interrupts on (after the next instruction) |
+| 2 | `DI` | interrupts off |
+| 3 | `TRAP` | software interrupt: push the saved word with the address of the next instruction, vector 6 |
+| 4 | `WAIT` | sleep until an interrupt that can be taken (NMI always; IRQ with interrupts on) |
+| 5 | `GSP RB` | `RB = ESP` (a RAM index) |
+| 6 | `SSP RB` | `ESP = RB & 0xFFFFFF` |
+| 7 | `GBP RB` | `RB = EBP` |
+| 8 | `SBP RB` | `EBP = RB & 0xFFFFFF` |
+| 9 | `SLIM RB` | stack limit `= RB & 0xFFFFFF` |
+| A–F | | free |
+
+`HALT` is the shutdown: it stops the CPU whether interrupts are on or not,
+and only an NMI or a reset wakes it (every path to it in the C library
+closes the open files first, so a reset after it loses nothing). `WAIT` is
+the idle sleep.
+
+**Taking an interrupt.** Before it fetches an instruction the CPU looks
+for one, in this order: a fault (below); an NMI (not while inside an NMI
+handler); an IRQ (when the enable latch is on). Not for the one instruction
+after `RTI` or `EI`. Then it pushes **two words** on the stack at `ESP`
+(without the limit check), turns interrupts off and jumps to the vector.
+The first word holds the two device selections of `COMM` (`OUTADDR` in bits
+15–0, `INADDR` in 31–16): they are global state set by one instruction and
+used by the next, so an interrupt between `OUTADDR` and `OUTDATA` whose
+handler talks to another device would otherwise send the program's next
+word to the wrong device. `RTI` selects them again. The second word:
+
+```
+bit 31 30 29 28   flags C A N Z
+bit 27            the enable latch before
+bit 26            inside an NMI handler before
+bit 24..0         the address to return to
+```
+
+| vector (ROM address) | what | return address |
+| --- | --- | --- |
+| 0 | reset: `IAR = 0`, interrupts off, stack limit = last RAM word | |
+| 2 | NMI: not maskable; sets the in-NMI latch until its `RTI` | the instruction not yet fetched |
+| 4 | IRQ: the controller's line (below) | the instruction not yet fetched |
+| 6 | TRAP | the instruction after `TRAP` |
+| 8 | FAULT: a `PUSH` or `CALL` with `ESP` ≥ the limit; the instruction is not executed, and the limit goes back to the last RAM word so the handler has room (`SLIM` again) | the `PUSH`/`CALL` itself |
+
+Each vector holds an `RJMP` (2 words). The handler saves the registers it
+uses (the CPU saves only the two words above) and ends with `RTI`.
+
+**The interrupt controller** (a `COMM` device at `0xAC` and `0xAD`, 8
+sources, lower number = higher priority; 0 timer, 1 keyboard). A device
+raises its source: the request is *latched* and stays until acknowledged, so
+a device can't hold the line and starve the program (an event is one
+request); the IRQ line is `pending & enable`. And one instruction always
+runs after `RTI`/`EI`, so even a handler that never acknowledges lets the
+program crawl on.
+
+| port | `OUTDATA` | `INDATA` |
+| --- | --- | --- |
+| `0xAC` | acknowledge: clear the pending bits set in the word | bits 7–0 pending, 15–8 the number of the highest-priority pending *and* enabled source (`0xFF`: none), 23–16 the enable mask |
+| `0xAD` | set the enable mask (0 at reset) | the enable mask |
+
+The timer (`0x7C`, planned wiring): `OUTDATA` sets the interrupt period in
+milliseconds (0 = off, at reset); every period it raises source 0. A key
+typed raises source 1. The NMI is a button (Esc and a "NMI" button in the
+simulator window, `CPU.nmi()`; a Logisim Button on the circuit).
+
+**The simulator** looks for an interrupt before every instruction in
+`step()`, and between chunks of 4096 instructions in `run()` (translated
+blocks are never stopped in the middle; the instructions of this group are
+never translated, `translate.py` ends a block before them): an interrupt
+that arrives while a chunk runs is taken up to a chunk later than on the
+circuit. A fault is exact: it takes the vector before the next instruction in
+both. `WAIT` makes `run()` return when nothing can end it; `run_sleeping()`,
+the headless runner and `cc run` then sleep until the timer's next tick, or
+give up when only a key or the NMI could wake the CPU.
+
+**In C** (`<cpu.h>`, `compiler/libc/interrupt.asm`): `set_interrupt_handler(
+INT_NMI | INT_IRQ | INT_TRAP | INT_FAULT, fn)`, `interrupts_on()`,
+`interrupts_off()`, `wait_for_interrupt()`, `software_interrupt()`,
+`irq_enable(mask)`, `irq_ack(mask)`, `irq_pending()`,
+`timer_interrupt_every(ms)`, `set_stack_limit(address)`, `stack_pointer()`.
+A handler is `unsigned fn(void)` and runs with interrupts off; the entry
+code saves all 16 registers and the flags come back with `RTI`. It returns 0
+to go back where the program was, or an address to return to instead (the
+shell's NMI handler returns `_spawn_kill`'s). With no handler an NMI and a
+TRAP are ignored, an IRQ switches every source off, a FAULT halts.
+`compiler/examples/c/basics/interrupts.c` is the example. Programs for the
+OS (`--exe`) can't install handlers: the OS owns them (they would be writing
+to their own copy of the slots).
 
 ## 2. The circuit (`logisim/CPU.circ`)
 
@@ -480,6 +587,60 @@ around to the next fetch.
 ---
 
 
+### 2.6 Phase 6 on the circuit: what to build (not done yet)
+
+Everything in 1.8 exists in the simulator only. To build it on the circuit
+(after 2.4, which widens the banks):
+
+1. **Widen `ESP`/`EBP` to 24 bits**: the two registers, the subtractor
+   (`ESP − 1`), the decoder paths of `STK`, and the grounded padding bits of
+   the stack index (2.2's table: the 17-bit adder for `EBP + RB` grows to
+   25 bits). The stack is then any RAM word, not RAM `0x0000–0x3FFF`.
+2. **Four instructions on the stack registers** (`GSP SSP GBP SBP`): `ESP` and
+   `EBP` onto the bus into `RB`, and `RB` from the bus into them (the
+   `STK CALL`/`RET` sequences already do the second half through memory).
+3. **The stack limit**: a 24-bit register (`SLIM` loads it from `RB`; reset:
+   all ones) and a comparator `ESP ≥ limit` checked in step 1 of `PUSH` and
+   `CALL`; when true that instruction stops before it writes anything and the
+   FAULT request is set (and a fault entry loads the limit with all ones).
+4. **Interrupt state**: an enable latch (set by `EI`, cleared by `DI` and by
+   every entry, loaded by `RTI`, 0 at reset), an in-NMI latch (set by an NMI
+   entry, loaded by `RTI`), an `inhibit` flip-flop (set by `RTI`/`EI`,
+   cleared after the next instruction), a pending-NMI latch (set by the NMI
+   button's edge, cleared by the entry), the fault latch, and the `waiting`
+   flip-flop of `WAIT` (set by it, cleared by an NMI or `IRQ & enable`; like
+   the halt flip-flop, which only an NMI or RESET clears now).
+5. **Entry at fetch time** (pushing the two words of 1.8; the first needs the
+   two device-address registers of `COMM` readable, and `RTI` loads them back): before step 0, if `fault | (nmi_pending &
+   ~in_nmi & ~inhibit) | (irq & enable & ~inhibit)`, load `IR` with a
+   hard-wired opcode (say `0x2F00`, the free group's last) instead of
+   fetching, and do not increment `IAR`. The control section then sees one more
+   instruction (no extra microcode address bits). Its steps: write the saved
+   word (`IAR`, flags, enable, in-NMI, packed by a splitter/combiner onto the
+   bus) to `stack[ESP]` *without* the limit compare, `ESP + 1`, clear the
+   enable latch, set the in-NMI latch if it is an NMI, and load `IAR` with the
+   vector (2, 4 or 8, from a small priority mux: fault, NMI, IRQ). `TRAP`
+   is the same steps with the vector 6, entered by the instruction itself
+   (the `IAR` already points past it).
+6. **`RTI`**: `ESP − 1`, read the word, `IAR = word[24:0]`, flags from bits
+   31–28 (the flag register's set path), enable latch = bit 27, in-NMI latch
+   = bit 26, set `inhibit`. **`EI`/`DI`/`WAIT`** are one-step instructions.
+7. **The interrupt controller** as a `COMM` device at `0xAC`/`0xAD`: eight
+   latches (source *n* sets bit *n*; `OUTDATA` to `0xAC` clears the bits
+   written as 1), an enable register, `pending & enable` as the IRQ line, a
+   priority encoder (lowest number wins) and the status word of 1.8 on
+   `INDATA`.
+8. **Sources**: the timer (not built at all yet: a 32-bit millisecond counter
+   for `INDATA` at `0x7C`, a period register for `OUTDATA`, a comparator
+   that raises source 0 and restarts the count), the keyboard (a key typed
+   sets source 1), and the NMI button (a Logisim Button labelled `NMI`).
+9. **Microcode**: the new instructions need their own steps; the table in
+   `logisim/microcode/microcode.py` has no room (all 32 control bits are used),
+   so they go in a second ROM selected by `FLOAT = 1, ALU = 0`, with
+   its control lines (stack-register enables, limit load, latch controls,
+   vector select) and the interrupt state inputs added to the address.
+   `verify.py` does not know the group yet.
+
 ## 3. The simulator (`cpu_sim/src/`)
 
 A Python model of the ISA that runs one instruction per step (it does not
@@ -501,7 +662,7 @@ modules import each other by plain name, so run them as scripts
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 31 checks on the core |
+| `selftest.py` | 42 checks on the core |
 | `bench.py` | the simulator's speed on nine example programs (3.3) |
 
 ### 3.2 Execution model
@@ -521,9 +682,12 @@ ALU instructions call `alu.int_op` or `alu.float_op` with `a = R[RA]` and
 
 `CPU.run(max_steps, stop_at=())` does what calling `step()` `max_steps`
 times does, without building `Step` records or disassembling. It stops at
-`HALT`, at a stack wrap that stops the CPU, or before an address in
+`HALT`, at a `WAIT` that nothing ends yet, or before an address in
 `stop_at` (not checked for the first instruction, so a run can leave a
-breakpoint). Code that runs often is translated into Python
+breakpoint). It looks for interrupts between chunks of 4096 instructions
+(`INTERRUPT_CHUNK`; `step()` looks before every instruction), exactly one
+instruction after `RTI`/`EI`; `run_sleeping()` also lets a `WAIT`ing CPU sleep
+until the timer's next interrupt (what the headless runner and `cc run` use). Code that runs often is translated into Python
 (`translate.py`): once execution has jumped to an address 50 times
 (`translate.HOT`), the code from there becomes a *block*, one Python
 function, that goes through conditional jumps (a taken one leaves it) and
@@ -672,7 +836,6 @@ python cpu_sim/src/bench.py [names] [--scale F]   # CPython: fixed-length runs a
 | `A_FLAG_SIGNED` | `True`: `A` compares signed | confirmed |
 | `SHR_ARITHMETIC` | `False`: `SHR` is logical, the top bit fills with 0 | confirmed |
 | `DIV_TRUNCATE` | `True`: `DIV` truncates toward zero, `MOD` keeps the dividend's sign (`-7 MOD 3 = -1`) | confirmed |
-| `STOP_ON_STACK_WRAP` | `False`: ESP/EBP wrap at 14 bits | wrapping confirmed; `True` stops the simulated CPU instead, to catch a runaway stack while debugging |
 | `FLOAT_NOP_RESULT` | `0`: written to `R0` by float `SHR/++/--` and the undefined float opcodes | confirmed for the undefined opcodes (`diag16.asm`); on the circuit float `SHR/++/--` read back as `0xFFFFFFFF` with N and Z both on (an undriven bus?), which the simulator doesn't copy |
 
 ---
@@ -725,7 +888,7 @@ problems of all files (bad source, unreadable file, broken `.obj`), as
 | `objfile.py` | `ObjectFile` and `Reloc`, saved as readable JSON |
 | `linker.py` | object files → one ROM image, plus `format_raw` and `format_map` |
 | `errors.py` | `AsmError` (one message with file and line) and `AsmErrors` (a batch) |
-| `selftest.py` | 20 checks for the assembler and linker |
+| `selftest.py` | 22 checks for the assembler and linker |
 | `asm_grammar.py` | writes railroad diagrams of the grammar to `asm_grammar.html` (needs `pip install railroad-diagrams`) |
 
 ### 4.3 Assembling (two passes)
@@ -845,11 +1008,23 @@ only when true, so older object files still load.
 ### 4.6 Linking
 
 ```
-ROM  0x0000000 RJMP start           (2 words, added by the linker)
-     0x0000002 each file's ROM part, in command-line order
-RAM  0x1000000 stack (never touched by the linker)
-     0x1004000 each file's RAM part, in command-line order
+ROM  0x0000000 the vectors, 2 words each: reset (RJMP to the start-up code),
+               NMI, IRQ, TRAP, FAULT (RJMP to a ROM label `_nmi` `_irq` `_trap`
+               `_fault` if some file has it `.global`, else to a default
+               RTI, or HALT for the fault)
+     0x000000A the start-up code, 13 words: ESP = EBP = _stack_base, the stack
+               limit = _stack_limit, R1 = 0, RJMP start, then the default RTI
+               and HALT
+     0x0000017 each file's ROM part, in command-line order
+RAM  0x1000000 each file's RAM part, in command-line order
+     _stack_base the stack (`link(stack_words=0x4000)`), after the data
+     _stack_limit = _end: the first RAM word after the stack (malloc's heap)
 ```
+
+`_stack_base`, `_stack_limit` and `_end` are symbols of the linker (a file
+that defines `_end` itself keeps its own). A program for the OS
+(`link(base=...)`) has none of the vectors and start-up code: an entry jump
+at the base, as before, and `_end` after its data.
 
 0. For a library (`--lib`), choose the parts to keep: starting from every
    part of the other files (and `start`), follow the relocations of each
@@ -969,6 +1144,7 @@ Assembly is under `asm/` (`programs/`, `stdlib/`, `two_files/`, `tests/` for cir
 | `asm/tests/io_test.asm` | minimal keyboard → display loop for probing the circuit |
 | `c/basics/hello.c` | C: `printf("hello, world\n")` |
 | `c/basics/primes.c` | C: a sieve, `printf` with a width, the hex display (`cpu.h`) |
+| `c/basics/interrupts.c` | C: the CPU's interrupts (simulator only): `main` sleeps with `wait_for_interrupt()` while a C handler serves a 100 ms timer IRQ and the keyboard IRQ (`irq_enable`, `irq_ack`, `timer_interrupt_every`, `set_interrupt_handler`); prints the keys typed (`--keys abc`), five ticks, and that the stack pointer came back. Takes half a second of real time |
 | `c/graphics/gfx_demo.c` | C: the RGB screen with `gfx.h`: gradient, text, shapes, a sine wave (`--screen` saves the picture) |
 | `c/graphics/image_demo.c` | C: compressed pictures with `gfx_image` (7.4): a 256×256 Mandelbrot picture and a transparent 16×16 sprite from `c/graphics/images/` (the PNGs and the `.h` files made from them), clipped at the edges |
 | `c/basics/structs.c` | C: an array of structs, `qsort`, `malloc`, `printf("%.2f")` |
@@ -985,14 +1161,14 @@ Assembly is under `asm/` (`programs/`, `stdlib/`, `two_files/`, `tests/` for cir
 | `c/os/disk_notes.c` | C: files on the disk (simulator only, `--disk FILE` on a disk made by `python compiler/src/disk format`): prints `/notes.txt`, then adds each typed line to it (`!help` lists the commands: `!show`, `!ls`, `!clear`, `!quit`), so the next run shows them again |
 | `c/tests/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, `~` on registers, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
 | `asm/tests/diag10.asm` | `INT` on floats below 1 (diagnostic, resolved: they give 0) |
-| `asm/tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x1004000`; they are also printed in hex |
-| `asm/tests/diag12.asm` | what the C compiler relies on: reading and setting `ESP`/`EBP` with `STK CALL`/`STK RET`, stack slot `i` being RAM word `i` (address `0x1000000 + i` now, `0x10000 + i` on the 16-bit circuit), the carry flag after `CMP`/`SUB`/`ADD`, the `A` flag after `FCMP` (a float compare), `MULT`'s low 32 bits, `DIV` by `0x80000000`. Link it first; 30 results from `0x1004000`, also printed |
-| `asm/tests/diag13.asm` | the carry flag (and A N Z) after `SUB`, `--`, `++`, `NEG`, `SHL`, `SHR`, `MULT`, `ADD`, `AND`, `TEST`: on the circuit `SUB` sets C on a borrow and `CMP`/`--`/`NEG`/`MULT` never set it. Link it first; 24 results from `0x1004000`, also printed |
-| `asm/tests/diag14.asm` | float special cases: division by ±0, NaN, infinity, `INT` out of range, overflow, subnormals. Link it first; 22 results from `0x1004000`, also printed |
-| `asm/tests/diag15.asm` | more of the same after diag14: `INT` of -infinity and of large values, the remaining divisions by zero. Link it first; 15 results from `0x1004000`, also printed |
-| `asm/tests/diag16.asm` | where `STK SET/GET` put `EBP + RB` (on the 16-bit circuit it wraps at 16 bits, across all of RAM), R0 and flags after `DIV`, `MOD` and `NOT` (`MOD` by 0 gives 0; `NOT` inverts RA), the float opcodes with no defined result, float rounding (to nearest, ties to even). Link it first; 52 results from `0x1004000`, also printed |
-| `asm/tests/diag17.asm` | follow-up to diag16: `NOT` encoded with RA and RB both set (it inverts RA, not RB), `DIV`/`MOD` by 0 and `0x80000000` by -1, float opcodes 4, 5, B, C with other inputs (4 doubles RB). Link it first; 30 results from `0x1004000`, also printed |
-| `asm/tests/diag18.asm` | the flags after `OR` and `XOR`, and `NOT` as the assembler writes it now (register in both fields: `~Rx`, `A` = 0); all as the simulator. Link it first; 16 results from `0x1004000`, also printed |
+| `asm/tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x1000000`; they are also printed in hex |
+| `asm/tests/diag12.asm` | what the C compiler relies on: reading and setting `ESP`/`EBP` with `STK CALL`/`STK RET`, stack slot `i` being RAM word `i` (address `0x1000000 + i` now, `0x10000 + i` on the 16-bit circuit), the carry flag after `CMP`/`SUB`/`ADD`, the `A` flag after `FCMP` (a float compare), `MULT`'s low 32 bits, `DIV` by `0x80000000`. Link it first; 30 results from `0x1000000`, also printed |
+| `asm/tests/diag13.asm` | the carry flag (and A N Z) after `SUB`, `--`, `++`, `NEG`, `SHL`, `SHR`, `MULT`, `ADD`, `AND`, `TEST`: on the circuit `SUB` sets C on a borrow and `CMP`/`--`/`NEG`/`MULT` never set it. Link it first; 24 results from `0x1000000`, also printed |
+| `asm/tests/diag14.asm` | float special cases: division by ±0, NaN, infinity, `INT` out of range, overflow, subnormals. Link it first; 22 results from `0x1000000`, also printed |
+| `asm/tests/diag15.asm` | more of the same after diag14: `INT` of -infinity and of large values, the remaining divisions by zero. Link it first; 15 results from `0x1000000`, also printed |
+| `asm/tests/diag16.asm` | where `STK SET/GET` put `EBP + RB` (on the 16-bit circuit it wraps at 16 bits, across all of RAM), R0 and flags after `DIV`, `MOD` and `NOT` (`MOD` by 0 gives 0; `NOT` inverts RA), the float opcodes with no defined result, float rounding (to nearest, ties to even). Link it first; 52 results from `0x1000000`, also printed |
+| `asm/tests/diag17.asm` | follow-up to diag16: `NOT` encoded with RA and RB both set (it inverts RA, not RB), `DIV`/`MOD` by 0 and `0x80000000` by -1, float opcodes 4, 5, B, C with other inputs (4 doubles RB). Link it first; 30 results from `0x1000000`, also printed |
+| `asm/tests/diag18.asm` | the flags after `OR` and `XOR`, and `NOT` as the assembler writes it now (register in both fields: `~Rx`, `A` = 0); all as the simulator. Link it first; 16 results from `0x1000000`, also printed |
 
 All of these build and run correctly in the simulator. The `c/` programs
 are C: build them with `python compiler/src/cc build <file>` (or `run`,
@@ -1077,13 +1253,13 @@ repo.
 ### 7.3 Self-checks
 
 ```
-python compiler/src/asm/selftest.py   # 20 checks: encodings, values, strings, jumps,
+python compiler/src/asm/selftest.py   # 22 checks: encodings, the interrupt group, vectors and start-up code, values, strings, jumps,
                                       # CALL/RET, SAVE/RESTORE, linking, a program past
                                       # 64K words and the size limits, link errors
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 31 checks: immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 42 checks: interrupts (TRAP/RTI, the timer IRQ, the held-line guard, masking, NMI, HALT wake, WAIT, the stack limit, SSP/GSP, the controller), 24-bit stack, immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
                                       # floats, FCMP flags, keyboard, backspace, key codes (arrows, Ctrl), the display's
                                       # backspace and form feed, ADDR/JMRB,
@@ -1097,7 +1273,7 @@ python cpu_sim/src/selftest.py        # 31 checks: immediates, flags, carry flag
                                       # the LD trace note when RA == RB, the window's pacing (settle(), screen_due()), step_line (C line
                                       # stepping: line, breakpoint, halt, limit), isa.py against the assembler's
                                       # encoding.py tables (names, groups, one/two-word shapes)
-python compiler/src/cc/selftest.py    # 17 checks: preprocessor, error messages (several per run), warnings,
+python compiler/src/cc/selftest.py    # 18 checks: interrupts from C (WAIT, timer and key IRQ, TRAP, the stack limit fault), preprocessor, error messages (several per run), warnings,
                                       # type sizes, exit/atexit, strtoul overflow limits, the 256 x 256 screen's edges (clipped, not
                                       # wrapped), keyboard input, globals
                                       # after a reset, library override, reserved names,
@@ -1113,7 +1289,7 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 17 checks: format (sparse, the superblock), text and
+python compiler/src/disk/selftest.py  # 19 checks: fs_reclaim() and the NMI kill of a spinning program through the shell, format (sparse, the superblock), text and
                                       # binary round trips (block edges), overwriting frees
                                       # blocks, a directory past one block (entries reused),
                                       # subdirectories, . and .., mv, name rules, disk full, CLI,
@@ -1319,7 +1495,8 @@ ISA, not generated from the circuit. Where they disagree, the circuit wins.
 | topic | simulator | circuit |
 | --- | --- | --- |
 | keyboard codes 28–31 (arrows) and 1–26 (Ctrl+letter) | buffered (`devices.key_code`) | **not measured**: the Logisim `Keyboard` gives 7-bit ASCII, but whether it buffers control characters, or arrow keys at all, is unknown (a diagnostic that echoes `INDATA` as hex would tell) |
-| `A` signed, `SHR` logical, `DIV`/`MOD` truncate, stack wraps | as in 3.4 | confirmed (2026-10-02) |
+| `A` signed, `SHR` logical, `DIV`/`MOD` truncate | as in 3.4 | confirmed (2026-10-02) |
+| `ESP`/`EBP` width | 14 bits on the circuit (wrap at 16K words) | measured (2026-10-02). The simulator has 24 bits since Phase 6 (the stack limit replaces the wrap); the circuit gets them with the Phase 6 changes (2.6) |
 | `INT` (float → int) | truncates toward zero | confirmed: truncates (`diag10.asm`, `diag11.asm`) |
 | `STK SET/GET`: where `EBP + RB` lands | wraps at 16 bits, across all of RAM | confirmed (`diag11.asm`, `diag16.asm`, 2026-10-13). The simulator used to wrap it at 14 bits, inside the stack area; it now matches the circuit |
 | does `STK GET` also write `RB`? | no | no: fixed in the circuit (STK GET/SET/PUSH no longer misuse RB) |
@@ -1538,9 +1715,10 @@ per group of functions: `printf.c`, `format.c`, `fdigits.c`, `scanf.c`,
 `string.c`, `malloc.c`, `math.c`, `gfx.c`, `gfx_text.c` and `gfx_image.c` for the RGB
 screen, `fs.c` (files on the disk, TFS1 as in 7.6, `stat` and `statvfs`) and `dir.c`
 (directories), ...), `local.h` (shared by the library
-files only) and four assembly files: `runtime.asm` (`_pow2`, `_udiv`,
+files only) and five assembly files: `runtime.asm` (`_pow2`, `_udiv`,
 `_umod`), `memory.asm` (`memcpy` and `memset`, 6 instructions a word instead of the
-13 and 9 of the compiled loops), `setjmp.asm`, and `spawn.asm` (the jumps of `spawn.c`'s `spawnv`,
+13 and 9 of the compiled loops), `setjmp.asm`, `interrupt.asm` (the vector stubs and
+`set_interrupt_handler` & co. of `<cpu.h>`, 1.8), and `spawn.asm` (the jumps of `spawn.c`'s `spawnv`,
 10.4). `_Exit` is in the generated crt0.
 
 * The driver compiles each library file the first time it is needed and
@@ -1595,8 +1773,17 @@ files only) and four assembly files: `runtime.asm` (`_pow2`, `_udiv`,
 
 The OS is called Tynix (after tiny C; the shell's banner says `Tynix
 shell`). Simulator only (it needs the disk, 1.7 and 7.6). One program at a time,
-like CP/M or MS-DOS: there are no interrupts and no memory protection, so
-no multitasking.
+like CP/M or MS-DOS, with no memory protection. Since Phase 6 the CPU has
+interrupts (1.8), and the shell uses one: the NMI (Esc or the window's NMI
+button) while a program runs asks `[NAME: 1 kill, 2 continue]`; 1 ends the
+program with status 130 (the handler returns `_spawn_kill`'s address, so the
+RTI lands in code that `longjmp`s back into `spawnv`), and the shell then runs
+`fs_reclaim()` (freeing blocks nothing points to, which a program killed while
+it wrote can leave) and prints `[killed: freed N lost blocks]` if there were
+any. The shell runs `fs_reclaim()` at boot too (`[boot: ...]`). With no
+program running an NMI is ignored. Programs still can't be paused and
+resumed or run side by side: that is Phase 7 (several programs in RAM, a
+scheduler on the timer interrupt).
 
 | file | what it is |
 | --- | --- |

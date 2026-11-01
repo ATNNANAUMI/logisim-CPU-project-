@@ -1,5 +1,6 @@
-"""The CPU itself: 16 registers, 25-bit IAR, C A N Z flags, a RAM stack."""
+"""The CPU itself: 16 registers, 25-bit IAR, C A N Z flags, a RAM stack, interrupts."""
 
+import time
 from dataclasses import dataclass, field
 
 import alu as alu
@@ -30,12 +31,21 @@ class CPU:
     regs: list[int] = field(default_factory=lambda: [0] * 16)
     iar: int = 0
     flags: int = 0          # C A N Z, bit3 .. bit0
-    esp: int = 0
+    esp: int = 0            # 24-bit indices into RAM (the stack can be anywhere)
     ebp: int = 0
+    slimit: int = config.STACK_LIMIT_RESET   # a PUSH/CALL at ESP >= this faults (SLIM)
+
+    # interrupts (TECHNICAL 1.8)
+    ie: int = 0             # the enable latch (EI/DI); off at reset
+    in_nmi: int = 0         # inside an NMI handler: the next NMI waits for its RTI
+    inhibit: int = 0        # 1 right after RTI/EI: one instruction runs before the next one
+    waiting: bool = False   # WAIT: asleep until an interrupt
+    nmi_pending: bool = False
+    fault_pending: bool = False     # a PUSH/CALL went past the limit (vector 8)
 
     breakpoints: set = field(default_factory=set)   # addresses to stop before
     halted: bool = False
-    stopped: bool = False   # hard stop (stack wrap, when enabled)
+    stopped: bool = False   # hard stop (nothing sets it now: the stack limit faults instead)
     error: str = ""
     instructions: int = 0
 
@@ -61,6 +71,9 @@ class CPU:
         self.iar = 0
         self.flags = 0
         self.esp = self.ebp = 0
+        self.slimit = config.STACK_LIMIT_RESET
+        self.ie = self.in_nmi = self.inhibit = 0
+        self.waiting = self.nmi_pending = self.fault_pending = False
         self.halted = self.stopped = False
         self.error = ""
         self.instructions = 0
@@ -132,6 +145,87 @@ class CPU:
     def resume(self) -> None:
         self.halted = False
 
+    def nmi(self) -> None:
+        """The non-maskable interrupt (the kill switch): taken before the next
+        instruction, and the only thing besides a reset that wakes a HALT."""
+        self.nmi_pending = True
+        self.halted = False
+        self.waiting = False
+
+    # ----------------------------------------------------------- interrupts
+    def _enter(self, vector: int, return_to: int) -> None:
+        """What the hardware does for an interrupt: push two words, turn
+        interrupts off and jump to the vector. First the selected devices
+        (COMM's OUTADDR in bits 15-0, INADDR in 31-16: they are global state
+        and OUTADDR + OUTDATA are two instructions, so a handler that talks
+        to a device must not leave the program's selection changed), then the
+        word with the address to return to (bits 24-0), in-NMI (26), the enable
+        bit (27) and the flags C A N Z (31-28). No stack limit check for
+        these pushes; the FAULT vector also switches the limit off (SLIM sets
+        it again), so its handler can use the stack."""
+        bus, ram, mask = self.bus, self.mem.ram, config.BANK_MASK
+        first, second = self.esp, (self.esp + 1) & mask
+        ram[first] = bus.out_addr & 0xFFFF | (bus.in_addr & 0xFFFF) << 16
+        ram[second] = return_to | self.in_nmi << 26 | self.ie << 27 | self.flags << 28
+        self._stored(config.RAM_BIT | first)
+        self._stored(config.RAM_BIT | second)
+        self.esp = (second + 1) & mask
+        self.ie = 0
+        if vector == config.VECTOR_NMI:
+            self.in_nmi = 1
+        elif vector == config.VECTOR_FAULT:
+            self.slimit = config.STACK_LIMIT_RESET      # the handler needs room: SLIM sets a new one
+        self.iar = vector
+        self.instructions += 1
+
+    def _return(self) -> None:
+        """RTI: pop the two words _enter() pushed."""
+        mask = config.BANK_MASK
+        self.esp = (self.esp - 1) & mask
+        word = self.mem.ram[self.esp]
+        self.esp = (self.esp - 1) & mask
+        devices = self.mem.ram[self.esp]
+        self.bus.out_address(devices & 0xFFFF)
+        self.bus.in_address(devices >> 16)
+        self.iar = word & config.ADDR_MASK
+        self.in_nmi = word >> 26 & 1
+        self.ie = word >> 27 & 1
+        self.flags = word >> 28 & 0xF
+        self.inhibit = 1
+
+    def _service(self, blocked: int):
+        """Take the interrupt that is due, if there is one: returns its
+        vector or None. A fault (stack limit) is due at once; the others wait
+        one instruction after RTI/EI (blocked), the NMI also for the end of
+        the NMI handler, and an IRQ needs the enable latch."""
+        if self.fault_pending:
+            self.fault_pending = False
+            vector = config.VECTOR_FAULT
+        elif blocked:
+            return None
+        elif self.nmi_pending and not self.in_nmi:
+            self.nmi_pending = False
+            vector = config.VECTOR_NMI
+        elif self.ie and self.bus.irq_line():
+            vector = config.VECTOR_IRQ
+        else:
+            return None
+        self._enter(vector, self.iar)
+        return vector
+
+    def _wake(self) -> bool:
+        """Is something there that ends a WAIT?"""
+        if (self.nmi_pending and not self.in_nmi) or (self.ie and self.bus.irq_line()):
+            self.waiting = False
+            return True
+        return False
+
+    def idle_seconds(self):
+        """For a caller that finds the CPU asleep (WAIT): how long to wait
+        before the timer raises something, or None when only a key or the NMI
+        can wake it."""
+        return self.bus.timer.until_tick() if self.ie else None
+
     def flag(self, name: str) -> bool:
         return bool(self.flags & isa.FLAG_BITS[name])
 
@@ -150,6 +244,16 @@ class CPU:
         """Execute one instruction.  Returns None while halted or stopped."""
         if self.halted or self.stopped:
             return None
+        blocked, self.inhibit = self.inhibit, 0
+        if self.waiting and not self._wake():
+            return None
+        address = self.iar
+        vector = self._service(blocked)
+        if vector is not None:
+            names = {config.VECTOR_NMI: "NMI", config.VECTOR_IRQ: "IRQ",
+                     config.VECTOR_FAULT: "FAULT"}
+            return Step(address, 0, None, f"<{names[vector]}>",
+                        f"pushed 0x{address:0{config.ADDR_DIGITS}X}, jump to {vector}")
 
         address = self.iar
         word = self._fetch()
@@ -161,20 +265,70 @@ class CPU:
             operand = self._fetch()
 
         note = self._execute(ins, operand, operand_addr)
+        if self.fault_pending:          # a PUSH/CALL past the limit: not executed, not counted
+            self._service(0)
+            return Step(address, word, operand, disassemble(word, operand),
+                        f"{note}, jump to {config.VECTOR_FAULT}")
         self.instructions += 1
         return Step(address, word, operand, disassemble(word, operand), note)
 
     def run(self, max_steps: int = 1_000_000, stop_at=()) -> int:
-        """Execute up to max_steps instructions; returns how many ran.
+        """Execute up to max_steps instructions; returns how many ran (taking
+        an interrupt counts as one).
 
         Does what calling step() max_steps times does, much faster: code
         that has run often runs as translated blocks (translate.py), the
         rest (cold code, the last instructions before max_steps, and
         everything when there are breakpoints) through _interpret(). It
-        stops early at HALT, at a stack wrap (when that stops the CPU), or
-        before an instruction whose address is in stop_at (not checked for
-        the first one, so a run can leave a breakpoint).
+        stops early at HALT, at a WAIT that nothing ends yet, or before an
+        instruction whose address is in stop_at (not checked for the first
+        one, so a run can leave a breakpoint).
+
+        Interrupts are looked for between chunks of config.INTERRUPT_CHUNK
+        instructions (step() looks before every instruction), so one that
+        arrives while a chunk runs is taken up to a chunk later.
         """
+        total = 0
+        while total < max_steps:
+            if self.halted or self.stopped:
+                break
+            blocked, self.inhibit = self.inhibit, 0
+            if self.waiting and not self._wake():
+                break
+            if self._service(blocked) is not None:
+                total += 1
+                if total >= max_steps:
+                    break
+            if stop_at and total and self.iar in stop_at:
+                break
+            # after RTI/EI exactly one instruction runs before interrupts are looked for
+            chunk = 1 if blocked else config.INTERRUPT_CHUNK
+            done = self._run(min(max_steps - total, chunk), stop_at)
+            total += done
+            if self.halted or self.stopped or self.waiting:
+                break
+            if done == 0 and not self.fault_pending:
+                break
+        return total
+
+    def run_sleeping(self, max_steps: int = 1_000_000) -> int:
+        """run(), but a CPU that goes to sleep (WAIT) is let sleep until the
+        timer raises something, as a real one would; it gives up when nothing
+        can wake it (no timer, no enabled interrupts: only a key or the NMI
+        from outside could). Returns the instructions run."""
+        done = 0
+        while done < max_steps:
+            done += self.run(max_steps - done)
+            if not self.waiting:
+                break
+            sleep = self.idle_seconds()
+            if sleep is None:
+                break
+            time.sleep(min(sleep, 0.05))
+        return done
+
+    def _run(self, max_steps: int, stop_at=()) -> int:
+        """run() without the interrupt check: one chunk."""
         if self.halted or self.stopped:
             return 0
         if stop_at:
@@ -204,8 +358,8 @@ class CPU:
                 if tree is not None:
                     iar, flags, esp, ebp, count, stopped = tree(
                         regs, rom, ram, flags, esp, ebp, self, iar, count, max_steps)
-                    if stopped:                     # HALT, a stop, or RAM code rewritten
-                        if self.halted or self.stopped:
+                    if stopped:                     # HALT, a fault, or RAM code rewritten
+                        if self.halted or self.stopped or self.fault_pending:
                             break
                         continue
                     if count >= max_steps:
@@ -227,7 +381,8 @@ class CPU:
                         iar, flags, esp, ebp = self.iar, self.flags, self.esp, self.ebp
                         count += done
                         interpreted += done
-                        if self.halted or self.stopped:
+                        if (self.halted or self.stopped or self.waiting or self.fault_pending
+                                or self.inhibit):
                             break
                         continue
                     code[iar] = block
@@ -250,7 +405,7 @@ class CPU:
                 except Stop as stop:                # HALT, a stop, or RAM code rewritten
                     iar, flags, esp, ebp, done = stop.args
                     count += done
-                    if self.halted or self.stopped:
+                    if self.halted or self.stopped or self.fault_pending:
                         break
                     continue
                 count += done
@@ -282,7 +437,7 @@ class CPU:
         int_op, float_op = alu.int_op, alu.float_op
         int_names, float_names = isa.INT_OPS, isa.FLOAT_OPS
         MASK, SIGN = config.WORD_MASK, config.SIGN_BIT
-        ADDR_MASK, STACK_MASK = config.ADDR_MASK, config.STACK_MASK
+        ADDR_MASK = config.ADDR_MASK
         RAM_BIT, BANK_MASK = config.RAM_BIT, config.BANK_MASK
         INDEX_MASK = config.STACK_INDEX_MASK
         a_signed, shr_arith = config.A_FLAG_SIGNED, config.SHR_ARITHMETIC
@@ -291,6 +446,8 @@ class CPU:
             code, heat = self._code, self._heat
             hot = translate.HOT
         marks = self._ram_code              # RAM words translated code was made from
+        slimit = self.slimit
+        inhibited = -1                      # the count at which RTI/EI ran last
 
         iar, flags, esp, ebp = self.iar, self.flags, self.esp, self.ebp
         count = 0
@@ -370,7 +527,46 @@ class CPU:
                     flags = carry | (4 if bigger else 0) | ((value >> 30) & 2) | (value == 0)
                     continue
 
-                if op == 0x3:                               # DATA
+                if word & 0x2000 and op < 10:               # interrupts, ESP/EBP/limit
+                    if op == 0:                             # RTI
+                        esp = (esp - 2) & BANK_MASK
+                        back = ram[(esp + 1) & BANK_MASK]
+                        bus.out_address(ram[esp] & 0xFFFF)
+                        bus.in_address(ram[esp] >> 16)
+                        iar = back & ADDR_MASK
+                        self.in_nmi = back >> 26 & 1
+                        self.ie = back >> 27 & 1
+                        flags = back >> 28 & 0xF
+                        inhibited = count
+                        break                               # run() looks for interrupts
+                    elif op == 1:                           # EI
+                        self.ie = 1
+                        inhibited = count
+                        break
+                    elif op == 2:                           # DI
+                        self.ie = 0
+                    elif op == 3:                           # TRAP: vector 6, back to the next word
+                        ram[esp] = bus.out_addr & 0xFFFF | (bus.in_addr & 0xFFFF) << 16
+                        ram[(esp + 1) & BANK_MASK] = iar | self.in_nmi << 26 | self.ie << 27 | flags << 28
+                        if marks is not None and (marks[esp] or marks[(esp + 1) & BANK_MASK]):
+                            self._code_written(esp)
+                        esp = (esp + 2) & BANK_MASK
+                        self.ie = 0
+                        iar = config.VECTOR_TRAP
+                    elif op == 4:                           # WAIT
+                        self.waiting = True
+                        break
+                    elif op == 5:                           # GSP
+                        regs[rb] = esp
+                    elif op == 6:                           # SSP
+                        esp = regs[rb] & BANK_MASK
+                    elif op == 7:                           # GBP
+                        regs[rb] = ebp
+                    elif op == 8:                           # SBP
+                        ebp = regs[rb] & BANK_MASK
+                    else:                                   # SLIM
+                        slimit = self.slimit = regs[rb] & BANK_MASK
+                elif op == 0x3:                             # DATA
                     regs[rb] = ram[iar & BANK_MASK] if iar & RAM_BIT else rom[iar]
                     iar = (iar + 1) & ADDR_MASK
                 elif op == 0xC:                             # ALD
@@ -408,28 +604,32 @@ class CPU:
                 elif op == 0xB:                             # STK
                     kind = (word >> 4) & 7
                     if kind == 0:                           # PUSH
+                        if esp >= slimit:                   # past the limit: not executed
+                            self.fault_pending = True
+                            iar = (iar - 1) & ADDR_MASK
+                            count -= 1
+                            break
                         ram[esp] = regs[0]
                         if marks is not None and marks[esp]:
                             self._code_written(esp)
                         esp += 1
-                        if esp > STACK_MASK:
-                            esp = self._bump(esp - 1, +1)
                     elif kind == 1:                         # POP
-                        esp -= 1
-                        if esp < 0:
-                            esp = self._bump(esp + 1, -1)
+                        esp = (esp - 1) & BANK_MASK
                         regs[0] = ram[esp]
                     elif kind == 2:                         # CALL (frame only)
+                        if esp >= slimit:
+                            self.fault_pending = True
+                            iar = (iar - 1) & ADDR_MASK
+                            count -= 1
+                            break
                         ram[esp] = ebp
                         if marks is not None and marks[esp]:
                             self._code_written(esp)
                         ebp = esp
                         esp += 1
-                        if esp > STACK_MASK:
-                            esp = self._bump(esp - 1, +1)
                     elif kind == 3:                         # RET
                         esp = ebp
-                        ebp = ram[ebp] & STACK_MASK
+                        ebp = ram[ebp] & BANK_MASK
                     elif kind == 4:                         # SET
                         addr = (ebp + regs[rb]) & INDEX_MASK
                         ram[addr] = regs[0]
@@ -437,8 +637,6 @@ class CPU:
                             self._code_written(addr)
                     elif kind == 5:                         # GET
                         regs[0] = ram[(ebp + regs[rb]) & INDEX_MASK]
-                    if self.stopped:
-                        break
                 elif op == 0x8:                             # COMM
                     mode = (word >> 4) & 3
                     if mode == 2:
@@ -480,6 +678,7 @@ class CPU:
         finally:
             self.iar, self.flags, self.esp, self.ebp = iar, flags, esp, ebp
             self.instructions += count
+            self.inhibit = 1 if inhibited == count else 0
         return count
 
     # ----------------------------------------------------------- execution
@@ -555,6 +754,38 @@ class CPU:
             self.halted = True
             return "halted"
 
+        if name == "RTI":
+            self._return()
+            return f"back to 0x{self.iar:0{config.ADDR_DIGITS}X}"
+        if name == "EI":
+            self.ie = self.inhibit = 1
+            return "interrupts on"
+        if name == "DI":
+            self.ie = 0
+            return "interrupts off"
+        if name == "TRAP":
+            self._enter(config.VECTOR_TRAP, self.iar)
+            self.instructions -= 1              # step() counts the TRAP itself
+            return f"jump to {config.VECTOR_TRAP}"
+        if name == "WAIT":
+            self.waiting = True
+            return "waiting"
+        if name == "GSP":
+            self.regs[rb] = self.esp
+            return ""
+        if name == "SSP":
+            self.esp = self.regs[rb] & config.BANK_MASK
+            return ""
+        if name == "GBP":
+            self.regs[rb] = self.ebp
+            return ""
+        if name == "SBP":
+            self.ebp = self.regs[rb] & config.BANK_MASK
+            return ""
+        if name == "SLIM":
+            self.slimit = self.regs[rb] & config.BANK_MASK
+            return f"stack limit 0x{self.slimit:X}"
+
         return ""
 
     # ---------------------------------------------------------------- parts
@@ -588,28 +819,41 @@ class CPU:
         self.regs[rb] = value & config.WORD_MASK
         return f"R{rb} <- 0x{value:X}"
 
+    def _overflow(self) -> str:
+        """A PUSH or CALL at or past the stack limit is not executed: the
+        FAULT vector is taken before the next instruction, with the address
+        of this one saved (the PUSH/CALL has no operand word)."""
+        self.fault_pending = True
+        self.iar = (self.iar - 1) & config.ADDR_MASK
+        return "stack limit reached"
+
     def _stack(self, op: int, rb: int) -> str:
         name = isa.STK_OPS.get(op)
+        mask = config.BANK_MASK
 
         if name == "PUSH":
+            if self.esp >= self.slimit:
+                return self._overflow()
             self.mem.stack_write(self.esp, self.regs[0])
-            self._stored(config.RAM_BIT | self.esp & config.STACK_INDEX_MASK)
-            self.esp = self._bump(self.esp, +1)
+            self._stored(config.RAM_BIT | self.esp)
+            self.esp += 1
             return ""
         if name == "POP":
-            self.esp = self._bump(self.esp, -1)
+            self.esp = (self.esp - 1) & mask
             self.regs[0] = self.mem.stack_read(self.esp)
             return ""
         if name == "CALL":                      # frame only, no jump
+            if self.esp >= self.slimit:
+                return self._overflow()
             self.mem.stack_write(self.esp, self.ebp)
-            self._stored(config.RAM_BIT | self.esp & config.STACK_INDEX_MASK)
+            self._stored(config.RAM_BIT | self.esp)
             self.ebp = self.esp
-            self.esp = self._bump(self.esp, +1)
-            return f"frame at 0x{self.ebp:04X}"
+            self.esp += 1
+            return f"frame at 0x{self.ebp:06X}"
         if name == "RET":
             self.esp = self.ebp
-            self.ebp = self.mem.stack_read(self.ebp) & config.STACK_MASK
-            return f"frame back to 0x{self.ebp:04X}"
+            self.ebp = self.mem.stack_read(self.ebp) & mask
+            return f"frame back to 0x{self.ebp:06X}"
         if name == "SET":                       # EBP + RB, wrapping across all RAM
             index = (self.ebp + self.regs[rb]) & config.STACK_INDEX_MASK
             self.mem.stack_write(index, self.regs[0])
@@ -620,12 +864,3 @@ class CPU:
             self.regs[0] = self.mem.stack_read(index)
             return f"R0 <- stack[0x{index:0{config.ADDR_DIGITS - 1}X}]"
         return "undefined stack op"
-
-    def _bump(self, pointer: int, delta: int) -> int:
-        new = pointer + delta
-        if not 0 <= new <= config.STACK_MASK:
-            if config.STOP_ON_STACK_WRAP:
-                self.stopped = True
-                self.error = "stack pointer wrapped"
-            new &= config.STACK_MASK
-        return new

@@ -19,7 +19,7 @@ circuit.
 32-bit words, 16 registers (`R0`–`R15`), a 25-bit address bus where bit 24
 picks RAM (`0x1000000`–`0x1FFFFFF`) over ROM (`0x0000000`–`0x0FFFFFF`), 16M
 words each (the circuit itself still has the 16-bit version), four flags
-(`C A N Z`), a hardware stack in the first 16K words of RAM, integer and
+(`C A N Z`), a hardware stack that can sit anywhere in RAM (with a limit register), interrupts (IRQ with a timer and the keyboard, an NMI kill switch, TRAP; simulator only so far), integer and
 IEEE-754 float ALUs, and I/O through a single `COMM` instruction: a text
 display at `0x5C`, a hex number display at `0x3C` and a keyboard at `0xF0`
 (plus a 256×256 RGB screen at `0x6C`, drawn on from C with `gfx.h`, and a

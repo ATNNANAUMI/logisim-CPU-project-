@@ -245,14 +245,20 @@ def check_linking():
     helper: RET
     """
     rom = build(main, lib).rom
-    # ROM: entry jump 0-1, main 2-14, lib from 15 (helper = 15).
-    # RAM: var 0x1004000-0x1004001, table 0x1004002.
-    assert rom[0:2] == [0x0400, 1]                    # RJMP start: 2 - 1
-    assert rom[2:4] == [0x0301, 0x1004001]            # DATA R1, var + 1
-    assert rom[5] == 11                               # CALL's return address
-    assert rom[9] == 15                               # CALL's target: helper
-    assert rom[12] == 15 - 12                         # RJMP helper, from its offset word at 12
-    assert rom[13:15] == [0x0302, 0x1004002]          # DATA R2, table
+    # ROM: vectors and start-up code 0-22, main 23-35, lib from 36 (helper = 36).
+    # RAM: var 0x1000000-0x1000001, table 0x1000002, then the stack (16K words).
+    h = linker.ROM_HEADER
+    assert h == 23
+    assert rom[0:2] == [0x0400, 9]                    # RJMP to the start-up code at 10
+    assert rom[10:17] == [0x0301, 5, 0x2601, 0x2801, 0x0301, 5 + 0x4000, 0x2901]
+    assert rom[19:21] == [0x0400, h - 20]             # RJMP start
+    assert rom[21:23] == [0x2000, 0x0F00]             # the default handlers: RTI, HALT
+    assert rom[2:10] == [0x0400, 21 - 3, 0x0400, 21 - 5, 0x0400, 21 - 7, 0x0400, 22 - 9]
+    assert rom[h:h + 2] == [0x0301, 0x1000001]        # DATA R1, var + 1
+    assert rom[h + 3] == 11 + 21                      # CALL's return address
+    assert rom[h + 7] == 15 + 21                      # CALL's target: helper
+    assert rom[h + 10] == 15 - 12                     # RJMP helper, from its offset word
+    assert rom[h + 11:h + 13] == [0x0302, 0x1000002]  # DATA R2, table
 
 
 def check_big_program():
@@ -271,20 +277,63 @@ def check_big_program():
     """
     program = build(main)
     rom = program.rom
-    far = 2 + 3 + 100000                              # entry jump, DATA + JMRB, pad
-    assert rom[2:4] == [0x0301, far] and rom[far:far + 2] == [0x0302, 0x1004000 + 200000]
-    assert program.ram_used == 200001
+    h = linker.ROM_HEADER
+    far = h + 3 + 100000                              # vectors, DATA + JMRB, pad
+    assert rom[h:h + 2] == [0x0301, far] and rom[far:far + 2] == [0x0302, 0x1000000 + 200000]
+    assert program.ram_used == 200001 + linker.STACK_WORDS
     expect_link_error(["        .global start\nstart:  HALT\nbig: .space 0xFFFFFF"],
                       "only 16777216 fit")
     expect_link_error(["        .global start\nstart:  HALT\n        .ram\nbig: .space 0xFFC001"],
-                      "fit above the stack")
+                      "RAM data and stack need")
 
 
 def check_entry_when_start_is_not_first():
     lib = "        .global f\nf:      RET\n"
     main = "        .global start\n        .extern f\nstart:  CALL f\n"
     rom = build(lib, main).rom
-    assert rom[0:2] == [0x0400, 7]                    # start = 2 + 6 = 8, 8 - 1
+    h = linker.ROM_HEADER
+    assert rom[19:21] == [0x0400, h + 6 - 20]         # start = h + 6 (after f), from the offset word at 20
+
+
+def check_interrupt_instructions():
+    """Phase 6: the instructions of group 0x2 (prefix 010)."""
+    assert words_of("RTI\nEI\nDI\nTRAP\nWAIT") == [0x2000, 0x2100, 0x2200, 0x2300, 0x2400]
+    assert words_of("GSP R3\nSSP R4\nGBP R5\nSBP R6\nSLIM R7") == \
+        [0x2503, 0x2604, 0x2705, 0x2806, 0x2907]
+    expect_error("        RTI R1", "RTI")
+    expect_error("        GSP", "GSP")
+
+
+def check_vectors_and_startup_code():
+    """The linker's vectors (0-9) and start-up code, and the handlers it finds."""
+    main = """
+            .global start, _irq, _fault
+            .ram
+    v:      .space 10
+            .rom
+    start:  HALT
+    _irq:   RTI
+    _fault: HALT
+    """
+    program = build(main)
+    rom, h = program.rom, linker.ROM_HEADER
+    addr = {sym.name: sym.address for sym in program.symbols}
+    assert rom[0:2] == [0x0400, 9]                                  # reset -> start-up code
+    assert rom[2:4] == [0x0400, 21 - 3]                             # NMI: the default RTI
+    assert rom[4:6] == [0x0400, addr["_irq"] - 5]                   # IRQ: _irq
+    assert rom[6:8] == [0x0400, 21 - 7]                             # TRAP: the default RTI
+    assert rom[8:10] == [0x0400, addr["_fault"] - 9]                # FAULT: _fault
+    assert rom[10:17] == [0x0301, 10, 0x2601, 0x2801, 0x0301, 10 + linker.STACK_WORDS, 0x2901]
+    assert addr["_stack_base"] == linker.RAM_BASE + 10
+    assert addr["_stack_limit"] == addr["_end"] == linker.RAM_BASE + 10 + linker.STACK_WORDS
+    assert rom[h:h + 3] == [0x0F00, 0x2000, 0x0F00]
+    assert linker.link([assemble(main, "m.asm")[0]], stack_words=100).ram_used == 110
+    expect_link_error(["        .global start, _irq\nstart: HALT\n        .ram\n_irq: .space 1"],
+                      "must be in ROM")
+    # a program for the OS has neither vectors nor start-up code
+    exe = linker.link([assemble("        .global start\nstart: HALT", "m.asm")[0]],
+                      base=linker.PROGRAM_BASE)
+    assert len(exe.rom) == 3 and exe.ram_used == 0
 
 
 def check_errors():
@@ -392,7 +441,7 @@ def check_library_parts():
     unused_lib = assemble(lib, "lib.asm")[0]
     tiny = linker.link([assemble("        .global start\nstart: HALT", "m.asm")[0], unused_lib],
                        [unused_lib])
-    assert len(tiny.rom) == 3 and len(alone.rom) > 3
+    assert len(tiny.rom) == linker.ROM_HEADER + 1 and len(alone.rom) > linker.ROM_HEADER + 1
 
 
 def linker_signed(v):
@@ -518,6 +567,8 @@ CHECKS = [
     check_linking,
     check_big_program,
     check_entry_when_start_is_not_first,
+    check_interrupt_instructions,
+    check_vectors_and_startup_code,
     check_errors,
     check_warnings,
     check_link_errors,

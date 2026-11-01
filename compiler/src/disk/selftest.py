@@ -650,6 +650,106 @@ def check_shell():
     return f"{cpu.instructions} instructions"
 
 
+def check_reclaim():
+    """fs_reclaim() (the shell runs it at boot and after a kill): blocks no
+    file uses, and chain blocks past a file's length, are freed; nothing a
+    file uses is touched, and fs.py finds the disk consistent afterwards."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+
+    image = os.path.join(TMP.name, "reclaim.img")
+    make_disk.make(image, programs=["echo"], new=True, size_mb=1, log=lambda _: None)
+    with FileSystem(image) as disk:
+        disk.put("/a.txt", b"x" * 700)                      # 175 words: one block
+        disk.put("/big.txt", b"y" * 3000)                   # 750 words: three blocks
+        before = disk.free_blocks()
+        lost = [disk.alloc() for _ in range(3)]             # blocks nothing points to
+        tail = disk.chain(disk.lookup("/a.txt").first)[-1]
+        extra = [disk.alloc(), disk.alloc()]                # a chain longer than the file
+        disk.set_fat(tail, extra[0])
+        disk.set_fat(extra[0], extra[1])
+        assert disk.free_blocks() == before - 5 and len(disk.check()) == len(lost)
+    shell, _ = driver.build([str(root / "tynix" / "shell.c")])
+    cpu, text = driver.run_in_simulator(shell.rom, "cat /a.txt > /copy.txt\nhalt\n", 50_000_000,
+                                        disk=image)
+    assert cpu.halted and "[boot: freed 5 lost blocks]\n" in text, text
+    with FileSystem(image) as disk:
+        assert disk.check() == [], disk.check()
+        assert disk.get("/a.txt") == b"x" * 700 and disk.get("/big.txt") == b"y" * 3000
+        assert len(disk.chain(disk.lookup("/a.txt").first)) == 1
+        assert disk.free_blocks() == before - 1             # only /copy.txt is new
+    cpu, text = driver.run_in_simulator(shell.rom, "halt\n", 50_000_000, disk=image)
+    assert "freed" not in text, text                        # nothing left to free
+    return f"{cpu.instructions} instructions"
+
+
+def check_kill():
+    """The NMI (the kill switch): while a program from /bin spins, the shell's
+    NMI handler asks; 2 goes on, 1 ends it with status 130 and the shell comes
+    back at its prompt. At the prompt an NMI does nothing."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+    sys.path.append(str(root / "cpu_sim" / "src"))
+    from cpu import CPU
+
+    image = os.path.join(TMP.name, "kill.img")
+    make_disk.make(image, programs=["echo"], new=True, size_mb=1, log=lambda _: None)
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "spin.c").write_text(
+            '#include <stdio.h>\n'
+            'int main(void) { long n = 0; puts("spinning"); for (;;) n++; return 0; }\n')
+        program, _ = driver.build([str(Path(tmp) / "spin.c")], exe=True)
+        (Path(tmp) / "spin.exe").write_bytes(driver.exe_bytes(program))
+        with FileSystem(image) as disk:
+            disk.put("/bin/spin", (Path(tmp) / "spin.exe").read_bytes(), binary=True)
+    shell, _ = driver.build([str(root / "tynix" / "shell.c")])
+
+    cpu = CPU()
+    cpu.mem.load_rom(shell.rom)
+    cpu.bus.attach_disk(image)
+
+    def until(text, limit=200):
+        for _ in range(limit):
+            if text in cpu.bus.display.text:
+                return
+            cpu.run(100_000)
+        raise AssertionError(f"never saw {text!r} in:\n{cpu.bus.display.text}")
+
+    try:
+        until("/> ")
+        cpu.nmi()                                       # at the prompt: nothing to stop
+        cpu.run(100_000)
+        assert "[" not in cpu.bus.display.text and not cpu.halted
+        cpu.bus.keyboard.type("spin\n")
+        until("spinning")
+        cpu.nmi()
+        until("[spin: 1 kill, 2 continue] ")
+        cpu.bus.keyboard.type("2")
+        cpu.run(100_000)
+        assert cpu.bus.display.text.endswith("] 2\n") and cpu.ie == 1 and not cpu.in_nmi
+        cpu.nmi()                                       # again: still running, so it asks again
+        cpu.bus.keyboard.type("x1")                     # (x is not an answer)
+        until("[spin: exit status 130]")
+        until("/> ")
+        cpu.bus.keyboard.type("echo back\nhalt\n")
+        cpu.run(2_000_000)
+        assert cpu.halted and "back\n" in cpu.bus.display.text
+        assert cpu.bus.display.text.count("1 kill, 2 continue") == 2
+    finally:
+        cpu.bus.attach_disk(None)
+    with FileSystem(image) as disk:
+        assert disk.check() == [], disk.check()
+    return f"{cpu.instructions} instructions"
+
+
 EDITOR_KEYS = ("ed /a.txt\n"
                "a\n"
                "one x\n"
@@ -1223,6 +1323,8 @@ CHECKS = [
     check_stat,
     check_spawn,
     check_shell,
+    check_reclaim,
+    check_kill,
     check_editor,
     check_screen_editor,
     check_tools,

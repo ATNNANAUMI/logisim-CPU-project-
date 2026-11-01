@@ -443,7 +443,8 @@ def test_run_matches_step():
         return (cpu.regs, cpu.iar, cpu.flags, cpu.esp, cpu.ebp, cpu.halted,
                 cpu.stopped, cpu.instructions, cpu.mem.ram, cpu.bus.display.text,
                 cpu.bus.hex_value, cpu.bus.video.pixels, cpu.bus.out_addr,
-                cpu.bus.in_addr, list(cpu.bus.keyboard.buffer))
+                cpu.bus.in_addr, list(cpu.bus.keyboard.buffer),
+                cpu.slimit, cpu.ie, cpu.in_nmi, cpu.inhibit, cpu.waiting, cpu.fault_pending)
 
     edges = [0, 1, 2, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF, 0xFFFFFFFE,
              0x3F800000, 0x7F800000, RAM, RAM | 0x3FFF, 0x3FFF,
@@ -457,10 +458,8 @@ def test_run_matches_step():
     from devices import Timer
     for cpu in (slow, fast, chunked):           # the same time for all three
         cpu.bus.timer = Timer(clock=lambda: 0.0)
-    saved = config.STOP_ON_STACK_WRAP
-    try:
+    if True:
         for seed in range(80):
-            config.STOP_ON_STACK_WRAP = seed % 2 == 1
             words = []
             for _ in range(400):
                 pick = rng.random()
@@ -483,8 +482,6 @@ def test_run_matches_step():
                 pass
             assert state(fast) == state(slow), f"run() differs from step(), seed {seed}"
             assert state(chunked) == state(slow), f"run() in pieces differs, seed {seed}"
-    finally:
-        config.STOP_ON_STACK_WRAP = saved
 
 
 def test_translated_code_matches_step():
@@ -501,7 +498,8 @@ def test_translated_code_matches_step():
         return (cpu.regs, cpu.iar, cpu.flags, cpu.esp, cpu.ebp, cpu.halted, cpu.stopped,
                 cpu.instructions, cpu.mem.ram, cpu.bus.display.text, cpu.bus.hex_value,
                 cpu.bus.video.pixels, cpu.bus.video.dirty, cpu.bus.video.used,
-                cpu.bus.out_addr, cpu.bus.in_addr, list(cpu.bus.keyboard.buffer))
+                cpu.bus.out_addr, cpu.bus.in_addr, list(cpu.bus.keyboard.buffer),
+                cpu.slimit, cpu.ie, cpu.in_nmi, cpu.inhibit, cpu.waiting, cpu.fault_pending)
 
     rng = random.Random(3)
     values = [0, 1, 2, 3, 7, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF, 0xFFFFFFFE, 0x3F800000,
@@ -523,8 +521,11 @@ def test_translated_code_matches_step():
                              else RAM | 0x5000 + rng.randrange(60)])
             elif pick < 0.52:                                   # CPY LD ST ALD AST ADDR
                 code.append([rng.choice((0x0E, 0x0E, 0x01, 0x02, 0x0C, 0x0D, 0x09)) << 8 | ra << 4 | rb])
-            elif pick < 0.64:                                   # STK
+            elif pick < 0.60:                                   # STK
                 code.append([0x0B00 | rng.choice((0, 0, 1, 1, 2, 3, 4, 5, 6)) << 4 | rb])
+            elif pick < 0.64:                                   # RTI EI DI TRAP WAIT GSP SSP GBP SBP SLIM
+                op = rng.choice((0, 1, 1, 2, 2, 3, 4, 5, 5, 6, 7, 7, 8, 9, 9, 9))
+                code.append([0x2000 | op << 8 | (rb if op >= 5 else 0)])
             elif pick < 0.82:                                   # RJMP RJF RJNF (target later)
                 code.append([rng.choice((0x04, 0x05, 0x06, 0x06)) << 8 | rng.randrange(16), None])
             elif pick < 0.87:                                   # CALL-like DATA R0, x ; JMRB R0
@@ -560,8 +561,7 @@ def test_translated_code_matches_step():
             words += item
         return words
 
-    saved = (config.A_FLAG_SIGNED, config.SHR_ARITHMETIC, config.STOP_ON_STACK_WRAP,
-             translate.HOT)
+    saved = (config.A_FLAG_SIGNED, config.SHR_ARITHMETIC, translate.HOT)
     slow, fast, chunked = CPU(), CPU(), CPU()
     rom = slow.mem.rom
     for cpu in (slow, fast, chunked):
@@ -572,7 +572,6 @@ def test_translated_code_matches_step():
         for seed in range(40):
             config.A_FLAG_SIGNED = seed % 5 != 4
             config.SHR_ARITHMETIC = seed % 7 == 6
-            config.STOP_ON_STACK_WRAP = seed % 3 == 2
             words = program()
             rom[:len(words) + 8] = words + [0] * 8
             if seed % 4 == 3:                                   # some code at the top of ROM
@@ -598,8 +597,7 @@ def test_translated_code_matches_step():
             made += len(fast._code)
         assert made > 100, made
     finally:
-        (config.A_FLAG_SIGNED, config.SHR_ARITHMETIC, config.STOP_ON_STACK_WRAP,
-         translate.HOT) = saved
+        config.A_FLAG_SIGNED, config.SHR_ARITHMETIC, translate.HOT = saved
 
 
 def test_translated_code_follows_changes():
@@ -639,6 +637,256 @@ def test_translated_code_follows_changes():
             assert cpu.halted and cpu.iar == RAM | 11 and cpu.regs[2] == 42, (fast, cpu.regs)
     finally:
         translate.HOT = saved
+
+
+# ------------------------------------------------------------ interrupts
+RTI, EI, DI, TRAP, WAIT = 0x2000, 0x2100, 0x2200, 0x2300, 0x2400
+HALT, NOP = 0x0F00, 0x0000
+
+
+def GSP(rb): return 0x2500 | rb
+def SSP(rb): return 0x2600 | rb
+def SLIM(rb): return 0x2900 | rb
+def DATA(rb, value): return [0x0300 | rb, value]
+def ADDI(ra, value): return [0x5000 | ra << 4, value]          # R0 = Ra + value
+def OUT(device, value, scratch=(14, 15)):
+    """Send value to an output device: OUTADDR, then OUTDATA."""
+    a, b = scratch
+    return (DATA(a, device) + [0x0830 | a] + DATA(b, value) + [0x0820 | b])
+
+
+def build(*items):
+    """ROM words: items are words, lists of words, ("at", address), ("L", name),
+    ("RJMP", name). The vectors: reset at 0 (RJMP start), 2 NMI, 4 IRQ, 6 TRAP,
+    8 FAULT, each an RJMP to the label nmi / irq / trap / fault if there is one,
+    else RTI (2 words)."""
+    labels, words = {}, []
+    flat = []
+    for item in items:
+        flat.extend([item] if isinstance(item, (int, tuple)) else item)
+    for item in flat:
+        if isinstance(item, tuple) and item[0] == "L":
+            labels[item[1]] = len(words)
+        elif isinstance(item, tuple) and item[0] == "RJMP":
+            words += [0x0400, item]
+        else:
+            words.append(item)
+    out = []
+    for i, w in enumerate(words):
+        out.append(((labels[w[1]] - i) & 0xFFFFFFFF) if isinstance(w, tuple) else w)
+    # the sixteen words of vectors in front: the program starts at 10
+    head = []
+    for vector, name in ((0, "start"), (2, "nmi"), (4, "irq"), (6, "trap"), (8, "fault")):
+        if name in labels:
+            head += [0x0400, (10 + labels[name]) - (vector + 1)]
+        else:
+            head += [RTI, NOP]
+    return head + out
+
+
+def machine(rom, now=None, interrupted=True):
+    from devices import Timer
+    cpu = CPU()
+    cpu.mem.load_rom(rom)
+    if now is not None:
+        cpu.bus.timer = Timer(clock=lambda: now[0])
+    return cpu
+
+
+def both(rom, steps, check, now=None):
+    """Run the program once with step() and once with run() (translating
+    everything), and check both end the same."""
+    import translate
+    saved = translate.HOT
+    translate.HOT = 1
+    try:
+        a, b = machine(rom, now), machine(rom, now)
+        for _ in range(steps):
+            if a.step() is None:
+                break
+        b.run(steps)
+        for cpu in (a, b):
+            check(cpu)
+        assert (a.regs, a.iar, a.esp, a.ie, a.instructions) == \
+               (b.regs, b.iar, b.esp, b.ie, b.instructions), "run() differs from step()"
+    finally:
+        translate.HOT = saved
+
+
+def test_trap_and_rti():
+    # CMP sets the flags, TRAP calls the handler, which changes them and
+    # returns: the flags, the interrupt enable bit and the address come back
+    # (the program has selected the display; the handler selects another
+    # device, and the display is selected again after RTI)
+    rom = build(("L", "start"), DATA(1, 5), EI, NOP, [0x1F11], DATA(14, 0x5C), [0x0830 | 14],
+                [TRAP], [HALT],
+                ("L", "trap"), DATA(2, 7), ADDI(2, 1), [0x0E03], DATA(13, 0xAC), [0x0830 | 13],
+                [0x0810 | 13], [RTI])
+
+    def check(cpu):
+        assert cpu.regs[1] == 5 and cpu.regs[2] == 7 and cpu.regs[3] == 8, cpu.regs
+        assert cpu.flags == 1 and cpu.ie == 1 and cpu.esp == 0 and cpu.halted, cpu.flags
+        assert cpu.bus.out_addr == 0x5C and cpu.bus.in_addr == 0, "RTI left the handler's devices"
+
+    both(rom, 100, check)
+    cpu = machine(rom)
+    while cpu.iar != 6:
+        cpu.step()
+    devices, word = cpu.mem.ram[0], cpu.mem.ram[1]     # TRAP pushed two words
+    assert cpu.esp == 2 and cpu.ie == 0 and devices == 0x5C, (cpu.esp, hex(devices))
+    assert word & 0x1FFFFFF == 19 and word >> 27 & 1 and word >> 28 == 1, hex(word)
+
+
+def test_timer_interrupt_and_acknowledge():
+    # the timer period 10 ms, enable source 0, EI; the main loop counts in
+    # R3, the handler counts in R4 and acknowledges; the clock is moved by hand
+    rom = build(("L", "start"), OUT(0xAD, 1), OUT(0x7C, 10), EI,
+                ("L", "loop"), ADDI(3, 1), [0x0E03], ("RJMP", "loop"),
+                ("L", "irq"), ADDI(4, 1), [0x0E04], OUT(0xAC, 1), [RTI])
+    for fast in (False, True):
+        now = [100.0]
+        cpu = machine(rom, now)
+        cpu.run(60) if fast else [cpu.step() for _ in range(60)]        # the setup
+        for tick in range(4):
+            now[0] += 0.011
+            if fast:
+                cpu.run(3000)
+            else:
+                for _ in range(3000):
+                    cpu.step()
+        assert cpu.regs[4] == 4 and cpu.regs[3] > 100, (cpu.regs[3], cpu.regs[4])
+        assert cpu.bus.interrupts.pending == 0 and cpu.ie == 1
+
+
+def test_a_request_nobody_acknowledges_does_not_starve_the_program():
+    # a key raises source 1; the handler never acknowledges, so the IRQ line
+    # stays active: one instruction still runs after every RTI
+    rom = build(("L", "start"), OUT(0xAD, 2), EI,
+                ("L", "loop"), ADDI(3, 1), [0x0E03], ("RJMP", "loop"),
+                ("L", "irq"), ADDI(4, 1), [0x0E04], [RTI])
+    for fast in (False, True):
+        cpu = machine(rom)
+        cpu.bus.keyboard.type("x")
+        cpu.run(600) if fast else [cpu.step() for _ in range(600)]
+        assert cpu.regs[3] > 30 and cpu.regs[4] > 30, (cpu.regs[3], cpu.regs[4])
+        assert cpu.bus.interrupts.pending == 2         # still waiting, nobody asked it to stop
+
+
+def test_a_masked_interrupt_waits():
+    # the same program with DI: the request is pending, nothing is taken; EI takes it
+    rom = build(("L", "start"), OUT(0xAD, 2), DI, NOP, NOP, NOP, EI, NOP, NOP, [HALT],
+                ("L", "irq"), DATA(5, 99), OUT(0xAC, 2), [RTI])
+    cpu = machine(rom)
+    cpu.bus.keyboard.type("x")
+    cpu.run(60)
+    assert cpu.regs[5] == 99 and cpu.halted and cpu.bus.interrupts.pending == 0
+
+
+def test_nmi_is_not_masked_and_does_not_nest():
+    # NMI works with interrupts off; a second NMI waits for the first one's RTI
+    # and for one instruction after it
+    rom = build(("L", "start"), DI,
+                ("L", "loop"), NOP, ("RJMP", "loop"),
+                ("L", "nmi"), ADDI(5, 1), [0x0E05], NOP, NOP, [RTI])
+    cpu = machine(rom)
+    cpu.run(10)
+    cpu.nmi()
+    cpu.step()                                         # taken
+    assert cpu.in_nmi == 1 and cpu.ie == 0 and cpu.iar == 2
+    cpu.nmi()                                          # during the handler: it waits
+    for _ in range(5):                                 # RJMP, ADD, CPY, NOP, NOP
+        cpu.step()
+    assert cpu.regs[5] == 1 and cpu.in_nmi == 1
+    cpu.step()                                         # RTI
+    assert cpu.in_nmi == 0 and cpu.inhibit == 1
+    cpu.step()                                         # the one instruction that must run
+    assert cpu.regs[5] == 1 and cpu.in_nmi == 0
+    cpu.step()                                         # now the second NMI is taken
+    assert cpu.in_nmi == 1 and cpu.iar == 2
+    cpu.run(10)
+    assert cpu.regs[5] == 2 and cpu.in_nmi == 0
+
+
+def test_nmi_wakes_a_halt():
+    # HALT is the shutdown: nothing but NMI (or a reset) wakes it
+    rom = build(("L", "start"), EI, [HALT], DATA(1, 1), [HALT],
+                ("L", "nmi"), DATA(2, 2), [HALT])
+    cpu = machine(rom)
+    cpu.run(10)
+    assert cpu.halted and cpu.regs[2] == 0
+    cpu.bus.keyboard.type("x")                         # a key doesn't
+    assert cpu.run(10) == 0 and cpu.halted
+    cpu.nmi()
+    cpu.run(10)
+    assert cpu.regs[2] == 2 and cpu.halted
+
+
+def test_wait_sleeps_until_an_interrupt():
+    rom = build(("L", "start"), OUT(0xAD, 1), OUT(0x7C, 5), EI, WAIT, DATA(6, 1), [HALT],
+                ("L", "irq"), DATA(7, 1), OUT(0xAC, 1), [RTI])
+    for fast in (False, True):
+        now = [10.0]
+        cpu = machine(rom, now)
+        cpu.run(40) if fast else [cpu.step() for _ in range(40)]
+        assert cpu.waiting and cpu.regs[6] == 0 and not cpu.halted
+        assert 0 < cpu.idle_seconds() <= 0.005
+        assert (cpu.run(10) == 0) if fast else (cpu.step() is None)      # still asleep
+        now[0] += 0.006
+        cpu.run(40) if fast else [cpu.step() for _ in range(40)]
+        assert cpu.regs[7] == 1 and cpu.regs[6] == 1 and cpu.halted and not cpu.waiting
+
+
+def test_stack_limit_faults_before_the_push():
+    # SLIM 3: three PUSHes fit, the fourth is not executed and takes the fault vector
+    rom = build(("L", "start"), DATA(1, 3), SLIM(1), DATA(0, 0x11), [0x0B00], [0x0B00],
+                [0x0B00], ("L", "again"), [0x0B00], DATA(8, 1), [HALT],
+                ("L", "fault"), DATA(9, 1), [HALT])
+
+    # (3 pushes at 0,1,2; the fault pushes its two words at 3 and 4)
+    def check(cpu):
+        assert cpu.regs[9] == 1 and cpu.regs[8] == 0 and cpu.halted
+        assert cpu.mem.ram[:3] == [0x11, 0x11, 0x11] and cpu.esp == 5   # the fault pushed 2 words
+        pushed = cpu.mem.ram[4] & 0x1FFFFFF
+        assert cpu.mem.rom[pushed] == 0x0B00, hex(pushed)   # the PUSH that did not run
+
+    both(rom, 100, check)
+
+
+def test_ssp_gsp_move_the_stack_anywhere():
+    # the stack at RAM word 0x1234, read back with GSP / GBP, a frame there too
+    rom = build(("L", "start"), DATA(1, 0x1234), SSP(1), DATA(0, 0xAB), [0x0B00],
+                [0x2500 | 2], [0x0B20], [0x2700 | 3], DATA(4, 0x2000), [0x2800 | 4], [HALT])
+
+    def check(cpu):
+        assert cpu.mem.ram[0x1234] == 0xAB and cpu.regs[2] == 0x1235
+        assert cpu.regs[3] == 0x1235 and cpu.ebp == 0x2000 and cpu.esp == 0x1236
+
+    both(rom, 100, check)
+
+
+def test_interrupt_controller_priority():
+    from devices import InterruptController
+    c = InterruptController()
+    c.set_enable(0b110)
+    c.raise_(0)
+    assert not c.line and c.highest() == 0xFF            # source 0 is not enabled
+    c.raise_(2)
+    c.raise_(1)
+    assert c.line and c.highest() == 1                   # lower number first
+    assert c.status() == 0b111 | 1 << 8 | 0b110 << 16
+    c.acknowledge(0b010)
+    assert c.highest() == 2 and c.pending == 0b101
+    c.acknowledge(0xFF)
+    assert not c.line
+
+
+def test_the_stack_lives_anywhere_in_ram():
+    # ESP and EBP are 24 bits wide now: they don't wrap at 16K words
+    rom = build(("L", "start"), DATA(1, 0x00FFFFFE), SSP(1), DATA(0, 5), [0x0B00],
+                [0x0B10], [0x2500 | 2], [HALT])
+    cpu = machine(rom)
+    cpu.run(30)
+    assert cpu.regs[2] == 0x00FFFFFE and cpu.mem.ram[0x00FFFFFE] == 5
 
 
 def test_run_stops_at_breakpoints():

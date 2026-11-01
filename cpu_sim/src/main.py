@@ -38,12 +38,14 @@ def run_headless(cpu: CPU, max_steps: int, trace: bool, keys: str = "",
               f"{step.text:<20s} {step.note}")
         steps += 1
     if not trace:
-        cpu.run(max_steps)
+        cpu.run_sleeping(max_steps)
+        if cpu.waiting:
+            print("\n(WAIT with nothing that can wake the CPU: stopped)")
 
     state = "HALTED" if cpu.halted else ("STOPPED: " + cpu.error) if cpu.stopped \
         else "step limit reached"
     print(f"\n--- {state} after {cpu.instructions} instructions ---")
-    print("IAR 0x%07X   flags %s   ESP 0x%04X   EBP 0x%04X"
+    print("IAR 0x%07X   flags %s   ESP 0x%06X   EBP 0x%06X"
           % (cpu.iar, cpu.flag_text, cpu.esp, cpu.ebp))
     for i in range(0, 16, 4):
         print("  " + "  ".join(f"R{j:<2d} 0x{cpu.regs[j]:08X}" for j in range(i, i + 4)))

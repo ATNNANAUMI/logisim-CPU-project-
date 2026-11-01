@@ -146,8 +146,9 @@ GNU statement expressions `({ ... })`, `a ?: b`, `_Thread_local`, `_Atomic`.
 ROM  0x00000   RJMP start (from the linker)
                crt0, your code, the library code, string literals, const data,
                and the starting values of initialised globals
-RAM  0x1000000 the stack (16K words), grows upward
-     0x1004000 global and static variables
+RAM  0x1000000 global and static variables
+     _stack_base the stack (16K words), grows upward; ESP and EBP are set by
+               the linker's start-up code, the vectors are in ROM 0-9
      _end      the heap (malloc) up to 0x1FFFFFF (up to 0x10FFFFF in a
                program that calls spawnv: programs are loaded from 0x1100000)
 ```
@@ -160,7 +161,9 @@ RAM  0x1000000 the stack (16K words), grows upward
   `atexit` functions run, then the CPU halts with the exit status in R0.
   RESUME halts it again.
 * Each call takes 2 words of stack plus its arguments and its locals; deep
-  recursion can run past the 16K words of stack (it wraps, nothing checks).
+  recursion can run past the 16K words of stack: the next `PUSH`/`CALL`
+  takes the FAULT vector (the stack limit), which halts the CPU unless
+  the program installed a handler (`set_interrupt_handler(INT_FAULT, ...)`).
 * **A program for the OS** (`build --exe`) lives all in RAM: its code,
   constants and variables from `0x1100000`, its heap after them up to
   `0x1FFFFFF`. `spawnv(path, argv)` loads it from the disk and calls
@@ -229,7 +232,18 @@ power function is `ipow`, so it doesn't clash with C's `pow`.)
 | `wait_ms(ms)` | does nothing for `ms` milliseconds (the timer, device `0x7C`) |
 | `device_out(d, v)` / `device_in(d)` | raw `COMM` to any device (`__builtin_out`, `__builtin_in`) |
 | `DISK_SEEK_DEVICE`, `DISK_DATA_DEVICE` | the disk (simulator only, `cc run --disk FILE`): `device_out(DISK_SEEK_DEVICE, n)` goes to word n, `device_in(DISK_SEEK_DEVICE)` is the size in words (0: no disk); `device_out`/`device_in` on `DISK_DATA_DEVICE` write/read a word and move on to the next |
-| `halt()` | stops the CPU (`__builtin_trap()`) |
+| `halt()` | the shutdown: stops the CPU (`__builtin_trap()`); only an NMI or a reset wakes it. It does not close files: `exit()` and the end of `main()` do (`atexit`), then halt, so nothing is lost by a reset after them |
+| `interrupts_on()`, `interrupts_off()` | the interrupt enable bit (off at reset; the start-up code leaves it alone) |
+| `set_interrupt_handler(which, fn)` | `which`: `INT_NMI`, `INT_IRQ`, `INT_TRAP`, `INT_FAULT`; `fn` is `unsigned fn(void)`, runs with interrupts off and every register saved, and returns 0 (go back where the program was) or an address to return to instead |
+| `irq_enable(mask)`, `irq_ack(mask)`, `irq_pending()` | the interrupt controller (devices `0xAC`/`0xAD`): sources `IRQ_TIMER` (1) and `IRQ_KEYBOARD` (2); a handler must acknowledge its source |
+| `timer_interrupt_every(ms)` | the timer raises `IRQ_TIMER` every `ms` (0 = off) |
+| `wait_for_interrupt()` | sleeps until an interrupt (`WAIT`) |
+| `software_interrupt()` | `TRAP`: calls the `INT_TRAP` handler |
+| `set_stack_limit(address)`, `stack_pointer()` | the stack limit (a `PUSH`/`CALL` at or past that RAM address takes the `INT_FAULT` handler, which halts the CPU if there is none) and `ESP` as a RAM address |
+
+Interrupts are simulator only so far (TECHNICAL 1.8; the circuit needs 2.6).
+A program for the OS (`--exe`) can't install handlers: the OS owns them
+(`tynix/shell.c` handles the NMI).
 
 **Inline assembly:** `asm("text");` (also `__asm__`) puts its text, one
 instruction per line, into the output. Inside a function the compiler keeps

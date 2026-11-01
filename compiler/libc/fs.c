@@ -436,6 +436,64 @@ int _fs_empty(_Node *dir)
     return 1;
 }
 
+/* ------------------------------------------------------------ reclaim */
+
+/* mark the blocks of one file (or directory) in use: the first `words`
+   words' worth of its chain, and cut the chain there (a program that was
+   killed while it wrote can have left more), then do the same for what a
+   directory holds */
+static void claim(unsigned *mark, unsigned first, unsigned words, int is_dir)
+{
+    unsigned need = (words + _FS_BLOCK - 1) / _FS_BLOCK, n, b = first, next, i, flags, len;
+    if (first == 0 || first >= blocks)
+        return;
+    if (need == 0)
+        need = 1;
+    for (n = 0; n < need && b != END && b != 0 && b < blocks && !mark[b]; n++) {
+        mark[b] = 1;
+        next = fat(b);
+        if (n + 1 == need && next != END)
+            set_fat(b, END);            /* the blocks after it are freed below */
+        b = next;
+    }
+    cache_first = 0;
+    if (!is_dir)
+        return;
+    for (i = 0; i < words / _FS_ENTRY; i++) {
+        flags = _fs_word(first, i * _FS_ENTRY + E_FLAGS);
+        if (!(flags & _FS_USED))
+            continue;
+        len = _fs_word(first, i * _FS_ENTRY + E_LENGTH);
+        claim(mark, _fs_word(first, i * _FS_ENTRY + E_FIRST),
+              flags & _FS_PACKED ? (len + 3) / 4 : len, flags & _FS_DIR);
+    }
+}
+
+int fs_reclaim(void)
+{
+    unsigned *mark, b, freed = 0;
+    if (_fs_mount())
+        return -1;
+    if ((mark = calloc(blocks, sizeof(unsigned))) == 0) {
+        errno = ENOSPC;
+        return -1;
+    }
+    for (b = 0; b < fat_start + (blocks + _FS_BLOCK - 1) / _FS_BLOCK; b++)
+        mark[b] = 1;                    /* the superblock and the FAT */
+    claim(mark, disk_read(SB_ROOT), disk_read(SB_ROOT_LEN), 1);
+    __builtin_out(SEEK_PORT, fat_start * _FS_BLOCK);
+    for (b = 0; b < blocks; b++)
+        if (__builtin_in(DATA_PORT) != 0 && !mark[b]) {
+            set_fat(b, 0);
+            freed++;
+            __builtin_out(SEEK_PORT, fat_start * _FS_BLOCK + b + 1);    /* the sweep goes on */
+        }
+    free(mark);
+    hint = 0;
+    cache_first = 0;
+    return freed;
+}
+
 /* ------------------------------------------------------------ open files */
 
 static void node_of(FILE *f, _Node *node)
