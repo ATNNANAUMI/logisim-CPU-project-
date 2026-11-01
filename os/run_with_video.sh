@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# run_with_video.sh - the OS shell in the simulator window, with video_player in /bin
+#
+#   os/run_with_video.sh                 plays what video_player.c includes by default (VIDEO there)
+#   os/run_with_video.sh clip.h          plays that one (made by python compiler/src/img/video.py clip.mp4),
+#                                        e.g. compiler/examples/c/graphics/videos/demo.h, the 4 s test picture
+#   SIM_ARGS="--headless --keys \$'/bin/video_player\nhalt\n' --steps 400000000" os/run_with_video.sh
+#                                        extra options for the simulator (here: no window)
+#   DISK=other.img os/run_with_video.sh  another disk image (default os/disk.img)
+#
+# Builds the shell and os/disk.img (what is already on the disk stays; delete
+# the file for a fresh one), builds video_player as a program for the OS and
+# puts it in /bin, then starts the simulator. In the window: run, speed "max",
+# the "RGB screen" tab, and type /bin/video_player in the shell.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+DISK="${DISK:-os/disk.img}"
+
+CLIP_ARGS=()
+if [ $# -ge 1 ]; then
+    clip=$(realpath "$1")
+    [ -f "$clip" ] || { echo "$1: no such file" >&2; exit 1; }
+    CLIP_ARGS=(-I "$(dirname "$clip")" -D "VIDEO=\"$clip\"")
+fi
+
+python compiler/src/cc build os/shell.c
+python os/make_disk.py "$DISK"
+python compiler/src/cc build compiler/examples/c/graphics/video_player.c --exe \
+    -o compiler/ROM/video_player.exe "${CLIP_ARGS[@]}"
+python compiler/src/disk put "$DISK" compiler/ROM/video_player.exe /bin/video_player --binary
+eval "python cpu_sim/src/main.py compiler/ROM/shell.rom --disk \"$DISK\" ${SIM_ARGS:-}"

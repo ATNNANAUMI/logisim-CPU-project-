@@ -96,6 +96,7 @@ The OS, Tynix (simulator only): a shell in ROM that runs the programs on the dis
 python os/make_disk.py                          # os/disk.img: the C examples in /bin, built --exe
 python compiler/src/cc build os/shell.c
 python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img   # type help, ls /bin, primes, snake ...
+os/run_with_video.sh [clip.h]                   # the shell with video_player in /bin, in the window
 ```
 
 ## A taste of the assembly

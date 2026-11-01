@@ -37,6 +37,7 @@ python compiler/src/cc build prog.c [more.c x.asm] [-o name.rom] [--map] [--lib 
 python compiler/src/cc build prog.c --exe            # a program for the OS: prog.exe (TEX1), for `disk put`; spawnv() runs it
 python compiler/src/cc compile prog.c [-o prog.asm]                   # C -> assembly only
 python os/make_disk.py [IMG] [--new] [--size MB]                     # the OS's disk: os/disk.img, C examples built --exe in /bin
+os/run_with_video.sh [clip.h]                        # shell + disk with video_player in /bin (a clip from img/video.py), opens the window
 python compiler/src/cc build os/shell.c && python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img   # the OS (shell)
 
 python compiler/src/img pic.png [-o pic.h] [--size WxH] [--colors N] [--dither] [--preview p.png]   # PNG -> compressed pic.h for gfx_image()

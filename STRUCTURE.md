@@ -116,7 +116,8 @@ logisim-CPU-project-/
 │   │                         name runs /bin/NAME (or a path) with spawnv() and waits
 │   ├── ed.c                  a line editor for text files (a program for /bin: a, i, c, d, p, s, /find, w, q)
 │   ├── edit.c                a full-screen editor on the RGB screen (a program for /bin: arrows, ^S save, ^Q quit)
-│   └── make_disk.py          os/disk.img (git-ignored): TFS1, ed and the C examples built --exe in /bin, /readme.txt
+│   ├── make_disk.py          os/disk.img (git-ignored): TFS1, ed and the C examples built --exe in /bin, /readme.txt
+│   └── run_with_video.sh     builds the shell and the disk, puts video_player in /bin (a clip.h argument picks the video), starts the simulator
 │
 └── cpu_sim/
     ├── src/                  simulator (modules import each other by plain name: run as scripts)
@@ -289,6 +290,7 @@ python compiler/src/img/video.py clip.mp4 [--fps 10] [--seconds 5]  # video -> c
 python compiler/src/disk format disk.img; python compiler/src/disk put disk.img notes.txt   # disk images (ls get cat rm mkdir mv df fsck)
 python os/make_disk.py; python compiler/src/cc build os/shell.c                 # the OS: os/disk.img with /bin, the shell's ROM
 python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img             # run it, type help
+os/run_with_video.sh [clip.h]                                                    # the same with video_player in /bin: type /bin/video_player
 pypy3 compiler/src/cc run compiler/examples/c/graphics/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
 pypy3 cpu_sim/src/bench.py [life sqrt ...]                          # simulator speed in MHz (python: --scale 0.1 by default)
 ```

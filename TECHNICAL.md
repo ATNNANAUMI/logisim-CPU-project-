@@ -1549,6 +1549,7 @@ no multitasking.
 | `os/ed.c` | a line editor for text files, a program for `/bin` (15.8K words; section 11.1) |
 | `os/edit.c` | a full-screen editor on the RGB screen, a program for `/bin` (section 11.2) |
 | `os/make_disk.py` | makes `os/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `os/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; other files on the disk are kept. Twelve C examples, `ed` and `edit`, 2.8K–17.4K words each, in under a second |
+| `os/run_with_video.sh` | builds the shell and the disk (`make_disk.py`), builds `video_player.c` with `--exe` (a `clip.h` argument is passed as `-D VIDEO=...`), puts it in `/bin/video_player` and starts the simulator on it (`SIM_ARGS` adds simulator options, `DISK` picks another image). `video_player` is not in `PROGRAMS`: its video is part of the program (17K words for the 4 s demo clip, millions for a long one) |
 
 ```
 python os/make_disk.py [IMG] [--new] [--size MB]
