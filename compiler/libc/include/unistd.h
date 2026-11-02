@@ -21,6 +21,10 @@
  *                        FILE out instead of the display; out is the
  *                        caller's, still open when the program ends. The
  *                        program should not rewrite that file itself.
+ *   isatty(fd)           1 if fd (0 keyboard, 1 stdout, 2 stderr) is the
+ *                        console, 0 if it is a file: only stdout can be, when
+ *                        the shell started the program with `>`. Not standard
+ *                        in what it covers: there are no other descriptors.
  */
 #ifndef _UNISTD_H
 #define _UNISTD_H
@@ -34,5 +38,6 @@ int mkdir(const char *path, ...);
 int rmdir(const char *path);
 int spawnv(const char *path, char *const argv[]);
 int spawnv_to(const char *path, char *const argv[], FILE *out);
+int isatty(int fd);
 
 #endif

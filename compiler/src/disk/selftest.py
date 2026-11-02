@@ -789,6 +789,425 @@ def check_screen_editor():
     return f"{cpu.instructions} instructions"
 
 
+TOOLS_KEYS = ("grep -n -i beta /docs/a.txt\n"
+              "grep -i beta /docs\n"
+              "grep -vn e /docs/a.txt\n"
+              "grep zzz /docs/a.txt\n"
+              "grep x /bin/echo\n"
+              "grep x /nope\n"
+              "grep\n"
+              "find / txt\n"
+              "find /docs sub\n"
+              "find /nope x\n"
+              "tree /docs\n"
+              "tree -s /docs\n"
+              "tree /nope\n"
+              "du /docs\n"
+              "du -a /docs\n"
+              "du /nope\n"
+              "diff /docs/a.txt /docs/a.txt\n"
+              "diff /docs/a.txt /docs/b.txt\n"
+              "diff /x.txt /y.txt\n"
+              "diff /docs/a.txt /bin/echo\n"
+              "hexdump /h.txt\n"
+              "hexdump /nope /h.txt\n"
+              "calc 2 * (3 + 4)\n"
+              "calc -1\n"
+              "calc 1 / 0\n"
+              "calc 0x1100000 + 256\n"
+              "calc \"256 >> 4\"\n"
+              "calc \"'a' + 1\"\n"
+              "calc 7 % 3 | 8 ^ 2\n"
+              "calc 2 + 3 * 4\n"
+              "calc 1 << 2 + 1\n"
+              "calc -7 / 2 + -7 % 2\n"
+              "calc \"-16 >> 2\"\n"
+              "calc 4294967295\n"
+              "calc 4294967296\n"
+              "calc 1 +\n"
+              "calc\n"
+              "1 + 1\n"
+              "0b101 << 2\n"
+              "(1\n"
+              "\x04"
+              "more -n 3 /long.txt\n"
+              " " "\n" "q"
+              "more -n 0 /long.txt\n"
+              "more /bin/echo\n"
+              "more /long.txt > /more.txt\n"
+              "tree /docs > /out.txt\n"
+              "halt\n")
+
+TOOLS_OUTPUT = """\
+Tynix shell: help lists the commands
+/> grep -n -i beta /docs/a.txt
+2:Beta line
+/> grep -i beta /docs
+/docs/a.txt:Beta line
+/docs/b.txt:Beta changed
+/docs/sub/c.txt:Beta in sub
+/> grep -vn e /docs/a.txt
+1:alpha
+3:gamma
+/> grep zzz /docs/a.txt
+[grep: exit status 1]
+/> grep x /bin/echo
+grep: /bin/echo: not a text file
+[grep: exit status 2]
+/> grep x /nope
+grep: /nope: No such file or directory
+[grep: exit status 2]
+/> grep
+usage: grep [-i] [-n] [-v] text [path...]
+[grep: exit status 1]
+/> find / txt
+{find_txt}/> find /docs sub
+/docs/sub/
+/> find /nope x
+find: /nope: No such file or directory
+[find: exit status 1]
+/> tree /docs
+/docs
+|-- a.txt
+|-- b.txt
+`-- sub
+    `-- c.txt
+1 directory, 3 files
+/> tree -s /docs
+/docs
+|-- [      36]  a.txt
+|-- [      38]  b.txt
+`-- [   <dir>]  sub
+    `-- [      20]  c.txt
+1 directory, 3 files
+/> tree /nope
+tree: /nope: No such file or directory
+[tree: exit status 1]
+/> du /docs
+{du_sub}
+{du_docs}
+/> du -a /docs
+{du_a}
+{du_sub}
+{du_docs}
+/> du /nope
+du: /nope: No such file or directory
+[du: exit status 1]
+/> diff /docs/a.txt /docs/a.txt
+/> diff /docs/a.txt /docs/b.txt
+2c2
+< Beta line
+---
+> Beta changed
+4d3
+< delta
+5a5
+> zeta
+[diff: exit status 1]
+/> diff /x.txt /y.txt
+2d1
+< 2
+5a5
+> 5b
+9a10
+> 9b
+[diff: exit status 1]
+/> diff /docs/a.txt /bin/echo
+diff: /bin/echo: not a text file
+[diff: exit status 2]
+/> hexdump /h.txt
+{hex}
+/> hexdump /nope /h.txt
+/nope:
+hexdump: /nope: No such file or directory
+/h.txt:
+{hex}
+[hexdump: exit status 1]
+/> calc 2 * (3 + 4)
+14
+/> calc -1
+-1 (4294967295 unsigned)
+/> calc 1 / 0
+calc: division by zero
+[calc: exit status 1]
+/> calc 0x1100000 + 256
+17826048
+/> calc "256 >> 4"
+16
+/> calc "'a' + 1"
+98
+/> calc 7 % 3 | 8 ^ 2
+11
+/> calc 2 + 3 * 4
+14
+/> calc 1 << 2 + 1
+8
+/> calc -7 / 2 + -7 % 2
+-4 (4294967292 unsigned)
+/> calc "-16 >> 2"
+-4 (4294967292 unsigned)
+/> calc 4294967295
+-1 (4294967295 unsigned)
+/> calc 4294967296
+calc: number does not fit in 32 bits
+[calc: exit status 1]
+/> calc 1 +
+calc: the expression ends too soon
+[calc: exit status 1]
+/> calc
+calc> 1 + 1
+2
+calc> 0b101 << 2
+20
+calc> (1
+calc: missing )
+calc> 
+/> more -n 3 /long.txt
+line 1
+line 2
+line 3
+--more-- (space: page, Enter: line, q: quit)
+line 4
+line 5
+line 6
+--more-- (space: page, Enter: line, q: quit)
+line 7
+--more-- (space: page, Enter: line, q: quit)
+/> more -n 0 /long.txt
+more: -n needs a number of lines, 1 or more
+[more: exit status 1]
+/> more /bin/echo
+more: /bin/echo: not a text file
+[more: exit status 1]
+/> more /long.txt > /more.txt
+/> tree /docs > /out.txt
+/> halt
+CPU halted
+"""
+
+HEXDUMP_TEXT = b"hello, world\n"
+
+
+FM2_KEYS = ("visual_file_manager /m\n"
+            "j" " " " " "x"                    # space selects a.txt and b.txt, x cuts both
+            "g" "l" "p" "h"                    # into dest, paste both, back
+            "j" "y" "y" "g" "l" "p" "h"        # c.txt: copy, the same key again clears it: nothing to paste in dest
+            "jj" " " "y" "g" "l" "u" "p" "h"   # d.txt selected and copied; u forgets it in dest: nothing to paste
+            "j" " " " " "d" "y"                # select c.txt and d.txt, delete both
+            "~" "a" "tilde\n"                  # ~ goes home: a folder made there
+            "q"
+            "visual_file_manager\n"           # no argument: starts in /home/user
+            "a" "mk\n" "q"
+            "halt\n")
+
+FM2_OUTPUT = """\
+Tynix shell: help lists the commands
+/> visual_file_manager /m
+/> visual_file_manager
+/> halt
+CPU halted
+"""
+
+
+FM3_KEYS = ("visual_file_manager /r\n"
+            "jj" "y" "g" "l" "p" "h"           # copy the folder tree (nested) into dest, back
+            "j" "d" "y"                        # delete junk, nested files and all
+            "y" "l" "p"                        # copy tree into itself: refused
+            "q"
+            "halt\n")
+
+FM4_KEYS = ("visual_file_manager /q\n"
+            "j" "y" "g" "l" "p"                # copy t (9 blocks) into d on a disk with 4 free: fails half way
+            "q"
+            "halt\n")
+
+FM3_OUTPUT = """\
+Tynix shell: help lists the commands
+/> visual_file_manager /r
+/> halt
+CPU halted
+"""
+FM4_OUTPUT = FM3_OUTPUT.replace("/r", "/q")
+
+
+def _tree(disk, path):
+    """A folder as nested dicts of name -> contents, to compare two copies."""
+    node = disk.lookup(path)
+    if not node.is_dir:
+        return disk.get(path)
+    return {e.name: _tree(disk, path.rstrip("/") + "/" + e.name) for e in disk.entries(node)}
+
+
+def _hexdump(data):
+    lines = []
+    for at in range(0, len(data), 8):
+        chunk = data[at:at + 8]
+        values = "".join(f" {c:08x}" for c in chunk) + "         " * (8 - len(chunk))
+        chars = "".join(chr(c) if 32 <= c <= 126 else "." for c in chunk)
+        lines.append(f"{at:06x}:{values}  {chars}")
+    return "\n".join(lines)
+
+
+def _kb(disk, path):
+    """Disk KB under path by fs.py's own block chains: a file's blocks, a folder's
+    own directory file plus all it holds (what `du` has to print)."""
+    node = disk.lookup(path)
+    total = len(disk.chain(node.first))
+    if node.is_dir:
+        for e in disk.entries(node):
+            total += _kb(disk, path.rstrip("/") + "/" + e.name)
+    return total
+
+
+FM_KEYS = ("visual_file_manager /fm\n"
+           "jj" "y" "k" "l" "p" "p" "h"       # copy one.txt, enter sub, paste (a second p is refused), back
+           "j" "x" "kk" "l" "p" "h"           # cut one.txt, enter dest, paste: moved
+           "jj" "y" "kk" "l" "p" "h"          # copy two.txt, paste into dest: dest has one, refused
+           "j" "r" "x\b2\n"                   # rename: the name is there to edit; sub -> sub2
+           "d" "n"                            # sub2 holds files: asked, no, it stays
+           "jj" "d" "n" "k" "d" "y"           # zzz.txt: asked, no; two.txt: asked, yes
+           "a" "newdir\n"                     # a new folder
+           "k" "l" "y" "\n"                   # in dest: copy one.txt, Enter opens it in edit:
+           "Z\x13\x11"                        #   edit types Z, saves, quits; the manager is back
+           "h" "p" "q"                        # up, paste the copy it still holds, quit
+           "visual_file_manager /bin echo\n"
+           "\n"                               # Enter on the program echo: it runs, the manager is back
+           "q"
+           "halt\n")
+
+FM_OUTPUT = """\
+Tynix shell: help lists the commands
+/> visual_file_manager /fm
+/> visual_file_manager /bin echo
+/bin/echo: no arguments (argc = 1)
+[/bin/echo: exit status 1]
+/> halt
+CPU halted
+"""
+
+
+def check_tools():
+    """The eight command-line tools in os/ (more grep find tree du diff hexdump
+    calc) as programs from /bin, run by the shell on known files, with their
+    exact output, exit status messages and errors; then visual_file_manager's
+    copy, cut, paste, rename, delete and new folder, and opening a file through
+    the shell (edit) and a program; all read back with fs.py."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "os"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # os/
+
+    names = ["echo", "edit", "more", "grep", "find", "tree", "du", "diff", "hexdump", "calc",
+             "visual_file_manager"]
+    image = os.path.join(TMP.name, "tools.img")
+    make_disk.make(image, programs=names, new=True, size_mb=1, log=lambda _: None)
+    a = b"alpha\nBeta line\ngamma\ndelta\nepsilon\n"
+    long_text = b"".join(b"line %d\n" % i for i in range(1, 13))
+    with FileSystem(image) as disk:
+        disk.mkdir("/docs")
+        disk.put("/docs/a.txt", a)
+        disk.put("/docs/b.txt", b"alpha\nBeta changed\ngamma\nepsilon\nzeta\n")
+        disk.mkdir("/docs/sub")
+        disk.put("/docs/sub/c.txt", b"Beta in sub\nnothing\n")
+        disk.put("/long.txt", long_text)
+        disk.put("/x.txt", b"".join(b"%d\n" % i for i in range(1, 10)))
+        disk.put("/y.txt", b"1\n3\n4\n5\n5b\n6\n7\n8\n9\n9b\n")
+        disk.put("/h.txt", HEXDUMP_TEXT)
+        expected = TOOLS_OUTPUT.format(
+            find_txt="/readme.txt\n/docs/a.txt\n/docs/b.txt\n/docs/sub/c.txt\n/long.txt\n"
+                     "/x.txt\n/y.txt\n/h.txt\n",
+            du_sub=f"{_kb(disk, '/docs/sub'):<6} /docs/sub",
+            du_docs=f"{_kb(disk, '/docs'):<6} /docs",
+            du_a="\n".join(f"{_kb(disk, p):<6} {p}" for p in
+                           ("/docs/a.txt", "/docs/b.txt", "/docs/sub/c.txt")),
+            hex=_hexdump(HEXDUMP_TEXT))
+    shell, _ = driver.build([str(root / "os" / "shell.c")])
+    cpu, text = driver.run_in_simulator(shell.rom, TOOLS_KEYS, 30_000_000, disk=image)
+    assert cpu.halted, text
+    assert text == expected, "\n".join(
+        f"{n}: {x!r} != {y!r}" for n, (x, y) in enumerate(zip(text.split("\n"), expected.split("\n")))
+        if x != y) or (len(text), len(expected))
+    with FileSystem(image) as disk:
+        assert disk.get("/more.txt") == long_text, disk.get("/more.txt")
+        assert disk.get("/out.txt") == (b"/docs\n|-- a.txt\n|-- b.txt\n`-- sub\n"
+                                        b"    `-- c.txt\n1 directory, 3 files\n")
+        assert disk.get("/docs/a.txt") == a
+        assert disk.check() == [], disk.check()
+        disk.mkdir("/fm")
+        disk.mkdir("/fm/dest")
+        disk.put("/fm/dest/two.txt", b"dest two\n")
+        disk.mkdir("/fm/sub")
+        disk.put("/fm/sub/inner.txt", b"inner\n")
+        disk.put("/fm/one.txt", b"one\n")
+        disk.put("/fm/two.txt", b"two\n")
+        disk.put("/fm/zzz.txt", b"zzz\n")
+        make_disk.make_home(disk)
+        disk.mkdir("/m")
+        disk.mkdir("/m/dest")
+        for n in "abcd":
+            disk.put(f"/m/{n}.txt", f"{n}\n".encode())
+        for folder in ("/r", "/r/dest", "/r/tree", "/r/tree/sub", "/r/tree/sub/deep", "/r/junk", "/r/junk/s"):
+            disk.mkdir(folder)
+        disk.put("/r/tree/top.txt", b"top\n")
+        disk.put("/r/tree/sub/mid.txt", b"mid\n" * 300)         # more than a block
+        disk.put("/r/tree/sub/deep/bottom.txt", b"bottom\n")
+        disk.put("/r/junk/j1.txt", b"j1\n")
+        disk.put("/r/junk/s/j2.txt", b"j2\n" * 400)
+    tools = cpu.instructions
+    cpu, text = driver.run_in_simulator(shell.rom, FM_KEYS, 40_000_000, disk=image)
+    assert cpu.halted and text == FM_OUTPUT, text
+    assert not any(cpu.bus.video.pixels), "screen not blank after quitting"
+    with FileSystem(image) as disk:
+        assert sorted(e.name for e in disk.entries(disk.lookup("/fm"))) == \
+            ["dest", "newdir", "one.txt", "sub2", "zzz.txt"]
+        assert disk.get("/fm/dest/one.txt") == b"Zone\n"       # moved, then edited through the shell
+        assert disk.get("/fm/one.txt") == b"Zone\n"            # the clipboard survived the trip
+        assert disk.get("/fm/dest/two.txt") == b"dest two\n"   # a paste never overwrites
+        assert disk.get("/fm/sub2/one.txt") == b"one\n"        # the first copy
+        assert disk.get("/fm/sub2/inner.txt") == b"inner\n"    # not overwritten, not deleted
+        assert disk.get("/fm/zzz.txt") == b"zzz\n"             # a no to "delete?" keeps it
+        assert disk.lookup("/fm/newdir").is_dir and disk.lookup("/.next") is None
+        assert disk.check() == [], disk.check()
+    fm = cpu.instructions
+    cpu, text = driver.run_in_simulator(shell.rom, FM2_KEYS, 40_000_000, disk=image)
+    assert cpu.halted and text == FM2_OUTPUT, text
+    with FileSystem(image) as disk:
+        assert sorted(e.name for e in disk.entries(disk.lookup("/m"))) == ["dest"]
+        assert sorted(e.name for e in disk.entries(disk.lookup("/m/dest"))) == ["a.txt", "b.txt"]
+        assert disk.get("/m/dest/b.txt") == b"b\n"
+        assert disk.lookup("/home/user/tilde").is_dir and disk.lookup("/home/user/mk").is_dir
+        assert sorted(e.name for e in disk.entries(disk.lookup("/home/user")))[:6] == \
+            ["Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos"]
+        assert disk.lookup("/.clipboard") is None and disk.check() == [], disk.check()
+    fm2 = cpu.instructions
+    cpu, text = driver.run_in_simulator(shell.rom, FM3_KEYS, 60_000_000, disk=image)
+    assert cpu.halted and text == FM3_OUTPUT, text
+    with FileSystem(image) as disk:
+        assert sorted(e.name for e in disk.entries(disk.lookup("/r"))) == ["dest", "tree"], \
+            "junk was not deleted"
+        assert _tree(disk, "/r/dest/tree") == _tree(disk, "/r/tree")     # the whole folder, copied
+        assert _tree(disk, "/r/tree")["sub"]["mid.txt"] == b"mid\n" * 300
+        assert "tree" not in _tree(disk, "/r/tree")                       # not into itself
+        assert disk.check() == [], disk.check()                           # the blocks of junk are free
+        disk.mkdir("/q")
+        disk.mkdir("/q/d")
+        disk.mkdir("/q/t")
+        for n in "abc":
+            disk.put(f"/q/t/{n}.txt", (n * 99 + "\n").encode() * 30)     # 3000 chars: 3 blocks each
+        disk.put("/fill", bytes(4 * 256 * (disk.free_blocks() - 4)), binary=True)
+        assert 1 <= disk.free_blocks() <= 5, disk.free_blocks()
+    fm3 = cpu.instructions
+    cpu, text = driver.run_in_simulator(shell.rom, FM4_KEYS, 60_000_000, disk=image)
+    assert cpu.halted and text == FM4_OUTPUT, text
+    with FileSystem(image) as disk:
+        assert disk.entries(disk.lookup("/q/d")) == [], "a failed copy left a half folder"
+        assert len(disk.entries(disk.lookup("/q/t"))) == 3
+        assert disk.check() == [], disk.check()
+    return f"{tools} + {fm} + {fm2} + {fm3} + {cpu.instructions} instructions"
+
+
 CHECKS = [
     check_format,
     check_text_round_trip,
@@ -806,6 +1225,7 @@ CHECKS = [
     check_shell,
     check_editor,
     check_screen_editor,
+    check_tools,
 ]
 
 
