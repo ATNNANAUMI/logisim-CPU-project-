@@ -199,7 +199,15 @@ def check_png():
                                             + [(1, 2, 3, 255)] * 2 + [(0, 0, 0, 0)] * 2)
     for bad in (b"GIF89a", png_bytes(1, 1, 2, 8, [b"\0\0\0"], [0]).replace(
             b"IHDR" + struct.pack(">II", 1, 1) + b"\x08\x02\x00\x00\x00",
-            b"IHDR" + struct.pack(">II", 1, 1) + b"\x08\x02\x00\x00\x01")):
+            b"IHDR" + struct.pack(">II", 1, 1) + b"\x08\x02\x00\x00\x01"),
+            # damaged files found by abusing the tool: each must be a ValueError, not a traceback
+            png_bytes(1, 1, 2, 8, [b"\0\0\0"], [0])[:-20],                     # the data stream cut off
+            png_bytes(2, 2, 2, 8, [b"\0" * 6] * 2, [0, 0]).replace(              # 2 x 2 said, 1 x 1 stored
+                b"IHDR" + struct.pack(">II", 2, 2), b"IHDR" + struct.pack(">II", 9, 9)),
+            png_bytes(1, 1, 2, 8, [b"\0\0\0"], [0]).replace(
+                b"IHDR" + struct.pack(">II", 1, 1), b"IHDR" + struct.pack(">II", 65535, 65535)),
+            png_bytes(1, 1, 2, 8, [b"\0\0\0"], [0]).replace(
+                b"IHDR" + struct.pack(">II", 1, 1), b"IHDR" + struct.pack(">II", 0, 0))):
         try:
             read(bad)
         except ValueError:

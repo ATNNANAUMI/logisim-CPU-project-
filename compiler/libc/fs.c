@@ -59,15 +59,23 @@ void _fs_forget(void)
 
 int _fs_mount(void)
 {
+    unsigned size;
     if (mounted)
         return 0;
-    if (__builtin_in(SEEK_PORT) == 0 || disk_read(0) != MAGIC
+    size = __builtin_in(SEEK_PORT);
+    if (size == 0 || disk_read(0) != MAGIC
             || disk_read(1) != 1 || disk_read(2) != _FS_BLOCK) {
         errno = ENODEV;         /* no disk, or not formatted */
         return -1;
     }
     blocks = disk_read(3);
     fat_start = disk_read(4);
+    /* a damaged superblock must not send df and the allocator through billions of blocks (fs.py checks the same) */
+    if (blocks < 4 || blocks > size / _FS_BLOCK || fat_start < 1
+            || fat_start + (blocks + _FS_BLOCK - 1) / _FS_BLOCK > blocks) {
+        errno = ENODEV;
+        return -1;
+    }
     mounted = 1;
     return 0;
 }
@@ -361,7 +369,7 @@ int _fs_parent(const char *path, _Node *dir, char *name)
         return -1;
     }
     for (c = name; *c; c++)
-        if (*c == ' ' || (unsigned)*c < 32) {
+        if (*c == ' ' || (unsigned)*c < 32 || (unsigned)*c > 0x10FFFF) {   /* not a character */
             errno = EINVAL;
             return -1;
         }

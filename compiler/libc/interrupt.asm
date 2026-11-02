@@ -34,6 +34,12 @@
 ; one before, R0 ... R15 the 16 after it); _int_depth counts the entries
 ; in progress. With _int_kstack = 0 (every program but a kernel) nothing
 ; changes stacks.
+;
+; The NMI cannot be switched off, so the way out is built for one landing
+; anywhere in it: _int_depth is stored last (the NMI is then an inner entry
+; on the stack it finds, never an outermost one), and the limit is the last
+; RAM word while the stacks change (the kernel's limit is below every
+; program's stack: a push on a program's stack would FAULT).
 ; ==================================================================
 
         .global _nmi, _irq, _trap, _fault
@@ -182,8 +188,10 @@ int_back:
         DATA R3, _int_depth
         LD R3, R4
         SUB R4, #1
-        ST R3, R0
-        CPY R0, R4                  ; R4 = entries still in progress
+        CPY R0, R4                  ; R4 = entries still in progress; _int_depth keeps
+                                    ; the old value until int_restore: an NMI (it cannot
+                                    ; be switched off) in the way out is then an inner
+                                    ; entry on the stack it finds, not an outermost one
         TEST R9
         RJF Z, int_switch
         TEST R4
@@ -218,6 +226,9 @@ int_switch:
 int_same:
         DATA R5, _int_cur
         LD R5, R7                   ; R7 = the record of what runs now
+        DATA R6, 0xFFFFFF
+        SLIM R6                     ; no limit while the stacks change: the kernel's limit
+                                    ; is below every program's stack
         LD R7, R6
         SSP R6
         ADD R7, #1
@@ -227,5 +238,8 @@ int_same:
         LD R0, R6
         SLIM R6
 int_restore:
+        DATA R3, _int_depth
+        CPY R4, R0
+        ST R3, R0                   ; the last thing before RESTORE and RTI
         RESTORE R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13, R14, R15
         RTI

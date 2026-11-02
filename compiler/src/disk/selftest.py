@@ -1029,6 +1029,137 @@ CPU halted
 """
 
 
+def check_abuse():
+    """Things a program or a user should not be able to break, found by
+    abusing the OS (2026-11-02): (1) an NMI in the middle of the way out of
+    an interrupt (the stack switch) used to leave the OS stopped with "kernel:
+    stack overflow"; here it lands at five places of that code and the menu
+    still works; (2) a TEX2 header asking for 0xFFFFFFFF words of region
+    wrapped the address arithmetic and wedged the shell, now "Cannot
+    allocate memory"; (3) a file name with a word that is no character is
+    refused (it made fsck crash). The disk is consistent after all of it."""
+    import sys, struct
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+    sys.path.append(str(root / "cpu_sim" / "src"))
+    from cpu import CPU
+    from devices import Timer
+
+    kernel = _kernel()
+    where = {sym.name: sym.address for sym in kernel.symbols if sym.section == "rom"}
+    image = os.path.join(TMP.name, "abuse.img")
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "loop.c").write_text("int main(void) { volatile int x = 0; for (;;) x++; }\n")
+        (Path(tmp) / "hi.c").write_text('#include <stdio.h>\nint main(void) { puts("hi"); return 0; }\n')
+        exes = {}
+        for name in ("loop", "hi"):
+            program, _ = driver.build([str(Path(tmp) / (name + ".c"))], exe=True)
+            exes[name] = driver.exe_bytes(program)
+        wild = bytearray(exes["hi"])
+        wild[24:28] = struct.pack("<I", 0xFFFFFFFF)         # header word 6: the region wanted
+        (Path(tmp) / "name.c").write_text(
+            '#include <stdio.h>\nint main(void) { char n[4] = {47, 0x7FFFFFFF, 0, 0}; n[0] = 47;\n'
+            '  FILE *f = fopen(n, "w"); puts(f ? "created" : "refused"); return 0; }\n')
+        program, _ = driver.build([str(Path(tmp) / "name.c")], exe=True)
+        exes["name"] = driver.exe_bytes(program)
+
+    def fresh():
+        make_disk.make(image, programs=[], new=True, size_mb=1, log=lambda _: None)
+        with FileSystem(image) as disk:
+            for name, data in exes.items():
+                disk.put(f"/bin/{name}", data, binary=True)
+            disk.put("/bin/wild", bytes(wild), binary=True)
+        cpu = CPU()
+        cpu.mem.load_rom(kernel.rom)
+        cpu.bus.attach_disk(image)
+        cpu.bus.timer = Timer(clock=lambda: cpu.instructions / 1e6)
+        cpu.bus._link_timer()
+        return cpu
+
+    def run(cpu, keys="", steps=400_000):
+        cpu.bus.keyboard.type(keys)
+        cpu.run_sleeping(steps)
+
+    try:
+        # (1) an NMI at five places of int_switch .. int_restore, with a program in front and another behind
+        for name, later in (("int_switch", 0), ("int_same", 0), ("int_same", 3), ("int_same", 6),
+                            ("int_restore", 0)):
+            at = where[name]
+            cpu = fresh()
+            run(cpu, steps=500_000)
+            run(cpu, "loop &\nloop\n", 600_000)
+            for _ in range(400_000):                        # the first way out of an interrupt through `at`
+                if cpu.iar == at:
+                    break
+                if cpu.step() is None:
+                    cpu.run_sleeping(1000)
+            assert cpu.iar == at, f"never reached {name}"
+            for _ in range(later):                          # that many instructions further on
+                cpu.step()
+            cpu.nmi()
+            run(cpu)
+            text = cpu.bus.display.text
+            assert "[loop: 1 kill, 2 continue, 3 background, 4 tasks] " in text, (name, text[-200:])
+            run(cpu, "1")
+            run(cpu, "echo ok\njobs\n", 600_000)
+            text = cpu.bus.display.text
+            assert "kernel:" not in text and "stack overflow" not in text and not cpu.halted, (name, text[-200:])
+            assert "ok\n" in text.rpartition("[loop: exit status 130]")[2], (name, text[-200:])
+            assert "loop          running" in text.rpartition("jobs")[2], (name, text[-200:])
+        # (2) a region of 0xFFFFFFFF words is refused, and the shell goes on
+        cpu = fresh()
+        run(cpu, steps=500_000)
+        run(cpu, "/bin/wild\n/bin/hi\n", 3_000_000)
+        text = cpu.bus.display.text
+        assert "wild: Cannot allocate memory" in text and text.endswith("hi\n/> "), text[-200:]
+        # (3) a name with a word that is no character
+        run(cpu, "name\n", 3_000_000)
+        assert cpu.bus.display.text.endswith("refused\n/> "), cpu.bus.display.text[-100:]
+        run(cpu, "halt\n", 400_000)
+        assert cpu.halted
+    finally:
+        cpu.bus.attach_disk(None)
+    with FileSystem(image) as disk:
+        assert disk.check() == [], disk.check()
+        # a name with a word that is no character (an old OS could write one): listed and reported, no crash
+        disk.put("/zz", b"x")
+        node = disk.lookup("/zz")
+        disk.write(node.parent, node.index * fs.ENTRY, [0x7FFFFFFF])
+        assert any("bad name" in problem for problem in disk.check()), disk.check()
+        assert any("\ufffd" in child.name for child in disk.entries(disk.root()))
+        # damage the tool must report, not crash on: a directory that points back at the root,
+        # a read past the end of a chain
+        disk.put("/yy", b"y")
+        disk.mkdir("/loop")
+        node = disk.lookup("/loop")
+        disk.write(node.parent, node.index * fs.ENTRY + fs.E_FIRST, [disk.root().first])
+        assert any("reached twice" in problem for problem in disk.check()), disk.check()
+        try:
+            disk.read(disk.lookup("/yy"), 0, 10 ** 6)
+            raise AssertionError("a read past the chain worked")
+        except FsError:
+            pass
+    with open(image, "r+b") as f:                       # a superblock that says more blocks than the file has
+        f.seek(fs.SB_BLOCKS * 4)
+        f.write(struct.pack("<I", 0x7FFFFFFF))
+    try:
+        FileSystem(image).close()
+        raise AssertionError("a damaged superblock was accepted")
+    except FsError:
+        pass
+    cpu = CPU()                                         # the OS refuses it too (df used to count 2 billion blocks)
+    cpu.mem.load_rom(kernel.rom)
+    cpu.bus.attach_disk(image)
+    try:
+        cpu.run_sleeping(3_000_000)
+        assert cpu.halted and "no disk, or not formatted" in cpu.bus.display.text, cpu.bus.display.text[-200:]
+    finally:
+        cpu.bus.attach_disk(None)
+
+
 def check_editor():
     """tynix/ed.c as a program from /bin, started by the shell: add, delete,
     substitute, find, insert, the unsaved-changes warning (q and Ctrl-D), a
@@ -1536,6 +1667,7 @@ CHECKS = [
     check_reclaim,
     check_kill,
     check_multitask,
+    check_abuse,
     check_editor,
     check_screen_editor,
     check_tools,

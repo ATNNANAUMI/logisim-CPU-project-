@@ -120,12 +120,17 @@ class FileSystem:
             self.close()
             raise FsError(f"{self.path}: not formatted (no TFS1 superblock): "
                           "python compiler/src/disk format IMG")
-        if self.word(SB_VERSION) != VERSION or self.word(SB_BLOCK) != BLOCK:
+        version, block = self.word(SB_VERSION), self.word(SB_BLOCK)
+        if version != VERSION or block != BLOCK:
             self.close()
-            raise FsError(f"{self.path}: TFS1 version {self.word(SB_VERSION)}, "
-                          f"block size {self.word(SB_BLOCK)}: not supported")
+            raise FsError(f"{self.path}: TFS1 version {version}, block size {block}: not supported")
         self.blocks = self.word(SB_BLOCKS)
         self.fat_start = self.word(SB_FAT)
+        if (self.blocks < MIN_BLOCKS or self.blocks * BLOCK > self.words or self.fat_start < 1
+                or self.fat_start + fat_blocks(self.blocks) > self.blocks):
+            self.close()
+            raise FsError(f"{self.path}: the superblock does not fit the file "
+                          f"({self.blocks} blocks, FAT at {self.fat_start}): damaged")
         self.hint = 0                       # where to start looking for a free block
 
     # ------------------------------------------------------------ format
@@ -162,10 +167,16 @@ class FileSystem:
 
     # ------------------------------------------------------------ words
     def word(self, i):
-        return WORD.unpack_from(self.map, i * 4)[0]
+        try:
+            return WORD.unpack_from(self.map, i * 4)[0]
+        except struct.error:                # a block number from a damaged disk
+            raise FsError(f"word {i} is past the end of the disk") from None
 
     def set_word(self, i, value):
-        WORD.pack_into(self.map, i * 4, value & 0xFFFFFFFF)
+        try:
+            WORD.pack_into(self.map, i * 4, value & 0xFFFFFFFF)
+        except struct.error:
+            raise FsError(f"word {i} is past the end of the disk") from None
 
     def fat(self, block):
         return self.word(self.fat_start * BLOCK + block)
@@ -207,6 +218,8 @@ class FileSystem:
         """Words start .. start + count of a file's blocks (to its last block)."""
         blocks = self.chain(node.first)
         end = len(blocks) * BLOCK if count is None else start + count
+        if end > len(blocks) * BLOCK:
+            raise FsError(f"{node.name}: {end} words wanted, its chain has {len(blocks) * BLOCK}")
         out = []
         for i in range(start, end):
             out.append(self.word(blocks[i // BLOCK] * BLOCK + i % BLOCK))
@@ -248,7 +261,11 @@ class FileSystem:
         for index in range(directory.length // ENTRY):
             e = words[index * ENTRY:(index + 1) * ENTRY]
             if e[E_FLAGS] & USED:
-                name = "".join(chr(c) for c in e[:NAME_WORDS][:e.index(0)])
+                # a word that is no character (a program wrote one) shows as U+FFFD: listing and fsck must not crash
+                name_words = e[:NAME_WORDS]
+                if 0 in name_words:
+                    name_words = name_words[:name_words.index(0)]
+                name = "".join(chr(c) if 0 <= c < 0x110000 else "\ufffd" for c in name_words)
                 out.append(Node(name, e[E_FIRST], e[E_LENGTH], e[E_FLAGS], directory, index))
         return out
 
@@ -305,7 +322,14 @@ class FileSystem:
         owner = {b: "the superblock and FAT"
                  for b in range(self.fat_start + fat_blocks(self.blocks))}
 
+        visited = set()
+
         def walk(node, path):
+            if node.is_dir and node.first not in (0, END):     # an empty directory has no block
+                if node.first in visited:       # an entry pointing back up: walking it would never end
+                    problems.append(f"{path}: directory at block {node.first} is reached twice (a loop)")
+                    return
+                visited.add(node.first)
             try:
                 chain = self.chain(node.first)
             except FsError as e:
@@ -319,7 +343,18 @@ class FileSystem:
             if words > len(chain) * BLOCK:
                 problems.append(f"{path}: length {node.length} past its {len(chain)} blocks")
             if node.is_dir:
-                for child in self.entries(node):
+                try:
+                    children = self.entries(node)
+                except FsError as e:
+                    problems.append(f"{path}: {e}")
+                    return
+                for child in children:
+                    try:
+                        check_name(child.name)
+                        if "\ufffd" in child.name:
+                            raise FsError("a character that does not exist")
+                    except FsError as e:
+                        problems.append(f"{path}: entry {child.name!r}: bad name ({e})")
                     walk(child, path.rstrip("/") + "/" + child.name)
 
         walk(self.root(), "/")

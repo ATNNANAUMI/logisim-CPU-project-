@@ -10,6 +10,9 @@ SIGNATURE = b"\x89PNG\r\n\x1a\n"
 CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}      # PNG colour type -> samples per pixel
 
 
+MAX_PIXELS = 1 << 26            # 64 million: a bigger one is a mistake or an attack, not a picture for a 256 x 256 screen
+
+
 def read_png(path):
     """(width, height, pixels) from a PNG file: any colour type and bit
     depth, but not interlaced."""
@@ -23,7 +26,9 @@ def read_png(path):
         body = data[pos + 8:pos + 8 + size]
         pos += 12 + size
         if kind == b"IHDR":
-            header = struct.unpack(">IIBBBBB", body)
+            if len(body) < 13:
+                raise ValueError(f"{path}: damaged PNG (short IHDR chunk)")
+            header = struct.unpack(">IIBBBBB", body[:13])
         elif kind == b"PLTE":
             plte = body
         elif kind == b"tRNS":
@@ -39,11 +44,19 @@ def read_png(path):
         raise ValueError(f"{path}: unknown PNG colour type {ctype} / bit depth {depth}")
     if interlace:
         raise ValueError(f"{path}: interlaced PNG: save it again without interlacing")
-    raw = zlib.decompress(b"".join(idat))
+    if width < 1 or height < 1 or width * height > MAX_PIXELS:
+        raise ValueError(f"{path}: a {width} x {height} picture (1 to {MAX_PIXELS} pixels are read)")
+    try:
+        raw = zlib.decompress(b"".join(idat))
+    except zlib.error as e:
+        raise ValueError(f"{path}: damaged PNG (the image data does not unpack: {e})") from None
 
     channels = CHANNELS[ctype]
     bpp = max(1, channels * depth // 8)              # filter unit, in bytes
     stride = (width * channels * depth + 7) // 8
+    if len(raw) < height * (stride + 1):
+        raise ValueError(f"{path}: damaged PNG (the image data is {len(raw)} bytes, "
+                         f"a {width} x {height} picture needs {height * (stride + 1)})")
     rows, prev, p = [], bytearray(stride), 0
     for _ in range(height):
         kind, line = raw[p], bytearray(raw[p + 1:p + 1 + stride])
