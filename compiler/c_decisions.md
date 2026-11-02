@@ -413,6 +413,39 @@ has its own library) still holds for everything but the disk.
     loop still runs until its stack ends (139). The PNG reader turns a short
     or damaged file into `ValueError`, and refuses more than 2^26 pixels.
 
+Phase 8, Claude from the CPU's keyboard (2026-11-02):
+
+70. **A child gets its caller's stdout and stdin.** `spawn` with `out_fd` 1
+    used to give the child the display even when the caller's own stdout
+    was a file; now it gets the caller's (as in Unix), so `sh -c LINE >
+    file`, `run FILE > out` and `claude`'s commands catch what the program
+    they start prints. A program run with `>` that starts another (the file
+    manager opening `edit`) now hands it the file too: nothing does that
+    today.
+71. **stdin from a file: `SPAWN_IN(fd)` in the flags word** (the system
+    call's four registers were taken), the block's `B_IN`, and a hook in
+    `getchar.c` (`_stdin_get`): the line comes from fd 0, without echo, and
+    the file's end is `EOF`. Only `getchar`/`fgets`/`scanf` see it;
+    `key_pressed()`/`wait_key()` still read the keyboard, so a program that
+    polls keys is not fed by it (Claude is told not to run those). Chosen
+    over the simulator typing the input into the keyboard (option b of the
+    plan): typed keys and real ones would mix, and EOF would be a Ctrl-D
+    that some programs ignore.
+72. **`claude` polls the device** (no interrupt source; plan question 2):
+    `device_in` and a 10 ms `wait_ms` when nothing came, so it sleeps in
+    the kernel and the others run. A device interrupt would need a new
+    kind of wait in the kernel for one program.
+73. **`claude` kills the whole tree at the timeout** (`tasks()`, the
+    youngest first): `sh -c` starts the program as its own child, and
+    killing only the shell left the program running as the shell's job.
+    When `claude` itself is killed (Esc, 1), its command is left alone, as
+    the kernel does with any orphan (plan question 3a).
+74. **Keys typed while a reply comes are kept** (found by the self-check:
+    polling for Ctrl-X ate them): `claude` reads its own lines and starts
+    each with them; a `y`/`n` typed ahead answers `/approve`'s question.
+    `claude QUESTION` does not look at the keyboard, so what is typed meanwhile
+    stays for the shell.
+
 ## Measured on the circuit while doing this
 
 * `diag12`/`diag13`: the carry flag is a *borrow* for `SUB`, and `CMP`,

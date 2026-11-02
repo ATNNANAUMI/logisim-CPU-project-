@@ -21,3 +21,6 @@ labs
 compiler/examples/c/graphics/videos/recording_20261022_12-00-41.mp4
 # disk images (--disk): can be big, and are made by a script, not committed
 *.img
+# Claude's folder on the PC (cpu_sim/src/claude.py): what it writes, not committed
+tynix/claude/*
+!tynix/claude/README.md

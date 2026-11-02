@@ -5,6 +5,7 @@
     python cpu_sim/src/main.py compiler/ROM/hello.rom --headless   run in the terminal
         (--screen out.png saves the RGB screen at the end)
     python cpu_sim/src/main.py prog.rom --disk disk.img        with a disk (created if missing)
+    python cpu_sim/src/main.py prog.rom --claude-model sonnet  the model of the Claude device (0x9C)
 """
 
 import argparse
@@ -13,8 +14,10 @@ from cpu import CPU
 from memory import load_image
 
 
-def build_cpu(rom_path=None, ram_path=None, disk_path=None) -> CPU:
+def build_cpu(rom_path=None, ram_path=None, disk_path=None, claude_model=None,
+              claude_system=None) -> CPU:
     cpu = CPU()
+    cpu.bus.claude.configure(claude_model, claude_system)
     if rom_path:
         cpu.mem.load_rom(load_image(rom_path))
     if ram_path:
@@ -74,10 +77,15 @@ def main() -> None:
                              "program runs (default 30, 0 = at every tick)")
     parser.add_argument("--disk", metavar="FILE",
                         help="disk image for devices 0x8C/0x8D (created, 64 MB sparse, if missing)")
+    parser.add_argument("--claude-model", metavar="NAME",
+                        help="the Claude device's model (0x9C): haiku (default), sonnet, opus, "
+                             "fable, or a model id; /model changes it later")
+    parser.add_argument("--claude-system", metavar="FILE",
+                        help="the Claude device's system prompt (default tynix/cpu_claude.md)")
     args = parser.parse_args()
 
     try:
-        cpu = build_cpu(args.rom, args.ram, args.disk)
+        cpu = build_cpu(args.rom, args.ram, args.disk, args.claude_model, args.claude_system)
     except (ValueError, OSError) as error:
         parser.error(str(error))
     try:

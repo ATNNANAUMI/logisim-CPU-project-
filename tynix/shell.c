@@ -28,6 +28,12 @@
  * The NMI (Esc) belongs to the kernel: on the program in front it asks
  * kill / continue / background / tasks; "background" gives the keyboard
  * back to this shell, which prints the job's number.
+ *
+ * `sh -c LINE` runs that one line and ends with its status, without the
+ * banner or a prompt (Claude's `claude` program runs its commands so, with
+ * stdin and stdout files). `run FILE` runs the lines of a text file as if
+ * typed (a batch file; lines starting with # are left out), and ends with
+ * the last one's status.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,6 +59,8 @@ static FILE *out;               /* where a built-in writes: stdout, or a file af
 static char *redirect;          /* the file after > or >>, or 0 */
 static int append;              /* >> */
 static int background;          /* the line ended with & */
+static FILE *base_out;          /* where a line writes without >: stdout, or run's file */
+static int depth;               /* run inside run */
 static struct job {             /* the programs this shell left running */
     int pid;
     char name[32];
@@ -96,6 +104,7 @@ static int is_dir(const char *p)
    arguments (the shell prints the usage). */
 
 static int cmd_help(int argc, char **argv);
+static int cmd_run(int argc, char **argv);
 
 static int list(const char *dir, int sizes)
 {
@@ -461,6 +470,7 @@ static const struct command {
     {"fg", "fg pid", "bring a program to the front, wait", cmd_fg},
     {"kill", "kill pid...", "end programs (status 130)", cmd_kill},
     {"wait", "wait [pid]", "wait for a program (none: all)", cmd_wait},
+    {"run", "run file", "run the lines of a file as commands", cmd_run},
 };
 
 #define N_COMMANDS (int)(sizeof commands / sizeof commands[0])
@@ -499,7 +509,8 @@ static int run_program(int argc, char **argv)
         sprintf(path, "/bin/%s", argv[0]);
     if (redirect && (to = fopen(redirect, append ? "a" : "w")) == 0)
         return fail(argv[0], redirect);
-    pid = spawn_to(path, argv, to, background ? 0 : SPAWN_FG);
+    pid = spawn_to(path, argv, to ? to : base_out != stdout ? base_out : 0,
+                   background ? 0 : SPAWN_FG);
     if (to)
         fclose(to);                     /* the program has its own hold on the file */
     if (pid < 0) {
@@ -588,34 +599,89 @@ static int split(char *s)
     return n;
 }
 
-static void run_line(char *s)
+/* one command line; its status */
+static int run_line(char *s)
 {
     int argc = split(s), i, status;
+    FILE *to;
     if (argc <= 0)
-        return;
+        return argc < 0;
     for (i = 0; i < N_COMMANDS; i++)
         if (strcmp(args[0], commands[i].name) == 0)
             break;
-    if (i == N_COMMANDS) {
-        run_program(argc, args);
-        return;
-    }
+    if (i == N_COMMANDS)
+        return run_program(argc, args);
     if (background)
         printf("%s: a built-in command can't run in the background\n", args[0]);
-    out = stdout;
-    if (redirect && (out = fopen(redirect, append ? "a" : "w")) == 0) {
-        fail(args[0], redirect);
-        return;
-    }
+    to = base_out;
+    if (redirect && (to = fopen(redirect, append ? "a" : "w")) == 0)
+        return fail(args[0], redirect);
+    out = to;
     status = commands[i].run(argc, args);
-    if (out != stdout)
-        fclose(out);
-    if (status == -1)
+    if (to != base_out)
+        fclose(to);
+    if (status == -1) {
         printf("usage: %s\n", commands[i].usage);
+        status = 2;
+    }
+    return status;
 }
 
-int main(void)
+/* run FILE: its lines, as if typed; the output of each goes where run's goes */
+static int cmd_run(int argc, char **argv)
 {
+    static char text[LINE_MAX];
+    FILE *f, *saved = base_out;
+    int status = 0, n = 0;
+    if (argc != 2)
+        return -1;
+    if (depth == 8) {
+        printf("run: %s: runs inside runs, 8 deep\n", argv[1]);
+        return 1;
+    }
+    if ((f = fopen(argv[1], "r")) == 0)
+        return fail(argv[0], argv[1]);
+    base_out = out;
+    depth++;
+    while (fgets(text, sizeof text, f)) {
+        char *p = text;
+        int len = strlen(text), c;
+        n++;
+        if (len == sizeof text - 1 && text[len - 1] != '\n') {     /* a cut line would run as two commands */
+            while ((c = fgetc(f)) != EOF && c != '\n')
+                ;
+            printf("run: %s: line %d is longer than %d chars, stopped\n", argv[1], n, LINE_MAX - 1);
+            status = 1;
+            break;
+        }
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (*p == '#' || *p == '\n' || !*p)
+            continue;
+        strcpy(line, p);                /* run_line writes into its words */
+        status = run_line(line);
+    }
+    depth--;
+    base_out = saved;
+    fclose(f);
+    return status;
+}
+
+int main(int argc, char **argv)
+{
+    base_out = stdout;
+    if (argc >= 2 && strcmp(argv[1], "-c") == 0) {     /* sh -c LINE: that line, then the end */
+        if (argc != 3) {
+            printf("usage: sh -c 'command line'\n");
+            return 2;
+        }
+        if (strlen(argv[2]) >= LINE_MAX) {
+            printf("sh: the line is longer than %d chars\n", LINE_MAX - 1);
+            return 2;
+        }
+        strcpy(line, argv[2]);
+        return run_line(line);
+    }
     printf("Tynix shell: help lists the commands\n");
     for (;;) {
         reap();

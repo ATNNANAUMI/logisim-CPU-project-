@@ -21,13 +21,18 @@ void _set_stdout(int (*put)(int, FILE *))
     out_file.put = put;
 }
 
+extern int (*_stdin_get)(void);         /* getchar.c */
+
 /* unistd.h: 1 for the keyboard and the display; 0 for stdout once a shell's
-   `>` gave the program a file (spawnv_to, spawn_to), so a program can tell */
+   `>` gave the program a file (spawnv_to, spawn_to), and for stdin once it
+   was given one (SPAWN_IN), so a program can tell */
 int isatty(int fd)
 {
     if (fd == 1)
         return out_file.put == 0;
-    return fd == 0 || fd == 2;
+    if (fd == 0)
+        return _stdin_get == 0;
+    return fd == 2;
 }
 
 int fputc(int c, FILE *stream)

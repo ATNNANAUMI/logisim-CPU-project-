@@ -72,6 +72,10 @@ def main(argv=None):
                            help="save the RGB screen (gfx.h) as a PNG at the end")
             p.add_argument("--disk", metavar="FILE",
                            help="disk image for devices 0x8C/0x8D (created, 64 MB sparse, if missing)")
+            p.add_argument("--claude-model", metavar="NAME",
+                           help="the Claude device's model (0x9C): haiku (default), sonnet, opus, fable")
+            p.add_argument("--claude-system", metavar="FILE",
+                           help="the Claude device's system prompt (default tynix/cpu_claude.md)")
 
     args = cli.parse_args(argv)
     warn = None if args.no_warn else driver.print_warning
@@ -111,7 +115,8 @@ def main(argv=None):
 
         try:
             cpu, text = driver.run_in_simulator(program.rom, args.keys, args.steps, args.trace,
-                                                disk=args.disk)
+                                                disk=args.disk, claude_model=args.claude_model,
+                                                claude_system=args.claude_system)
         except (ValueError, OSError) as e:          # a disk file that can't be used
             print(e, file=sys.stderr)
             return 1

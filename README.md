@@ -28,12 +28,17 @@ and, in the simulator only, a disk kept in a file at `0x8C`/`0x8D`, with a
 filesystem that C's `fopen` reads and writes and `compiler/src/disk` edits
 from the PC; Tynix, `tynix/`, is a small OS for it: a preemptive multitasking
 kernel in ROM that loads several programs from the disk into RAM at once,
-with a Unix-like shell, `/bin/sh`).
+with a Unix-like shell, `/bin/sh`; and a Claude device at `0x9C`, through
+which `claude` on Tynix talks to the Claude API on the PC and lets Claude run
+commands on the CPU).
 Every ALU result goes to **R0**.
 
 ## Requirements
 
 * Python 3.10+, standard library only
+* only for Tynix's `claude` (the Claude device): `pip install anthropic` and
+  an API key on the PC (`ANTHROPIC_API_KEY`, or `ant auth login`). What Claude
+  reads is sent to Anthropic's API
 * `tkinter` for the simulator window (Arch: `tk`, Debian/Ubuntu: `python3-tk`,
   Fedora: `python3-tkinter`)
 * Logisim-evolution 4.1.0 to open or run the circuit (not included)
@@ -98,6 +103,7 @@ python tynix/make_disk.py                       # tynix/disk.img: /bin/sh and th
 python compiler/src/cc build tynix/kernel.c
 python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img   # type help, ls /bin, primes &, jobs, snake ...
 tynix/run_with_video.sh [clip.h]                # the OS with video_player in /bin, in the window
+python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img --claude-model haiku   # then type: claude
 ```
 
 ## A taste of the assembly
@@ -146,13 +152,13 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 | `compiler/src/disk/` | disk tool: makes and edits disk images (TFS1 filesystem) for the simulator's `--disk` |
 | `compiler/src/img/` | image converter: PNG -> compressed picture for `gfx_image()` (`gfx.h`); `video.py`: a video -> frames for `video_player.c` |
 | `compiler/libc/` | the C library: headers (`include/`), C and assembly sources |
-| `tynix/` | the OS, Tynix (simulator only): `kernel.c`, the ROM (programs side by side, the filesystem, system calls); `shell.c`, the shell (`/bin/sh`); `ed.c`, a line editor; `edit.c`, a full-screen editor on the RGB screen; `more`, `grep`, `find`, `tree`, `du`, `diff`, `hexdump`, `calc` (one `.c` each) and `visual_file_manager.c`, a yazi-like file manager on the RGB screen; `make_disk.py`, a disk with these and the C examples in `/bin` |
+| `tynix/` | the OS, Tynix (simulator only): `kernel.c`, the ROM (programs side by side, the filesystem, system calls); `shell.c`, the shell (`/bin/sh`); `ed.c`, a line editor; `edit.c`, a full-screen editor on the RGB screen; `more`, `grep`, `find`, `tree`, `du`, `diff`, `hexdump`, `calc` (one `.c` each) and `visual_file_manager.c`, a yazi-like file manager on the RGB screen; `claude.c`, Claude through the Claude device, with its system prompt `cpu_claude.md`, the PC paths it may use in `claude_access.conf` and its folder `claude/`; `make_disk.py`, a disk with these and the C examples in `/bin` |
 | `compiler/examples/` | example programs: `asm/` (programs, the standard library `stdlib/stdlib.asm`, `tests/` circuit diagnostics) and `c/` in folders by kind (`basics/`, `games/`, `graphics/`, `tests/`, `os/`) |
 | `compiler/ROM/` | build output for ROM images (ignored by git) |
 | `compiler/assembly_syntax.md` | full assembly language reference |
 | `compiler/c_language.md` | the C language and library reference |
 | `compiler/c_decisions.md` | the C compiler's design decisions, guesses and open questions |
-| `cpu_sim/src/` | Python simulator (core, a translator of hot code into Python, GUI, self-checks, `bench.py` speed check) |
+| `cpu_sim/src/` | Python simulator (core, a translator of hot code into Python, GUI, the Claude device `claude.py`, self-checks, `bench.py` speed check) |
 | `run.py` | one entry point for all of the above |
 
 ## Documentation

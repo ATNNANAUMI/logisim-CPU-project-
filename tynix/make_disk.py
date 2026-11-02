@@ -34,7 +34,7 @@ DEFAULT_IMAGE = ROOT / "tynix" / "disk.img"
 PROGRAMS = ["echo", "hello", "primes", "structs", "guess", "gfx_demo", "image_demo",
             "snake", "game_of_life", "grapher", "qr", "disk_notes", "ed", "edit",
             "more", "grep", "find", "tree", "du", "diff", "hexdump", "calc",
-            "visual_file_manager"]
+            "visual_file_manager", "claude"]
 SOURCES = {"sh": "shell"}               # /bin/sh is tynix/shell.c
 REGIONS = {"diff": 0x140000}            # RAM a program asks for (cc build --exe --region):
                                         # diff's table of 1001 x 1001 words does not fit in 1M
@@ -64,6 +64,9 @@ starts the shell, /bin/sh from tynix/shell.c).
                    fg N brings one forward, kill N ends it
   Esc              (the NMI) on the program in front: kill, continue,
                    background, or the list of tasks
+  sh -c 'ls /bin'  one command line, then the end; run FILE: a file's lines
+  claude           talk to Claude (on the PC, through device 0x9C: needs
+                   an API key there); claude QUESTION asks once
 
 On the RGB screen (the simulator window's tab): snake and
 game_of_life (q quits), gfx_demo, image_demo, grapher and qr

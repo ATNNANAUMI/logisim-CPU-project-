@@ -26,7 +26,15 @@
  *                        caller's, still open when the program ends.
  *   spawn(path, argv, flags)     start it and don't wait: its pid, or -1.
  *                        flags SPAWN_FG gives it the keyboard and the screen.
- *   spawn_to(path, argv, out, flags)   the same, its stdout to out (or 0).
+ *   spawn_to(path, argv, out, flags)   the same, its stdout to out (or 0:
+ *                        the caller's stdout, which is a file when the
+ *                        caller's is).
+ *   spawn_io(path, argv, in, out, flags)   the same, and its stdin (what
+ *                        getchar, fgets and scanf read) from the open FILE in,
+ *                        without echo, EOF at its end (or 0: the caller's
+ *                        stdin, the keyboard unless the caller's is a file).
+ *                        Keys read with key_pressed()/wait_key() still come
+ *                        from the keyboard.
  *   waitpid(pid, &status, flags) wait for a child (pid -1: any) to end:
  *                        its pid, or 0 with WAIT_NOHANG while it still runs,
  *                        -1 (ECHILD) when there is none. status: as spawnv's.
@@ -41,9 +49,10 @@
  *                        blocks it freed, or -1 (errno ENODEV, no disk).
  *                        Not POSIX.
  *   isatty(fd)           1 if fd (0 keyboard, 1 stdout, 2 stderr) is the
- *                        console, 0 if it is a file: only stdout can be, when
- *                        the shell started the program with `>`. Not standard
- *                        in what it covers: there are no other descriptors.
+ *                        console, 0 if it is a file: stdout when the shell
+ *                        started the program with `>`, stdin when it was
+ *                        started with spawn_io. Not standard in what it
+ *                        covers: there are no other descriptors.
  */
 #ifndef _UNISTD_H
 #define _UNISTD_H
@@ -63,6 +72,7 @@ int spawnv(const char *path, char *const argv[]);
 int spawnv_to(const char *path, char *const argv[], FILE *out);
 int spawn(const char *path, char *const argv[], int flags);
 int spawn_to(const char *path, char *const argv[], FILE *out, int flags);
+int spawn_io(const char *path, char *const argv[], FILE *in, FILE *out, int flags);
 int waitpid(int pid, int *status, int flags);
 int kill(int pid, int sig);
 int getpid(void);

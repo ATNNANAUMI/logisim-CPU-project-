@@ -229,6 +229,7 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 | `0x7C` | timer (*planned*) | `INDATA` reads the milliseconds since reset, wrapping at 32 bits; C's `clock()` |
 | `0x8C` | disk seek (*simulator only*) | `OUTDATA` sets the disk's word position; `INDATA` reads the disk's size in words |
 | `0x8D` | disk data (*simulator only*) | `OUTDATA` writes the word at the position, `INDATA` reads it; both move the position on by one. Past the end, reads give 0 and writes are dropped |
+| `0x9C` | Claude (*simulator only*) | a terminal to the Claude API, on the PC (11.5). `OUTDATA`: a char of the message; `0` sends it; `0x18` a new conversation; `0x03` stops the reply; `0x16` a program starts using it. `INDATA`: the next char of the reply, `0` none yet, `4` the end of the turn, `2` a tool for the CPU (a letter, fields split by `0x1F`, then `0x03`; the CPU answers with the result and `0`) |
 
 `0x6C`/`0x6D` were chosen on 2026-10-11; `0x6C` was built on the circuit
 (`RGB_Display`, section 2.2) on 2026-10-22. The numbers are `VIDEO_*` in
@@ -253,6 +254,13 @@ sparse 64 MB file (16M words, `DISK_WORDS`), an existing one keeps its size
 moving it on after every word makes block copies a loop of `INDATA`s or
 `OUTDATA`s. A reset rewinds it to 0 and keeps the disk. The filesystem on
 the disk (TFS1) and the tool that makes images are in 7.6.
+
+The Claude device (`0x9C`, Phase 8, 2026-11-02) exists only in the
+simulator: it is Python (`cpu_sim/src/claude.py`) that calls the Claude API
+from the PC in a worker thread, so the simulation never waits for the
+network; the CPU polls it as it polls the keyboard. It raises no interrupt
+(decided 2026-11-02: `claude` polls, sleeping 10 ms when nothing came).
+11.5 has the protocol, the tools and the program that uses it.
 
 Each device compares the 8 low bits of the selected address against its own
 number with a gate decoder (the keyboard: bits 0–3 must be 0, bits 4–7 must
@@ -678,13 +686,14 @@ modules import each other by plain name, so run them as scripts
 | `isa.py` | opcode tables, `decode(word) -> Instr`, `disassemble(word, operand)`. `Instr.takes_operand` says whether a literal word follows |
 | `alu.py` | `int_op(name, a, b)` and `float_op(name, a, b)`, each returning `(R0 value, flag nibble)`; float32 ↔ bits helpers |
 | `memory.py` | `Memory` with two 16M-word banks (Python lists, 128 MB each, kept out of the cycle collector's sight with `gc.freeze()`: it walked their 32M items, 66 ms a time), `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
-| `devices.py` | `Display` (lines of text; `\n` new line, `\r` back to the start of the line (what follows overwrites it), `\b` deletes, `\f` clears it all, so headless output shows only what came after the last `\f`), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; the selected input and output addresses, and `hex_value`, the last word sent to the hex display; `OUTADDR` looks the output device up once and keeps its function in `send`, and putting another device in `display`, `video` or `disk` rewires it) |
+| `devices.py` | `Display` (lines of text; `\n` new line, `\r` back to the start of the line (what follows overwrites it), `\b` deletes, `\f` clears it all, so headless output shows only what came after the last `\f`), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; the selected input and output addresses, and `hex_value`, the last word sent to the hex display; `OUTADDR` looks the output device up once and keeps its function in `send`, and putting another device in `display`, `video` or `disk` rewires it; `claude`, the device at `0x9C`) |
+| `claude.py` | the Claude device (`0x9C`, 11.5): `ClaudeDevice` (the protocol, the worker thread, the history, the slash commands, the costs), `Access` (the PC paths of `tynix/claude_access.conf`), the tools, `AnthropicBackend` (the `anthropic` SDK, imported on first use) and `FakeBackend` (the self-checks) |
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()` (translated blocks, and the `_interpret()` loop), `reset()`, `resume()`, `forget_code()` |
 | `translate.py` | turns code that runs often into Python functions for `run()` (3.2): `translate()` (one block), `dispatcher()` (the loop that runs them) |
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 43 checks on the core |
+| `selftest.py` | 51 checks on the core and the Claude device |
 | `bench.py` | the simulator's speed on nine example programs (3.3) |
 
 ### 3.2 Execution model
@@ -765,7 +774,7 @@ never translated), and `os` stayed about the same (12.8–15.8 against 15.3–16
 ### 3.3 Running it
 
 ```
-python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--trace] [--keys TEXT] [--screen FILE.png] [--disk FILE] [--screen-fps N]
+python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--trace] [--keys TEXT] [--screen FILE.png] [--disk FILE] [--screen-fps N] [--claude-model NAME] [--claude-system FILE]
 ```
 
 * without `--headless`: opens the window with the ROM loaded
@@ -780,13 +789,18 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
 * `--screen-fps N`: the window draws the RGB screen at most N times a second
   while a program runs (default 30; 0 = at every tick). See "How the window
   paces itself" below
+* `--claude-model NAME`: the Claude device's model (`0x9C`, 11.5): `haiku`
+  (the default, `claude-haiku-5-5`), `sonnet`, `opus`, `fable` or one of
+  their ids; anything else is refused. `/model` changes it later
+* `--claude-system FILE`: its system prompt instead of `tynix/cpu_claude.md`
 
 **The window:**
 
 * left: load ROM/RAM, attach a disk (a file dialog; a new name creates one), reset, step, run/pause, resume (after `HALT`), a speed
   dropdown (1 Hz … 1 MHz, or `max`), and a trace toggle. Below them: the 16
   registers, IAR, ESP, EBP, the flags as checkboxes, and a status block (bank,
-  selected devices, the disk and its position, instruction count, measured
+  selected devices, the disk and its position, the Claude device's state
+  (idle, answering, tool) and dollars so far, instruction count, measured
   rate, run state)
 * middle: ROM and RAM tabs, 256 words per page, with optional disassembly and
   "follow IAR"; and a C source tab (below)
@@ -1301,7 +1315,14 @@ python compiler/src/asm/selftest.py   # 22 checks: encodings, the interrupt grou
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 43 checks: interrupts (TRAP/RTI, the timer IRQ, the held-line guard, masking, NMI, HALT wake, WAIT, the stack limit, SSP/GSP, the controller), 24-bit stack, immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 51 checks: the Claude device with a fake backend (ASCII, the request's
+                                      # model/effort/max_tokens/caching/tools, errors and no SDK,
+                                      # refusal, every slash command, tool frames, bad tool
+                                      # input, /approve, Ctrl-X, a new program (SYN) during a
+                                      # tool, CAN, the PC access rules (.., symlinks, unlisted
+                                      # paths, the file edited meanwhile), the screenshot,
+                                      # prices and the long-prompt warning, the bus at 0x9C),
+                                      # interrupts (TRAP/RTI, the timer IRQ, the held-line guard, masking, NMI, HALT wake, WAIT, the stack limit, SSP/GSP, the controller), 24-bit stack, immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
                                       # floats, FCMP flags, keyboard, backspace, key codes (arrows, Ctrl), the display's
                                       # backspace and form feed, ADDR/JMRB,
@@ -1331,7 +1352,12 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 21 checks: fs_reclaim() and the NMI kill of a spinning program under the kernel, format (sparse, the superblock), text and
+python compiler/src/disk/selftest.py  # 23 checks: `claude` (tynix/claude.c and the device with a fake
+                                      # backend under the kernel: commands with output, stdin,
+                                      # cd, write_file, the timeout killing a program and its
+                                      # child, /approve n, Ctrl-X, wrapping at 64 columns,
+                                      # `claude QUESTION`), `batch` (sh -c, run FILE, > after
+                                      # run), fs_reclaim() and the NMI kill of a spinning program under the kernel, format (sparse, the superblock), text and
                                       # binary round trips (block edges), overwriting frees
                                       # blocks, a directory past one block (entries reused),
                                       # subdirectories, . and .., mv, name rules, disk full, CLI,
@@ -1608,7 +1634,7 @@ how the compiler works.
 ```
 python compiler/src/cc compile prog.c [-o prog.asm]                 # C -> assembly
 python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map] [--no-libc] [--lib x.asm] [--exe [--region WORDS]]
-python compiler/src/cc run   prog.c [...] [--keys TEXT] [--steps N] [--stats] [--trace] [--screen FILE.png] [--disk FILE]
+python compiler/src/cc run   prog.c [...] [--keys TEXT] [--steps N] [--stats] [--trace] [--screen FILE.png] [--disk FILE] [--claude-model NAME] [--claude-system FILE]
         common options: -I dir, -D NAME[=value], -w (no warnings)
 ```
 
@@ -1751,13 +1777,16 @@ leads to after an unconditional jump.
   adds `region - base` to the r words, zeroes the data, copies argv to the
   top of the region, and starts it with R1 = a block (`B_ARGC`, `B_ARGV`,
   `B_PID`, `B_END` the end of its heap, `B_OUT` whether stdout is a file,
-  `B_FG` the address of the kernel's foreground pid, `B_LOST`). That crt0
+  `B_FG` the address of the kernel's foreground pid, `B_LOST`, `B_IN`
+  whether stdin is a file). That crt0
   keeps the block, stores `B_END` into `_heap_end`, calls the `_init_`
   routines and `_tx_start(block)` (`compiler/libc/tynix/sys.c`: `_set_stdout()` with a
-  function that sends stdout to fd 1 64 words at a time when `B_OUT`), then
+  function that sends stdout to fd 1 64 words at a time when `B_OUT`; when
+  `B_IN`, getchar's `_stdin_get` reads fd 0 64 words at a time, without
+  echo), then
   `main(argc, argv)`; its `_Exit` is the system call exit (`TRAP` with R1 = 0,
   R2 = the status). `isatty(1)` in `file.c` is false exactly when stdout is a
-  file. The old format, TEX1 (5-word header, fixed at `0x1100000`, no
+  file, `isatty(0)` when stdin is. The old format, TEX1 (5-word header, fixed at `0x1100000`, no
   relocations), is no longer written; the kernel still runs one (11).
 * Labels: C names as they are (or `_X` + name, 5 in `c_language.md`);
   compiler labels `_K<n>` (code), `_L<n>` (statements), `_S<n>` (strings),
@@ -1783,10 +1812,10 @@ task-switch words). `_Exit` is in the generated crt0.
 | file | what changes |
 | --- | --- |
 | `sys.asm` | `_syscall(n, a, b, c, d)`: `TRAP` with R1 = n, R2..R5 = a..d, the answer in R0 |
-| `sys.c` | `_tx_start` (crt0 calls it), `_tx_call` (a negative answer -> -1 and `errno`), stdout to fd 1 |
+| `sys.c` | `_tx_start` (crt0 calls it), `_tx_call` (a negative answer -> -1 and `errno`), stdout to fd 1, stdin from fd 0 when it is a file |
 | `fs.c` | `fopen` & co., `remove`, `rename`, `stat`, `statvfs`, `fs_reclaim` as system calls; a `FILE` is the kernel's file number with a 64-word buffer (`fd`, `buf` in `local.h`) |
 | `dir.c` | `mkdir`, `rmdir`, `chdir`, `getcwd`, `opendir`/`readdir`/`closedir` as system calls (4 directories open per program) |
-| `spawn.c` | `spawnv`, `spawnv_to`, `spawn`, `spawn_to`, `waitpid`, `kill`, `getpid`, `yield`, `set_foreground`, `tasks`, `halt_os` (`<unistd.h>`) |
+| `spawn.c` | `spawnv`, `spawnv_to`, `spawn`, `spawn_to`, `spawn_io` (stdin from a file too, `SPAWN_IN(fd)`), `waitpid`, `kill`, `getpid`, `yield`, `set_foreground`, `tasks`, `halt_os` (`<unistd.h>`) |
 | `cpu.c` | the keyboard through the kernel (`key_pressed`, `wait_key`, getchar's `_read_key`: only the foreground program gets keys, and the waiting ones sleep), `wait_ms` sleeps, `_gfx_hold` (each `gfx_` call waits for the foreground), `gfx_lost()` |
 
 A ROM program keeps the plain files: `cpu.c`'s `_gfx_hold` is 0 and
@@ -1856,8 +1885,8 @@ With no disk, or no `/bin/sh`, the kernel says so and halts.
 
 | file | what it is |
 | --- | --- |
-| `tynix/kernel.c` | the OS's ROM: tasks, memory, scheduling, system calls, the filesystem, keyboard and screen focus, the NMI menu (21,695 words of ROM, 38,078 of RAM with its 8K-word stack and 16 task records) |
-| `tynix/shell.c` | the shell, `/bin/sh` (16,468 words): built-ins, programs from `/bin`, `&`, `jobs`, `fg`, `kill`, `wait` |
+| `tynix/kernel.c` | the OS's ROM: tasks, memory, scheduling, system calls, the filesystem, keyboard and screen focus, the NMI menu (21,879 words of ROM, 38,095 of RAM with its 8K-word stack and 16 task records) |
+| `tynix/shell.c` | the shell, `/bin/sh` (17,283 words): built-ins, programs from `/bin`, `&`, `jobs`, `fg`, `kill`, `wait`, `run FILE`; `sh -c LINE` |
 | `tynix/ed.c` | a line editor for text files, a program for `/bin` (15.8K words; section 11.1) |
 | `tynix/edit.c` | a full-screen editor on the RGB screen, a program for `/bin` (section 11.2) |
 | `tynix/more.c` | show text files a page at a time, a program for `/bin` (11.3; 12.4K words) |
@@ -1869,7 +1898,10 @@ With no disk, or no `/bin/sh`, the kernel says so and halts.
 | `tynix/hexdump.c` | the values of files in hexadecimal (11.3; 11.6K words) |
 | `tynix/calc.c` | a 32-bit integer calculator (11.3; 7.6K words) |
 | `tynix/visual_file_manager.c` | a two-pane file manager on the RGB screen, in the style of yazi (section 11.4; 22.8K words) |
-| `tynix/make_disk.py` | makes `tynix/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds `shell.c` as `/bin/sh` and every program in its `PROGRAMS` list (from `tynix/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; from the command line it also makes a Linux-like `/home/user` (`Desktop`, `Documents` with `welcome.txt`, `Downloads`, `Music`, `Pictures`, `Videos`) and `/tmp` when missing (`make(..., home=True)`; the self-checks leave them out); other files on the disk are kept. Twelve C examples, `ed`, `edit` and the nine tools of 11.3 and 11.4, 2.8K–22.8K words each; `REGIONS` gives `diff` 1.25M words of RAM (`--region`) |
+| `tynix/claude.c` | `claude`: talk to Claude through the Claude device, which runs commands on the CPU for it (section 11.5; 13.5K words) |
+| `tynix/cpu_claude.md` | the Claude device's system prompt: the machine, the characters allowed, the tools, the Tynix commands, what not to run, the limits (11.5) |
+| `tynix/claude_access.conf` | the PC paths Claude may read (`read PATH`) or write (`write PATH`) besides its own folder `tynix/claude/` (what Claude writes there is git-ignored); all commented out, so nothing else is allowed (11.5) |
+| `tynix/make_disk.py` | makes `tynix/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds `shell.c` as `/bin/sh` and every program in its `PROGRAMS` list (from `tynix/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; from the command line it also makes a Linux-like `/home/user` (`Desktop`, `Documents` with `welcome.txt`, `Downloads`, `Music`, `Pictures`, `Videos`) and `/tmp` when missing (`make(..., home=True)`; the self-checks leave them out); other files on the disk are kept. Twelve C examples, `ed`, `edit`, the nine tools of 11.3 and 11.4 and `claude` (11.5), 2.8K–22.8K words each; `REGIONS` gives `diff` 1.25M words of RAM (`--region`) |
 | `tynix/run_with_video.sh` | builds the kernel and the disk (`make_disk.py`), builds `video_player.c` with `--exe` (a `clip.h` argument is passed as `-D VIDEO=...`), puts it in `/bin/video_player` and starts the simulator on it, all under pypy3 when it is installed (`PY` picks another interpreter, `SIM_ARGS` adds simulator options, `DISK` picks another image). `video_player` is not in `PROGRAMS`: its video is part of the program (17K words for the 4 s demo clip, millions for a long one) |
 
 ```
@@ -1919,11 +1951,11 @@ kernel stack is enough: kernel code never sleeps.
 | call | what it does |
 | --- | --- |
 | `exit(status)` | the end: the kernel flushes and closes its open files, frees its region, tells the parent |
-| `spawn(path, argv, out_fd, flags)` | load a program; `SPAWN_FG` gives it the foreground; `out_fd` (a file the caller opened) becomes its stdout |
+| `spawn(path, argv, out_fd, flags)` | load a program; `SPAWN_FG` gives it the foreground; `out_fd` (a file the caller opened) becomes its stdout, and `SPAWN_IN(fd)` in the flags its stdin. With `out_fd` 1 and no `SPAWN_IN` it gets the caller's stdout and stdin: a file when the caller's is one (as in Unix; until Phase 8 the child always got the display and the keyboard) |
 | `wait(pid or -1, flags, &pid)` | its exit status; blocks, or `WAIT_NOHANG`. `WAIT_BACKGROUND` when the NMI menu sent it to the background |
 | `kill(pid)`, `getpid`, `yield`, `sleep(ms)` | |
 | `tasks(buf, max)`, `foreground(pid)`, `halt` | `struct task_info` for `jobs`; the keyboard and screen to that program; close every file and stop |
-| `open close read write seek length` | files by number: fd 0 the keyboard, 1 stdout (the display, or a file), 2 the display, 3 and up opened files, 16 per program, 32 in all (each a `FILE` of the kernel's `fs.c`, shared by the fds that point to it) |
+| `open close read write seek length` | files by number: fd 0 stdin (nothing: the keyboard, through `getkey`; or a file), 1 stdout (the display, or a file), 2 the display, 3 and up opened files, 16 per program, 32 in all (each a `FILE` of the kernel's `fs.c`, shared by the fds that point to it) |
 | `stat remove rename mkdir rmdir chdir getcwd opendir readdir statvfs reclaim` | the filesystem, with each program's own current directory |
 | `getkey(wait)`, `waitfg` | the keyboard (only the foreground program's call reads it; a background one waits), wait to be the foreground |
 
@@ -1999,6 +2031,7 @@ Built-in commands (the `commands[]` table, which `help` also prints):
 | `fg pid` | `set_foreground(pid)`, then wait for it as for a program typed at the prompt |
 | `kill pid...` | end those programs (status 130); their files are closed by the kernel |
 | `wait [pid]` | wait for that program to end (its status is the command's); none: for every job |
+| `run file` | the lines of a text file as if typed (a batch file): blank lines and lines starting with `#` are left out, the status is the last line's. `run file > out` sends their output to `out` (a program among them too); a `>` inside a line still wins. 8 deep at most (a file that runs itself). A line over 255 chars stops the run (status 1) instead of being cut into two commands |
 
 A built-in writes to `out`: the display, or the file after `>` (`fopen`
 `"w"`, a text file) or `>>` (`"a"`), closed after the command. Error
@@ -2025,6 +2058,12 @@ With `&` at the end of the line the shell doesn't wait: it prints `[pid] NAME
 that ended (`waitpid(-1, ..., WAIT_NOHANG)`) and prints `[pid] done: NAME, exit
 status N`. A program that never ends no longer keeps the CPU: the NMI menu or
 `kill` ends it, and the others run meanwhile.
+
+`sh -c LINE` (Phase 8) runs that one line, with no banner and no prompt, and
+ends with its status (`usage: sh -c 'command line'`, status 2, without a
+line); a line is 255 chars at most, one command (there are no pipes or
+`;`). Run with stdout or stdin files, it passes them on to the program it
+starts. That is how `claude` (11.5) runs Claude's commands.
 
 Any program can start another now (`spawnv()`, `spawn()`): the child gets its
 own region, so the caller stays as it was. `visual_file_manager` (11.4) opens
@@ -2185,3 +2224,128 @@ program) and reads the disk back with `fs.py`; it does not look at pixels
 beyond the screen being blank after `q`, and the screen layout was checked by
 eye from a saved screenshot, not on the circuit (the circuit cannot run these
 programs yet: 16-bit banks).
+
+### 11.5 Claude: the device and `claude` (`cpu_sim/src/claude.py`, `tynix/claude.c`)
+
+Phase 8 (2026-11-02). Claude does not run on the CPU: the model runs on
+Anthropic's servers, so the CPU is a terminal. `claude` (a program for `/bin`)
+sends what is typed to the Claude device (`0x9C`, simulator only, 1.7), which
+is Python in the simulator's process on the PC: it calls the Claude API in a
+worker thread, streaming, and hands the reply back a char at a time as it
+arrives, so the simulation never waits for the network. The conversation's
+history is a Python list there, not in the CPU's RAM: it survives `claude`
+ending (the next `claude` goes on with it) and a CPU reset, and is lost when
+the simulator closes (no file is written: decided 2026-11-02).
+
+```
+claude                    a conversation: you> prompts, /quit or Ctrl-D ends it,
+                          /new starts a new one, Ctrl-X stops a reply
+claude what is a FAT?     one question, one answer (the keyboard is left alone:
+                          Esc's menu stops it)
+claude /model sonnet      a command for the device, from the shell
+```
+
+**The API.** The `anthropic` package is the project's only dependency outside
+the standard library, and only this device needs it: it is imported the
+first time a request is made (`pip install anthropic`). The key is the PC's
+(`ANTHROPIC_API_KEY`, or an `ant auth login` profile, which the SDK finds),
+never on the disk image or in a ROM. Each request: model `claude-haiku-5-5`
+(`--claude-model`, `/model`), `output_config.effort` `low` (Haiku 5.5's default
+would be `medium`), `max_tokens` 100,000 (so the request has to stream),
+adaptive thinking left at its default (not sent), automatic prompt caching
+(`cache_control` at the top level; the tools and the system prompt are far over
+Haiku's 512-token minimum), the system prompt `tynix/cpu_claude.md` (read at
+each new conversation and by `/reload`; `--claude-system` picks another), the
+six tools with `eager_input_streaming` (their input is checked against the
+schema here before anything runs: a bad one goes back as an error result,
+`INVALID_INPUT`). The whole content of each response (thinking blocks
+included) is appended to the history, so it stays append-only; `stop_reason`
+is checked before anything is run: `max_tokens` and `refusal` end the turn
+with a line on the display, and their tool calls are answered "not run".
+No key, no SDK, a failed request: one line (`[claude: no valid API key ...]`)
+and the end of the turn; the CPU never hangs on it. With `/tools off` the tools
+stay listed and `tool_choice` is `none`, so the cache holds.
+
+The display is 7-bit: the device turns the reply into printable ASCII and
+newlines (accents dropped, curly quotes, dashes and `...` made plain, tabs
+four spaces, anything else `?`), and the system prompt asks for plain ASCII
+lines of 64 columns, no markdown. `claude` wraps words at 64 columns too.
+
+**The protocol** (`OUTDATA`/`INDATA` at `0x9C`; the names are `CLAUDE_*` in
+`<cpu.h>`):
+
+| CPU sends | means |
+| --- | --- |
+| a char | added to the line being sent |
+| `0` | send it: a message, a `/` command for the device, or (while a tool runs) the tool's result |
+| `0x18` | a new conversation |
+| `0x03` | stop the reply (the text so far stays in the history, marked stopped) |
+| `0x16` | a program starts using the device: a turn left by one that was killed is dropped, with the unread chars (a tool it was running is answered "stopped") |
+
+| CPU reads | means |
+| --- | --- |
+| `0` | nothing yet |
+| a char | of the reply: printable ASCII or `\n` |
+| `4` | the end of the turn |
+| `2` | a tool for the CPU: a letter, the fields split by `0x1F`, `0x03`. `r` (or `R`: ask first) timeout, command, input; `w` (or `W`) path, content. The CPU answers with the result's chars and `0` |
+
+**The tools.** On the CPU (`claude` runs them):
+
+* `run_command(command, input?)`: `claude` writes `input` to `/tmp/.claude_in`
+  and runs `sh -c COMMAND` with `spawn_io()`, stdin that file (so `getchar`
+  and `fgets` read it, then EOF) and stdout `/tmp/.claude_out`, in the
+  foreground (a graphics program can draw). It waits with `waitpid(...,
+  WAIT_NOHANG)` and 20 ms sleeps; past the timeout (30 s, `/timeout`) it kills
+  the shell and every program under it (`tasks()`, the youngest first): status
+  130. The result is `exit status N`, then at most 8000 chars of the output
+  (the device keeps 10,000 at most); the first 12 lines are shown on the
+  display, after `[claude runs: COMMAND]`. `cd DIR` changes `claude`'s own
+  directory, where the next commands start. What a killed program had not
+  flushed of its stdout is lost; its errors (stderr) go to the display, not
+  to Claude.
+* `write_file(path, content)`: `claude` writes the text file with `fopen`.
+
+With `/approve on`, both ask `[claude wants to run: ls] allow? (y/n)` first (a
+`y` or `n` typed ahead answers). On the PC (the device runs them; the CPU gets
+only a line such as `[claude reads ~/x on the PC]`):
+
+* `read_host_file(path)`, `list_host_dir(path)` (an empty path lists what is
+  permitted), `write_host_file(path, content)`: only `tynix/claude/` (read and
+  write; what is written there is git-ignored) and the lines of
+  `tynix/claude_access.conf`, `read PATH` or `write PATH` (a file, or a folder
+  and everything under it; `~` and paths relative to `tynix/`), read again
+  before every request. A path Claude gives starts at `tynix/claude/`; a `..`
+  in it is refused, and the real path (symlinks resolved) has to be inside an
+  allowed one. Binary files are refused, a text file is cut at 100,000 chars.
+  Nothing can run on the PC. What Claude reads is sent to Anthropic's API.
+* `screenshot()`: the RGB screen as a PNG at twice the size (512 x 512), an
+  image in the tool result.
+
+**Slash commands**: a line starting with `/` is handled by the device and
+never sent to Claude, from the chat or the shell (`claude /usage`): `/model
+[NAME]` (haiku, sonnet, opus, fable or their ids: one table, `MODELS` in
+`claude.py`, with the prices), `/effort [low|medium|high|xhigh|max]`, `/max
+[N]` (max_tokens, up to 128,000), `/clear`, `/usage` (requests, tokens,
+cache reads and writes, dollars since the simulator started), `/tools
+[on|off]`, `/timeout [S]`, `/approve [on|off]`, `/reload`, `/access`, `/help`.
+`claude`'s own: `/quit`, `/new` (sends `0x18`). Changing the model or the effort
+starts the prompt cache again.
+
+**Costs.** Prices are per million tokens, from the `claude-api` skill's table
+(cached 2026-10-06, they drift): Haiku 5.5 $0.10 in, $0.50 out ($0.50 / $2.50
+when the prompt is over 100K tokens), cache reads 0.1 x and writes 1.25 x the
+input price. The whole history is sent with every message, so a long
+conversation costs more each turn: past 100K tokens the device says so once,
+and `/clear` starts over.
+
+**Not tested against the real API**: the container that built Phase 8 had no
+key. The real backend was run against a local fake of the Messages API (SSE:
+a thinking block, text, a streamed tool call, then the answer; a 401; no
+credentials), with `anthropic` 2.3.0, so the requests' shape, the history
+passed back (the thinking block with its signature) and the error messages
+are checked; what the model actually answers is not. The window's status
+line (`claude idle $0.000`) was not seen either (no Tk there).
+
+Not done: an interrupt from the device (`claude` polls, 10 ms sleeps); pipes
+or `;` in commands; stderr in a command's result; persistence of the
+conversation; two `claude` programs at once share one conversation (don't).

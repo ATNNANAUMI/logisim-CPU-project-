@@ -1649,6 +1649,144 @@ def check_tools():
     return f"{tools} + {fm} + {fm2} + {fm3} + {cpu.instructions} instructions"
 
 
+SPIN_C = """\
+#include <stdio.h>
+#include <unistd.h>
+int main(int argc, char **argv)
+{
+    long n = 0;
+    char *child[] = {"spin", "child", 0};
+    if (argc == 1)
+        spawn("/bin/spin", child, 0);
+    printf("spinning\\n");
+    for (;;)
+        n++;
+    return 0;
+}
+"""
+
+
+def check_claude():
+    """tynix/claude.c with the Claude device (0x9C) and a fake backend (no
+    network): a conversation where Claude runs commands on the CPU (output,
+    stdin from its input, cd, a file written), a command killed with all it
+    started at the timeout, a command the user refuses (/approve on),
+    Ctrl-X stopping a reply, wrapping at 64 columns, and `claude QUESTION`."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    sys.path.append(str(root / "cpu_sim" / "src"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+    import claude                       # cpu_sim/src
+    from cpu import CPU
+
+    image = os.path.join(TMP.name, "claude.img")
+    make_disk.make(image, programs=["claude", "echo"], new=True, size_mb=2, log=lambda _: None)
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "spin.c").write_text(SPIN_C)
+        program, _ = driver.build([str(Path(tmp) / "spin.c")], exe=True)
+        with FileSystem(image) as disk:
+            disk.mkdir("/tmp")
+            disk.put("/bin/spin", driver.exe_bytes(program), binary=True)
+    results = []
+
+    def result(request):                # what Claude got back from the CPU
+        results.append(request["messages"][-1]["content"][0]["content"])
+        return claude.text_reply("ok")
+
+    tool = claude.tool_reply
+    backend = claude.FakeBackend([
+        tool("run_command", {"command": "ls /bin"}, "Let me look."), result,
+        tool("run_command", {"command": "cat", "input": "fed\nthrough stdin\n"}), result,
+        tool("write_file", {"path": "/tmp/n.txt", "content": "hello\nfile\n"}), result,
+        tool("run_command", {"command": "cd /tmp"}), result,
+        tool("run_command", {"command": "cat n.txt"}), result,
+        tool("run_command", {"command": "spin"}), result,
+        tool("run_command", {"command": "jobs"}), result,
+        tool("run_command", {"command": "echo never"}), result,
+        claude.text_reply("first ", "never shown"),
+        claude.text_reply("A long answer " * 6),
+        claude.text_reply("once"),
+    ])
+    backend.gate = __import__("threading").Event()          # never set: Ctrl-X has to stop it
+    cpu = CPU()
+    cpu.mem.load_rom(_kernel().rom)
+    cpu.bus.attach_disk(image)
+    cpu.bus.claude.backend = backend
+    cpu.bus.keyboard.type("claude\nlist\nfeed\nwrite\ncd\nread\n/timeout 1\nspin\njobs\n"
+                          "/approve on\nask\nn/approve off\nstop\n\x18long\n/quit\n"
+                          "claude /usage\nclaude say it\nhalt\n")
+    try:
+        cpu.run_sleeping(400_000_000)
+    finally:
+        cpu.bus.attach_disk(None)
+    text = cpu.bus.display.text
+    assert cpu.halted, text
+    assert results[:6] == [
+        "exit status 0\nsh  claude  echo  spin\n",
+        "exit status 0\nfed\nthrough stdin\n",             # input: the program's stdin
+        "wrote 11 chars to /tmp/n.txt",
+        "exit status 0 (the directory is now /tmp)",
+        "exit status 0\nhello\nfile\n",                    # run in /tmp, after cd
+        "exit status 130 (killed: it ran past the 1 s timeout)\n"], results
+    assert not re.search(r"spin +(running|waiting)", results[6]), results[6]   # killed, all of them
+    assert re.search(r"claude +waiting", results[6]), results[6]
+    assert results[7] == "the user said no: the command was not run"
+    assert ("you> list\nLet me look.\n[claude runs: ls /bin]\nsh  claude  echo  spin\nok\n"
+            "you> feed\n[claude runs: cat]\nfed\nthrough stdin\nok\n") in text, text
+    assert "[claude runs: spin]\n[killed: it ran past 1 s]\nok\n" in text, text
+    assert "[claude wants to run: echo never] allow? (y/n) n\nok\n" in text, text
+    stopped = text.partition("you> stop\n")[2].partition("you> long\n")[0]
+    assert stopped.endswith("[stopped]\n") and "never" not in stopped, stopped
+    assert ("you> long\n" + "A long answer A long answer A long answer A long answer A long\n"
+            "answer A long answer\nyou> /quit\n") in text, text
+    assert all(len(line) <= 64 and not line.endswith(" ") for line in
+               text.partition("/> claude\n")[2].partition("/> claude /usage")[0].split("\n")
+               if not line.startswith("you>")), text
+    assert "/> claude /usage\n17 requests," in text and "/> claude say it\nonce\n/> halt" in text, text
+    assert "Paths" not in text and "\x18" not in text
+    with FileSystem(image) as disk:
+        assert disk.get("/tmp/n.txt") == b"hello\nfile\n"
+        assert disk.check() == [], disk.check()
+    return f"{cpu.instructions} instructions"
+
+
+def check_batch():
+    """sh -c LINE runs one line and ends with its status; run FILE runs a
+    file's lines (comments and blank lines left out), and > after it takes
+    their output; a program started under a redirected shell writes there."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+
+    image = os.path.join(TMP.name, "batch.img")
+    make_disk.make(image, programs=["echo"], new=True, size_mb=1, log=lambda _: None)
+    with FileSystem(image) as disk:
+        disk.put("/s.txt", b"# a batch file\n\necho one\n  echo two three\n/bin/echo four\nls /nope\n")
+        disk.put("/long.txt", b"echo " + b"x" * 300 + b"\necho next\n")      # cut, it would run as two commands
+    keys = ("run /long.txt\nrun /s.txt\nrun /s.txt > /r.txt\nsh -c 'echo inner' > /c.txt\n"
+            "sh -c 'cat /c.txt'\nsh -c\nrun\nhalt\n")
+    cpu, text = driver.run_in_simulator(_kernel().rom, keys, 50_000_000, disk=image)
+    assert cpu.halted, text
+    assert text.endswith(
+        "/> run /long.txt\nrun: /long.txt: line 1 is longer than 255 chars, stopped\n"
+        "/> run /s.txt\none\ntwo three\nfour\nls: /nope: No such file or directory\n"
+        "/> run /s.txt > /r.txt\nls: /nope: No such file or directory\n"
+        "/> sh -c 'echo inner' > /c.txt\n"
+        "/> sh -c 'cat /c.txt'\ninner\n"
+        "/> sh -c\nusage: sh -c 'command line'\n[sh: exit status 2]\n"
+        "/> run\nusage: run file\n/> halt\nCPU halted\n"), text
+    with FileSystem(image) as disk:
+        assert disk.get("/r.txt") == b"one\ntwo three\nfour\n"
+        assert disk.get("/c.txt") == b"inner\n"
+    return f"{cpu.instructions} instructions"
+
+
 CHECKS = [
     check_format,
     check_text_round_trip,
@@ -1671,6 +1809,8 @@ CHECKS = [
     check_editor,
     check_screen_editor,
     check_tools,
+    check_batch,
+    check_claude,
 ]
 
 

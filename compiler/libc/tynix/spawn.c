@@ -22,6 +22,15 @@ int spawn_to(const char *path, char *const argv[], FILE *out, int flags)
     return _tx_call(SYS_SPAWN, (int)path, (int)argv, out ? out->fd : 1, flags);
 }
 
+int spawn_io(const char *path, char *const argv[], FILE *in, FILE *out, int flags)
+{
+    if (in && in->fd < 3) {             /* stdin: not a file of the kernel's */
+        errno = EBADF;
+        return -1;
+    }
+    return spawn_to(path, argv, out, flags | (in ? SPAWN_IN(in->fd) : 0));
+}
+
 int waitpid(int pid, int *status, int flags)
 {
     int who = pid, r = _syscall(SYS_WAIT, pid, flags, (int)&who, 0);

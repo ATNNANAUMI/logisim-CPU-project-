@@ -938,6 +938,297 @@ def test_run_stops_at_breakpoints():
     assert cpu.regs[0] == 2 and cpu.instructions == 3
 
 
+# ---------------------------------------------------------------- the Claude device (0x9C)
+# All with claude.FakeBackend: no network, no key, no cost.
+
+import os as _os
+import sys as _sys
+import tempfile as _tempfile
+import time as _time
+from pathlib import Path as _Path
+
+import claude
+
+
+def _device(script=(), tmp=None, **kwargs):
+    tmp = _Path(tmp or _tempfile.mkdtemp())
+    access = claude.Access(tmp / "claude", tmp / "access.conf")
+    dev = claude.ClaudeDevice(screenshot=kwargs.pop("screenshot", None),
+                              backend=claude.FakeBackend(script), access=access,
+                              system_file=tmp / "no_prompt.md")
+    return dev
+
+
+def _send(dev, text, end=0):
+    for c in text:
+        dev.write(ord(c))
+    if end is not None:
+        dev.write(end)
+
+
+def _turn(dev, answer_tool=None, limit=5.0):
+    """What the CPU reads up to EOT, as text; a tool frame is answered with
+    answer_tool(letter, fields) and shown as {letter|field|field}."""
+    got, start = [], _time.time()
+    while _time.time() - start < limit:
+        c = dev.read()
+        if c == 0:
+            _time.sleep(0.001)
+            continue
+        if c == claude.EOT:
+            return "".join(got)
+        if c == claude.STX:
+            frame = []
+            while (c := dev.read()) != claude.ETX:
+                if c:
+                    frame.append(chr(c))
+            letter, fields = frame[0], "".join(frame[1:]).split(chr(claude.US))
+            got.append("{" + letter + "|" + "|".join(fields) + "}")
+            _send(dev, answer_tool(letter, fields) if answer_tool else "ok")
+            continue
+        got.append(chr(c))
+    raise AssertionError("no EOT: " + "".join(got))
+
+
+def _roles(dev):
+    return [m["role"] for m in dev.history]
+
+
+def test_claude_streams_ascii_and_ends_the_turn():
+    dev = _device([claude.text_reply("Héllo “world” — ", "ok… \U0001F600\tend")])
+    _send(dev, "hi")
+    assert _turn(dev) == 'Hello "world" -- ok... ?    end'
+    assert _roles(dev) == ["user", "assistant"] and dev.history[0]["content"] == "hi"
+    req = dev.backend.requests[0]
+    assert req["model"] == "claude-haiku-5-5" and req["max_tokens"] == 100_000
+    assert req["output_config"] == {"effort": "low"} and req["cache_control"] == {"type": "ephemeral"}
+    assert "thinking" not in req and "tool_choice" not in req and "temperature" not in req
+    assert [t["name"] for t in req["tools"]] == ["run_command", "write_file", "read_host_file",
+                                                 "list_host_dir", "write_host_file", "screenshot"]
+    assert all(t["eager_input_streaming"] for t in req["tools"])
+    assert "plain ASCII" in req["system"][0]["text"]       # the fallback prompt: no file here
+    assert dev.read() == 0 and dev.state == "idle"
+
+
+def test_claude_errors_end_the_turn():
+    dev = _device([RuntimeError("overloaded")])
+    _send(dev, "hi")
+    assert _turn(dev) == "\n[claude: overloaded]\n"
+    saved = _sys.modules.get("anthropic")
+    _sys.modules["anthropic"] = None                      # import anthropic fails: no SDK
+    try:
+        dev.backend = None                                # the real backend, made on use
+        _send(dev, "again")
+        assert "the anthropic package is not installed" in _turn(dev)
+    finally:
+        if saved is None:
+            del _sys.modules["anthropic"]
+        else:
+            _sys.modules["anthropic"] = saved
+    dev.backend = claude.FakeBackend([([], [], "refusal"), claude.text_reply("fine")])
+    _send(dev, "x")
+    assert _turn(dev) == "\n[claude declined to answer]\n"
+    _send(dev, "y")
+    assert _turn(dev) == "fine"
+    roles = _roles(dev)                  # a valid history: the users stay, every turn answered
+    assert roles[-4:] == ["user", "assistant", "user", "assistant"], roles
+
+
+def test_claude_slash_commands_stay_in_the_simulator():
+    dev = _device()
+
+    def cmd(line):
+        _send(dev, line)
+        return _turn(dev)
+
+    assert "/model" in cmd("/help") and "/approve" in cmd("/help")
+    assert cmd("/model opus") .startswith("model claude-opus-5-5")
+    assert dev.settings["model"] == "claude-opus-5-5"
+    assert cmd("/model gpt") .startswith("unknown model gpt")
+    assert cmd("/model claude-haiku-5-5").startswith("model claude-haiku-5-5")
+    assert cmd("/effort high") == "effort high\n" and cmd("/effort huge").startswith("effort: one of")
+    assert cmd("/max 2048") == "max_tokens 2048\n" and cmd("/max 0").startswith("max: a number")
+    assert cmd("/max 999999").startswith("max: a number") and dev.settings["max_tokens"] == 2048
+    assert cmd("/tools off") == "tools off\n" and cmd("/approve on") == "approve on\n"
+    assert cmd("/timeout 5") == "timeout 5 s\n" and cmd("/timeout x").startswith("timeout: seconds")
+    assert cmd("/usage").startswith("0 requests") and cmd("/reload").startswith("read no_prompt.md")
+    assert "write" in cmd("/access") and cmd("/nope").startswith("unknown command /nope")
+    assert dev.backend.requests == [] and dev.history == []   # none of it reached Claude
+    dev.backend.script = [claude.text_reply("a"), claude.text_reply("b")]
+    _send(dev, "q")
+    _turn(dev)
+    req = dev.backend.requests[0]
+    assert req["tool_choice"] == {"type": "none"} and req["max_tokens"] == 2048
+    assert req["output_config"] == {"effort": "high"} and len(req["tools"]) == 6
+    assert cmd("/clear") == "new conversation\n" and dev.history == []
+    dev.write(claude.CAN)                                   # the CPU's /new: the same
+    assert dev.history == [] and dev.read() == 0
+
+
+def test_claude_runs_tools_on_the_cpu():
+    tool = claude.tool_reply
+    dev = _device([
+        tool("run_command", {"command": "ls /bin"}, "Looking."),
+        lambda req: claude.text_reply("seen: " + req["messages"][-1]["content"][0]["content"]),
+        tool("write_file", {"path": "/a.txt", "content": "xé\ty"}, tool_id="t2"),
+        claude.text_reply("written"),
+        tool("run_command", {"command": "a\nb"}, tool_id="t3"),
+        tool("run_command", {"cmd": "ls"}, tool_id="t4"),
+        claude.text_reply("gave up"),
+    ])
+    _send(dev, "go")
+    assert _turn(dev, lambda letter, f: "exit status 0\nsh echo") == \
+        "Looking.{r|30|ls /bin|}seen: exit status 0\nsh echo"
+    _send(dev, "write")
+    assert _turn(dev, lambda letter, f: "wrote 4 chars") == "{w|/a.txt|xe\ty}written"
+    _send(dev, "bad")                                       # bad inputs never reach the CPU
+    assert _turn(dev) == "gave up"
+    results = [m["content"][0] for m in dev.history if m["role"] == "user"
+               and isinstance(m["content"], list)]
+    assert [r.get("is_error", False) for r in results] == [False, False, True, True]
+    assert "one non-empty line" in results[2]["content"] and "INVALID_INPUT" in results[3]["content"]
+    assert "missing command" in results[3]["content"]
+    dev.settings.update(approve=True, timeout=7)            # /approve on: the letter asks first
+    dev.backend.script = [tool("run_command", {"command": "pwd", "input": "a\nb"}),
+                          claude.text_reply("ok")]
+    _send(dev, "again")
+    assert _turn(dev, lambda letter, f: "the user said no") == "{R|7|pwd|a\nb}ok"
+
+
+def test_claude_stop_new_conversation_and_hello():
+    dev = _device([claude.text_reply("first ", "second")])
+    dev.backend.gate = gate = __import__("threading").Event()
+    _send(dev, "talk")
+    start = _time.time()
+    while dev.read() == 0 and _time.time() - start < 5:     # "first " has come
+        _time.sleep(0.001)
+    dev.write(claude.ETX)                                   # Ctrl-X: stop it
+    gate.set()
+    rest = _turn(dev)
+    assert rest.endswith("\n[stopped]\n") and "second" not in rest, rest
+    assert dev.history[-1]["content"][0]["text"] == "first  [stopped by the user]"
+    # a program killed while its tool ran: the next one says hello (SYN)
+    dev.backend = claude.FakeBackend([claude.tool_reply("run_command", {"command": "spin"}),
+                                      claude.text_reply("after")])
+    _send(dev, "run it")
+    start = _time.time()
+    while dev.state != "tool" and _time.time() - start < 5:
+        _time.sleep(0.001)
+    assert dev.waiting_tool
+    dev.write(claude.SYN)
+    assert dev.read() == 0 and not dev.waiting_tool
+    last = dev.history[-1]["content"][0]
+    assert last["type"] == "tool_result" and last["is_error"] and "stopped" in last["content"]
+    _send(dev, "and now")
+    assert _turn(dev) == "after"
+    assert _roles(dev)[-4:] == ["assistant", "user", "user", "assistant"], _roles(dev)
+    dev.write(claude.CAN)
+    assert dev.history == []
+
+
+def test_claude_reads_only_the_permitted_pc_files():
+    tmp = _Path(_tempfile.mkdtemp())
+    (tmp / "docs").mkdir()
+    (tmp / "docs" / "spec.md").write_text("the spec")
+    (tmp / "secret.txt").write_text("no")
+    (tmp / "out").mkdir()
+    (tmp / "bin.dat").write_bytes(b"\0\1\2")
+    dev = _device(tmp=tmp)
+    access = dev.access
+    conf = tmp / "access.conf"
+    deny = claude.AccessError
+
+    def refused(call, *args):
+        try:
+            call(*args)
+        except deny as e:
+            return str(e)
+        raise AssertionError(f"allowed: {args}")
+
+    assert "not allowed" in refused(claude.read_host_file, access, str(tmp / "docs" / "spec.md"))
+    conf.write_text(f"# a comment\nread {tmp}/docs/\nwrite {tmp}/out/  # trailing\nread bin.dat\n")
+    assert claude.read_host_file(access, str(tmp / "docs" / "spec.md")) == "the spec"
+    assert "not allowed" in refused(claude.read_host_file, access, str(tmp / "secret.txt"))
+    assert "'..'" in refused(claude.read_host_file, access, str(tmp / "docs" / ".." / "secret.txt"))
+    assert "binary" in refused(claude.read_host_file, access, str(tmp / "bin.dat"))
+    assert claude.write_host_file(access, "notes/n.txt", "mine").startswith("wrote 4 chars")
+    assert (tmp / "claude" / "notes" / "n.txt").read_text() == "mine"   # relative: Claude's folder
+    assert claude.read_host_file(access, "notes/n.txt") == "mine"
+    assert "not allowed (write)" in refused(claude.write_host_file, access,
+                                            str(tmp / "docs" / "x.txt"), "x")
+    assert claude.write_host_file(access, str(tmp / "out" / "r.txt"), "r").startswith("wrote")
+    if hasattr(_os, "symlink"):                                 # a link out of the folder
+        _os.symlink(tmp / "secret.txt", tmp / "claude" / "link.txt")
+        assert "not allowed" in refused(claude.read_host_file, access, "link.txt")
+    listing = claude.list_host_dir(access, "")
+    assert f"read  {tmp}/docs" in listing and f"write {tmp}/out" in listing, listing
+    assert claude.list_host_dir(access, str(tmp / "docs")) == "spec.md  8"
+    conf.write_text("")                                         # edited while it runs
+    assert "not allowed" in refused(claude.read_host_file, access, str(tmp / "docs" / "spec.md"))
+    # through the device: the CPU only gets a line, the result goes to Claude
+    dev.backend.script = [claude.tool_reply("read_host_file", {"path": str(tmp / "secret.txt")}),
+                          lambda req: claude.text_reply(str(req["messages"][-1]["content"][0].get("is_error")))]
+    _send(dev, "read it")
+    assert _turn(dev).endswith("[refused: " + str(tmp / "secret.txt") +
+                               ": not allowed (read); the permitted paths are in "
+                               "tynix/claude_access.conf]\nTrue")
+
+
+def test_claude_screenshot_and_costs():
+    shots = []
+    dev = _device([claude.tool_reply("screenshot", {}), claude.text_reply("a red square")],
+                  screenshot=lambda: shots.append(1) or b"\x89PNG fake")
+    _send(dev, "look")
+    assert _turn(dev) == "\n[claude looks at the RGB screen]\na red square"
+    image = dev.history[-2]["content"][0]["content"][0]
+    assert image["type"] == "image" and image["source"]["media_type"] == "image/png"
+    assert image["source"]["data"] == "iVBORyBmYWtl" and shots == [1]
+    dev.reset_usage()
+    small = {"input_tokens": 50_000, "output_tokens": 50_000}  # $0.10 / $0.50 per M
+    assert abs(dev.price(small) - 0.03) < 1e-9 and abs(dev.price({"input_tokens": 10_000,
+               "cache_read_input_tokens": 50_000, "output_tokens": 2000}) - 0.0025) < 1e-9
+    big = {"input_tokens": 200_000, "output_tokens": 1000}      # past 100K: 0.50 / 2.50
+    assert abs(dev.price(big) - 0.1025) < 1e-9
+    dev.settings["model"] = "claude-opus-5-5"
+    assert abs(dev.price(big) - 0.82) < 1e-9
+    dev.settings["model"] = "claude-haiku-5-5"
+    dev.backend.usage = dict(big, cache_read_input_tokens=0, cache_creation_input_tokens=0)
+    dev.backend.script = [claude.text_reply("x"), claude.text_reply("y")]
+    _send(dev, "a")
+    assert "is 200000 tokens long" in _turn(dev)
+    _send(dev, "b")
+    assert _turn(dev) == "y"                                    # the warning comes once
+    assert dev.usage["requests"] == 2 and abs(dev.usage["dollars"] - 0.205) < 1e-9
+    try:
+        dev.configure("gpt-9")
+    except ValueError as e:
+        assert "unknown Claude model" in str(e)
+    else:
+        raise AssertionError("gpt-9 accepted")
+    dev.configure("sonnet")
+    assert dev.settings["model"] == "claude-sonnet-5-5"
+
+
+def test_claude_device_on_the_bus():
+    """OUTDATA/INDATA at 0x9C reach the device; a reset keeps the conversation."""
+    cpu = CPU()
+    cpu.bus.claude.backend = claude.FakeBackend([claude.text_reply("ok")])
+    cpu.bus.out_address(config.CLAUDE_ADDR)
+    cpu.bus.in_address(config.CLAUDE_ADDR)
+    for c in "hi":
+        cpu.bus.out_data(ord(c))
+    cpu.bus.out_data(0)
+    got, start = [], _time.time()
+    while claude.EOT not in got and _time.time() - start < 5:
+        c = cpu.bus.in_data()
+        if c:
+            got.append(c)
+    assert got == [ord("o"), ord("k"), claude.EOT]
+    assert cpu.bus.in_data() == 0
+    cpu.reset()
+    assert len(cpu.bus.claude.history) == 2
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
