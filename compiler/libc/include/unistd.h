@@ -21,6 +21,15 @@
  *                        FILE out instead of the display; out is the
  *                        caller's, still open when the program ends. The
  *                        program should not rewrite that file itself.
+ *   _spawn_kill          not called: the address of the code that ends the
+ *                        program spawnv() is running with status 130. An
+ *                        interrupt handler returns it (cast to unsigned) to
+ *                        kill the program: RTI then goes there.
+ *   fs_reclaim()         the blocks no file uses (what a killed program left
+ *                        half written) are freed, and chains longer than
+ *                        their file's length are cut. Returns how many
+ *                        blocks it freed, or -1 (errno ENODEV, no disk).
+ *                        Not POSIX.
  *   isatty(fd)           1 if fd (0 keyboard, 1 stdout, 2 stderr) is the
  *                        console, 0 if it is a file: only stdout can be, when
  *                        the shell started the program with `>`. Not standard
@@ -38,6 +47,8 @@ int mkdir(const char *path, ...);
 int rmdir(const char *path);
 int spawnv(const char *path, char *const argv[]);
 int spawnv_to(const char *path, char *const argv[], FILE *out);
+void _spawn_kill(void);
+int fs_reclaim(void);
 int isatty(int fd);
 
 #endif

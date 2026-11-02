@@ -1,6 +1,6 @@
 /* du.c - how much disk space folders and files take (a program for Tynix, in /bin)
  *
- *   python os/make_disk.py                 (builds it into /bin)
+ *   python tynix/make_disk.py              (builds it into /bin)
  *   (in the shell)   du [-a] [path...]
  *
  * Sizes are in disk KB, like `du -k`: one block (256 words) is 1 KB. A text

@@ -50,7 +50,7 @@ logisim-CPU-project-/
 │   │   ├── objfile.py        ObjectFile / Reloc (abs|rel, rom_only for CALL targets), saved as JSON (.obj)
 │   │   ├── linker.py         .obj files → ROM image; --lib: only the needed parts; checks externs/RAM calls; format_raw(), format_map()
 │   │   ├── errors.py         AsmError (file:line: message), AsmErrors (batch)
-│   │   ├── selftest.py       20 checks (incl. building every compiler/examples program)
+│   │   ├── selftest.py       22 checks (incl. building every compiler/examples program)
 │   │   └── asm_grammar.py    generates railroad-diagram HTML of the grammar (needs railroad-diagrams)
 │   ├── src/cc/               C compiler (run as `python compiler/src/cc <cmd>`); imports src/asm's modules
 │   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; build: --exe; run: --keys --steps --stats --trace)
@@ -63,7 +63,7 @@ logisim-CPU-project-/
 │   │   ├── peephole.py       clean-ups per function
 │   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0 (ROM or --exe), link, TEX1 .exe, run in simulator
 │   │   ├── cerror.py         CError (file:line:col: error: ...)
-│   │   ├── selftest.py       17 checks (incl. every tests/ program against gcc's output)
+│   │   ├── selftest.py       18 checks (incl. interrupts from C, every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
 │   │                         fuzz.py: random programs, gcc vs tiny C
 │   ├── src/img/              PNG -> compressed image for gfx_image() (run as `python compiler/src/img pic.png`)
@@ -80,7 +80,7 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       17 checks (incl. the C library's files on the simulator against fs.py, stat, spawnv, os/shell.c, os/ed.c, os/edit.c, the nine tools)
+│   │   └── selftest.py       19 checks (incl. fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv, tynix/shell.c, tynix/ed.c, tynix/edit.c, the nine tools)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), memory.asm (memcpy, memset), setjmp.asm,
 │   │                         spawn.c + spawn.asm (spawnv: load a --exe program from the disk, run it, come back)
@@ -96,7 +96,8 @@ logisim-CPU-project-/
 │   │   │                     diag16, diag17 (STK SET/GET wrap, NOT, MOD by 0, float opcodes, rounding),
 │   │   │                     diag18 (flags after OR/XOR, NOT as assembled now)
 │   │   └── c/                C
-│   │       ├── basics/       hello, primes (sieve + hex display), structs (structs, qsort, malloc)
+│   │       ├── basics/       hello, primes (sieve + hex display), structs (structs, qsort, malloc),
+│   │       │                 interrupts (WAIT, a timer IRQ and a key IRQ served by a C handler)
 │   │       ├── games/        guess (keyboard input), snake (W/A/S/D, R restarts, Q quits),
 │   │       │                 game_of_life (64x64 torus, 7 scenes of well-known patterns, checks itself; keys 1-7 n r space s q)
 │   │       ├── graphics/     the RGB screen: gfx_demo; image_demo (gfx_image) with images/: mandelbrot, smiley (.png + the .h made from it);
@@ -110,7 +111,7 @@ logisim-CPU-project-/
 │   └── ROM/                  build output (.obj/.rom/.map/.asm), git-ignored, created on first build;
 │                             ROM/libc/ caches the compiled C library
 │
-├── os/                       the OS, Tynix (simulator only), CP/M / DOS style: one program at a time
+├── tynix/                    the OS, Tynix (simulator only), CP/M / DOS style: one program at a time
 │   ├── shell.c               the OS's ROM: checks the disk, prompts with the current directory; built-ins help ls
 │   │                         cd pwd cat echo rm mv cp mkdir rmdir df clear halt (> and >> to a file); any other
 │   │                         name runs /bin/NAME (or a path) with spawnv() and waits; a program that exits 254
@@ -123,7 +124,7 @@ logisim-CPU-project-/
 │   ├── diff.c, hexdump.c     changed lines of two text files (LCS, Unix normal format); values in hex
 │   ├── calc.c                32-bit integer calculator (C precedence; no argument: a line at a time)
 │   ├── visual_file_manager.c a two-pane yazi-like file manager on the RGB screen (j k h l, space select, y x p, u, r d a, ~ home, q)
-│   ├── make_disk.py          os/disk.img (git-ignored): TFS1, ed and the C examples built --exe in /bin, /readme.txt, /home/user (Documents, Downloads, ...)
+│   ├── make_disk.py          tynix/disk.img (git-ignored): TFS1, ed and the C examples built --exe in /bin, /readme.txt, /home/user (Documents, Downloads, ...)
 │   └── run_with_video.sh     builds the shell and the disk, puts video_player in /bin (a clip.h argument picks the video), starts the simulator
 │
 └── cpu_sim/
@@ -141,7 +142,7 @@ logisim-CPU-project-/
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG --screen-fps N]`
     │   ├── bench.py          speed check: nine example programs in run(), MHz first/best run + end-state digest
-    │   └── selftest.py       31 checks (incl. translated code against step() on random code)
+    │   └── selftest.py       43 checks (incl. interrupts, translated code against step() on random code)
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -170,8 +171,8 @@ The design follows the "But How Do It Know?" style: a single bus,
 ## ISA cheat sheet
 
 * 32-bit words. 16 registers `R0`–`R15`. 25-bit addresses, 16M words per
-  bank: bit 24 = RAM. ROM `0x0000000–0x0FFFFFF` (read-only), stack = RAM
-  `0x1000000–0x1003FFF`, linker data from `0x1004000`, end of RAM
+  bank: bit 24 = RAM. ROM `0x0000000–0x0FFFFFF` (read-only; the vectors are
+  its first 10 words), RAM linker data from `0x1000000`, then the stack, end of RAM
   `0x1FFFFFF`. The memory map lives in `linker.py` and `config.py` (and
   `malloc.c`/`stdlib.asm` write down the end of RAM). **The circuit still
   has the 16-bit map** (bit 16 = RAM, 64K words per bank) and can't run
@@ -183,7 +184,7 @@ The design follows the "But How Do It Know?" style: a single bus,
   `CMP`/`FCMP` write 0 to R0 and set the flags from `RA − RB`.
 * Confirmed on the circuit: the `A` flag (`RA > RB`) is signed, `SHR` is
   logical, `DIV` truncates and `MOD` keeps the dividend's sign, `INT`
-  (float→int) truncates toward zero, ESP/EBP wrap at 14 bits, the `A` flag
+  (float→int) truncates toward zero, ESP/EBP wrap at 14 bits (the simulator's are 24 since Phase 6), the `A` flag
   after `FCMP` is a float compare. `DIV` by 0 gives the dividend, `MOD` by 0
   gives 0 (`diag16`/`diag17`).
 * `NOT` inverts RB on the circuit since it was rewired on 2026-10-15
@@ -199,6 +200,12 @@ The design follows the "But How Do It Know?" style: a single bus,
   mnemonic) writes `RB × 2`; 8/9/A/E write 0; 5/B/C give `FFFFFFFF` with N and Z
   both on (an undriven bus?), which the simulator doesn't copy.
 * System ops: NOP LD ST DATA RJMP RJF RJNF CLF COMM ADDR JMRB STK ALD AST CPY HALT.
+  Group `0x2` (Phase 6; simulator only so far, TECHNICAL 1.8): RTI EI DI TRAP
+  WAIT GSP SSP GBP SBP SLIM. `HALT` is the shutdown (NMI or reset wakes it),
+  `WAIT` the idle sleep. Interrupts: vectors in ROM 0 reset, 2 NMI, 4 IRQ, 6 TRAP,
+  8 FAULT (stack limit), two saved words (the selected devices; IAR, flags, enable bit), a controller
+  at `0xAC`/`0xAD`, the timer period at `0x7C`; the linker adds the vectors and
+  a start-up code that sets ESP/EBP/limit (no fixed stack area).
   `CPY RA, RB` copies RA → RB. `ALD`/`AST` use R0 with `mem[RA+RB]`.
 * Jumps are relative to the **address of the offset word**. `RJF` = any
   listed flag on, `RJNF` = any listed flag off. Mask: C=8 A=4 N=2 Z=1.
@@ -271,7 +278,7 @@ The design follows the "But How Do It Know?" style: a single bus,
   argv)` loads one from the disk, runs it with argc/argv and returns its exit
   status (longjmp back). crt0 holds `_Exit` and `_heap_end` (the OS's heap stops
   at `0x1100000` when `spawnv` is linked). Each program has its own libc copy.
-  `os/shell.c` is the shell that runs them (built-ins + `/bin/NAME`).
+  `tynix/shell.c` is the shell that runs them (built-ins + `/bin/NAME`).
 * Tests: `compiler/src/cc/tests/*.c` must print exactly gcc's output
   (`.expected`); `difftest.py` checks with gcc.
 
@@ -295,9 +302,9 @@ python compiler/src/cc/tests/difftest.py [--update]                # C tests aga
 python compiler/src/img pic.png [--colors 16] [--size 64x]         # PNG -> pic.h for gfx_image(x, y, pic)
 python compiler/src/img/video.py clip.mp4 [--fps 10] [--seconds 5]  # video -> clip.h for video_player.c (needs ffmpeg)
 python compiler/src/disk format disk.img; python compiler/src/disk put disk.img notes.txt   # disk images (ls get cat rm mkdir mv df fsck)
-python os/make_disk.py; python compiler/src/cc build os/shell.c                 # the OS: os/disk.img with /bin, the shell's ROM
-python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img             # run it, type help
-os/run_with_video.sh [clip.h]                                                    # the same with video_player in /bin: type /bin/video_player
+python tynix/make_disk.py; python compiler/src/cc build tynix/shell.c           # the OS: tynix/disk.img with /bin, the shell's ROM
+python cpu_sim/src/main.py compiler/ROM/shell.rom --disk tynix/disk.img          # run it, type help
+tynix/run_with_video.sh [clip.h]                                                 # the same with video_player in /bin: type /bin/video_player
 pypy3 compiler/src/cc run compiler/examples/c/graphics/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
 pypy3 cpu_sim/src/bench.py [life sqrt ...]                          # simulator speed in MHz (python: --scale 0.1 by default)
 ```

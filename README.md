@@ -19,7 +19,7 @@ circuit.
 32-bit words, 16 registers (`R0`–`R15`), a 25-bit address bus where bit 24
 picks RAM (`0x1000000`–`0x1FFFFFF`) over ROM (`0x0000000`–`0x0FFFFFF`), 16M
 words each (the circuit itself still has the 16-bit version), four flags
-(`C A N Z`), a hardware stack in the first 16K words of RAM, integer and
+(`C A N Z`), a hardware stack that can sit anywhere in RAM (with a limit register), interrupts (IRQ with a timer and the keyboard, an NMI kill switch, TRAP; simulator only so far), integer and
 IEEE-754 float ALUs, and I/O through a single `COMM` instruction: a text
 display at `0x5C`, a hex number display at `0x3C` and a keyboard at `0xF0`
 (plus a 256×256 RGB screen at `0x6C`, drawn on from C with `gfx.h`, and a
@@ -27,7 +27,7 @@ millisecond timer at `0x7C`, wiring planned, which C's `clock()` reads,
 and, in the simulator only, a disk kept in a file at `0x8C`/`0x8D`, with a
 filesystem that C's `fopen` reads and writes and `compiler/src/disk` edits
 from the PC, and programs that C's `spawnv` loads from it into RAM and runs;
-`os/shell.c` is a small OS for it: a command shell in ROM).
+`tynix/shell.c` is a small OS for it: a command shell in ROM).
 Every ALU result goes to **R0**.
 
 ## Requirements
@@ -93,10 +93,10 @@ python compiler/src/cc run compiler/examples/c/graphics/image_demo.c --screen ou
 The OS, Tynix (simulator only): a shell in ROM that runs the programs on the disk:
 
 ```
-python os/make_disk.py                          # os/disk.img: the C examples in /bin, built --exe
-python compiler/src/cc build os/shell.c
-python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img   # type help, ls /bin, primes, snake ...
-os/run_with_video.sh [clip.h]                   # the shell with video_player in /bin, in the window
+python tynix/make_disk.py                       # tynix/disk.img: the C examples in /bin, built --exe
+python compiler/src/cc build tynix/shell.c
+python cpu_sim/src/main.py compiler/ROM/shell.rom --disk tynix/disk.img   # type help, ls /bin, primes, snake ...
+tynix/run_with_video.sh [clip.h]                # the shell with video_player in /bin, in the window
 ```
 
 ## A taste of the assembly
@@ -145,7 +145,7 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 | `compiler/src/disk/` | disk tool: makes and edits disk images (TFS1 filesystem) for the simulator's `--disk` |
 | `compiler/src/img/` | image converter: PNG -> compressed picture for `gfx_image()` (`gfx.h`); `video.py`: a video -> frames for `video_player.c` |
 | `compiler/libc/` | the C library: headers (`include/`), C and assembly sources |
-| `os/` | the OS, Tynix (simulator only): `shell.c`, a command shell in ROM that runs programs from the disk; `ed.c`, a line editor; `edit.c`, a full-screen editor on the RGB screen; `more`, `grep`, `find`, `tree`, `du`, `diff`, `hexdump`, `calc` (one `.c` each) and `visual_file_manager.c`, a yazi-like file manager on the RGB screen; `make_disk.py`, a disk with these and the C examples in `/bin` |
+| `tynix/` | the OS, Tynix (simulator only): `shell.c`, a command shell in ROM that runs programs from the disk; `ed.c`, a line editor; `edit.c`, a full-screen editor on the RGB screen; `more`, `grep`, `find`, `tree`, `du`, `diff`, `hexdump`, `calc` (one `.c` each) and `visual_file_manager.c`, a yazi-like file manager on the RGB screen; `make_disk.py`, a disk with these and the C examples in `/bin` |
 | `compiler/examples/` | example programs: `asm/` (programs, the standard library `stdlib/stdlib.asm`, `tests/` circuit diagnostics) and `c/` in folders by kind (`basics/`, `games/`, `graphics/`, `tests/`, `os/`) |
 | `compiler/ROM/` | build output for ROM images (ignored by git) |
 | `compiler/assembly_syntax.md` | full assembly language reference |

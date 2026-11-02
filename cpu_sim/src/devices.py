@@ -97,11 +97,14 @@ class Keyboard:
     circuit's keyboard presents and what read_char / read_line poll on.
     """
 
-    def __init__(self):
+    def __init__(self, interrupts=None):
         self.buffer: deque[int] = deque()
+        self.interrupts = interrupts        # the controller: a key raises its source
 
     def type(self, text: str) -> None:
         self.buffer.extend(ord(c) for c in text)
+        if text and self.interrupts is not None:
+            self.interrupts.raise_(config.IRQ_KEYBOARD)
 
     def read(self) -> int:
         return self.buffer.popleft() if self.buffer else 0
@@ -116,10 +119,37 @@ class Timer:
     runs at the right speed however fast it is simulated; the window stops
     it while the simulation is paused. clock: a function giving seconds."""
 
-    def __init__(self, clock=time.perf_counter):
+    def __init__(self, clock=time.perf_counter, interrupts=None):
         self.clock = clock
         self.frozen = None          # the clock's reading when it was paused
         self.start = clock()
+        self.interrupts = interrupts    # the controller the periodic source is raised on
+        self.period = 0                 # interrupt period in ms, 0 = off
+        self.next_tick = 0.0            # in ms since start
+
+    def now_ms(self) -> float:
+        now = self.clock() if self.frozen is None else self.frozen
+        return (now - self.start) * 1000
+
+    def set_period(self, value: int) -> None:
+        """OUTDATA: the interrupt period in milliseconds (0 = off)."""
+        self.period = value & config.WORD_MASK
+        self.next_tick = self.now_ms() + self.period
+
+    def poll(self) -> None:
+        """Raise the timer source if a period has gone by (periods that
+        passed unseen count as one)."""
+        if self.period and self.interrupts is not None:
+            now = self.now_ms()
+            if now >= self.next_tick:
+                self.interrupts.raise_(config.IRQ_TIMER)
+                self.next_tick = now + self.period
+
+    def until_tick(self) -> float | None:
+        """Seconds to the next interrupt, or None when the timer is off."""
+        if not self.period:
+            return None
+        return max(self.next_tick - self.now_ms(), 0.0) / 1000
 
     def read(self) -> int:
         now = self.clock() if self.frozen is None else self.frozen
@@ -137,6 +167,7 @@ class Timer:
     def reset(self) -> None:
         """Back to 0; a paused timer stays paused."""
         self.start = self.clock()
+        self.period, self.next_tick = 0, 0.0
         if self.frozen is not None:
             self.frozen = self.start
 
@@ -151,6 +182,8 @@ class Video:
         self.width, self.height = width, height
         self.pixels = [0] * (width * height)     # RGB565, row by row
         self.dirty = set()                       # indices changed since the window drew
+        self.writes = 0                          # pixels written ever (the window asks: is it still drawing? a
+                                                 # pixel painted over one already in `dirty` adds nothing to it)
         self.used = False                        # has anything been drawn
         self.cleared = True                      # everything changed (window redraws all)
 
@@ -160,11 +193,13 @@ class Video:
         i = y * self.width + x
         self.pixels[i] = value & 0xFFFF
         self.dirty.add(i)
+        self.writes += 1
         self.used = True
 
     def clear(self) -> None:
         self.pixels = [0] * (self.width * self.height)
         self.dirty.clear()
+        self.writes += 1
         self.cleared = True
 
     @staticmethod
@@ -235,6 +270,44 @@ class Disk:
             self.file.close()
 
 
+class InterruptController:
+    """Interrupt controller at 0xAC (pending/acknowledge) and 0xAD (enable).
+
+    A device raises a source (a bit, lower number = higher priority): the
+    request is latched in `pending` until the CPU acknowledges it, so a
+    device can't hold the line and starve the program (an event is one
+    request). The IRQ line is `pending & enable`. INDATA 0xAC gives
+    pending (bits 7-0), the highest-priority pending and enabled source
+    (15-8, 0xFF = none) and the enable mask (23-16)."""
+
+    def __init__(self):
+        self.pending = 0
+        self.enable = 0
+
+    def raise_(self, source: int) -> None:
+        self.pending |= 1 << source
+
+    def acknowledge(self, value: int) -> None:
+        self.pending &= ~value & 0xFF
+
+    def set_enable(self, value: int) -> None:
+        self.enable = value & 0xFF
+
+    @property
+    def line(self) -> bool:
+        return bool(self.pending & self.enable)
+
+    def highest(self) -> int:
+        active = self.pending & self.enable
+        return (active & -active).bit_length() - 1 if active else 0xFF
+
+    def status(self) -> int:
+        return self.pending | self.highest() << 8 | self.enable << 16
+
+    def reset(self) -> None:
+        self.pending = self.enable = 0
+
+
 def _nothing(value: int) -> None:
     """OUTDATA to an address where no device listens."""
 
@@ -268,8 +341,9 @@ class DeviceBus:
         self._display = Display()
         self._video = Video()
         self._disk: Disk | None = None
-        self.keyboard = Keyboard()
-        self.timer = Timer()
+        self.interrupts = InterruptController()
+        self.keyboard = Keyboard(self.interrupts)
+        self.timer = Timer(interrupts=self.interrupts)
         self.hex_value = None          # None = nothing sent yet (display blank)
         self._wire()
 
@@ -280,6 +354,9 @@ class DeviceBus:
             config.HEX_DISPLAY_ADDR: self._hex,
             config.VIDEO_ADDR: self._video.write,
             config.VIDEO_CLEAR_ADDR: self._video_clear,
+            config.TIMER_ADDR: self._timer_period,
+            config.INT_ACK_ADDR: self.interrupts.acknowledge,
+            config.INT_ENABLE_ADDR: self.interrupts.set_enable,
         }
         if self._disk is not None:
             self._outputs[config.DISK_DATA_ADDR] = self._disk.write
@@ -310,6 +387,10 @@ class DeviceBus:
             return self.keyboard.read()
         if self.in_addr == config.TIMER_ADDR:
             return self.timer.read()
+        if self.in_addr == config.INT_ACK_ADDR:
+            return self.interrupts.status()
+        if self.in_addr == config.INT_ENABLE_ADDR:
+            return self.interrupts.enable
         disk = self._disk
         if disk is not None:
             if self.in_addr == config.DISK_DATA_ADDR:
@@ -317,6 +398,20 @@ class DeviceBus:
             if self.in_addr == config.DISK_SEEK_ADDR:
                 return disk.words
         return None
+
+    def _link_timer(self) -> None:
+        if self.timer.interrupts is None:      # a timer put here (tests use a fake clock)
+            self.timer.interrupts = self.interrupts
+
+    def _timer_period(self, value: int) -> None:
+        self._link_timer()
+        self.timer.set_period(value)
+
+    def irq_line(self) -> bool:
+        """Is a request pending (the timer is looked at first)?"""
+        self._link_timer()
+        self.timer.poll()
+        return self.interrupts.line
 
     def attach_disk(self, path) -> None:
         """Use the disk file at path (created if missing); None takes it out."""
@@ -334,5 +429,6 @@ class DeviceBus:
         self.video.clear()
         self.video.used = False
         self.timer.reset()
+        self.interrupts.reset()
         if self.disk is not None:          # the disk keeps its contents
             self.disk.position = 0

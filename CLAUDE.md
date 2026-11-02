@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # five self-check suites (assembler 20, simulator 31, C compiler 17, image tool 10, disk tool 17), then check_docs.py
+python run.py test                                   # five self-check suites (assembler 22, simulator 43, C compiler 18, image tool 10, disk tool 19), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
@@ -37,9 +37,9 @@ python compiler/src/cc run prog.c [--keys $'text\n'] [--stats] [--disk disk.img]
 python compiler/src/cc build prog.c [more.c x.asm] [-o name.rom] [--map] [--lib x.asm]   # C: links the C library itself
 python compiler/src/cc build prog.c --exe            # a program for the OS: prog.exe (TEX1), for `disk put`; spawnv() runs it
 python compiler/src/cc compile prog.c [-o prog.asm]                   # C -> assembly only
-python os/make_disk.py [IMG] [--new] [--size MB]                     # the OS's disk: os/disk.img, C examples built --exe in /bin
-os/run_with_video.sh [clip.h]                        # shell + disk with video_player in /bin (a clip from img/video.py), opens the window
-python compiler/src/cc build os/shell.c && python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img   # the OS (shell)
+python tynix/make_disk.py [IMG] [--new] [--size MB]                  # the OS's disk: tynix/disk.img, C examples built --exe in /bin
+tynix/run_with_video.sh [clip.h]                     # shell + disk with video_player in /bin (a clip from img/video.py), opens the window
+python compiler/src/cc build tynix/shell.c && python cpu_sim/src/main.py compiler/ROM/shell.rom --disk tynix/disk.img   # the OS (shell)
 
 python compiler/src/img pic.png [-o pic.h] [--size WxH] [--colors N] [--dither] [--preview p.png]   # PNG -> compressed pic.h for gfx_image()
 python compiler/src/img/video.py clip.mp4 [-o clip.h] [--fps N] [--seconds S] [--colors N] [--tolerance T] [--preview dir/]   # video (ffmpeg) or PNG folder -> frames for video_player.c
@@ -67,7 +67,7 @@ Pictures: `compiler/src/img/` turns a PNG into a `.h` holding a compressed image
 
 Disk: the simulator's disk device (`0x8C`/`0x8D`, `--disk FILE`) is a file of words; `compiler/src/disk/` makes and edits images in the TFS1 filesystem (format in `fs.py`'s docstring: 256-word blocks chained by a FAT, directories are files of 132-word entries, text files packed 4 chars a word). The C library's `fs.c`/`dir.c` (`fopen` and friends, `dirent.h`, `unistd.h`) read and write the same format, and `fs.py` is the reference; the disk self-check runs both against each other. Programs for the OS: `cc build --exe` links a C program for RAM at `0x1100000` (`linker.link(base=...)`) into a TEX1 `.exe` (format in `compiler/libc/spawn.c`), and `spawnv()` (`spawn.c`/`spawn.asm`) loads it from the disk, runs it with argc/argv through the block crt0 gets in R1, and comes back by longjmp when it exits.
 
-The OS, Tynix (simulator only, TECHNICAL §11): `os/shell.c` is an ordinary C program in ROM; its built-in commands use the C library's file functions, and any other name is a `cc build --exe` program that `spawnv()` loads from `/bin` on the disk, runs at `0x1100000` and returns from. `os/ed.c` (line editor) and `os/edit.c` (full-screen editor on the RGB screen: polls keys, redraws changed cells at most every 33 ms) are `/bin` programs like the examples, and so are the tools `more grep find tree du diff hexdump calc` and `visual_file_manager` (a two-pane file manager on the RGB screen). A `--exe` program can't call `spawnv()`, so the file manager opens things by writing command lines into `/.next` and exiting with status 254: the shell runs them and starts the manager again (TECHNICAL §11, 11.4). `os/make_disk.py` builds `os/disk.img` (git-ignored) with the examples in `PROGRAMS`. A program in `/bin` must end by itself (no interrupts): the examples quit on Ctrl-D or `q`.
+The OS, Tynix (simulator only, TECHNICAL §11): `tynix/shell.c` is an ordinary C program in ROM; its built-in commands use the C library's file functions, and any other name is a `cc build --exe` program that `spawnv()` loads from `/bin` on the disk, runs at `0x1100000` and returns from. `tynix/ed.c` (line editor) and `tynix/edit.c` (full-screen editor on the RGB screen: polls keys, redraws changed cells at most every 33 ms) are `/bin` programs like the examples, and so are the tools `more grep find tree du diff hexdump calc` and `visual_file_manager` (a two-pane file manager on the RGB screen). A `--exe` program can't call `spawnv()`, so the file manager opens things by writing command lines into `/.next` and exiting with status 254: the shell runs them and starts the manager again (TECHNICAL §11, 11.4). `tynix/make_disk.py` builds `tynix/disk.img` (git-ignored) with the examples in `PROGRAMS`. A program in `/bin` should end by itself (the examples quit on Ctrl-D or `q`); a stuck one is killed with the NMI (Esc in the window: `[NAME: 1 kill, 2 continue]`, status 130), after which the shell frees the blocks it left (`fs_reclaim()`).
 
 `compiler/src/asm/`, `compiler/src/cc/`, `compiler/src/img/`, `compiler/src/disk/` and `cpu_sim/src/` import their sibling modules by plain name, so run files as scripts (or put the directory on `sys.path`), not as packages. The assembler, the C compiler, the image converter and the disk tool are invoked as directories (`python compiler/src/asm <cmd>`, `python compiler/src/cc <cmd>`, `python compiler/src/img pic.png`, `python compiler/src/disk <cmd> disk.img`, via `__main__.py`).
 
@@ -79,7 +79,7 @@ Key ISA facts that trip people up (details in STRUCTURE.md):
 - The carry flag: `SUB` sets C on a *borrow* (`RA < RB` unsigned); `CMP`, `--`, `NEG`, `MULT` never set it (measured on the circuit).
 - `STK CALL/RET` only move the stack frame; the `CALL`/`RET` pseudo-ops do the jump and clobber R0/R14/R15.
 - The linker puts `RJMP start` at address 0. Exactly one file has `.global start`. Calling or jumping to a RAM label is a link error.
-- Memory: 16M words of ROM and of RAM (24-bit banks, 25-bit addresses, RAM from `0x1000000`; stack `0x1000000–0x1003FFF`, linker data from `0x1004000`, programs for the OS from `0x1100000`). **The circuit still has 16-bit banks** (RAM from `0x10000`), so programs built now run only in the simulator until it is widened (TECHNICAL §2.4); `run_rom.py` refuses. A simulated CPU holds two 128 MB lists.
+- Memory: 16M words of ROM and of RAM (24-bit banks, 25-bit addresses, RAM from `0x1000000`; linker data from `0x1000000`, then the stack (16K words), then the heap; no fixed stack area, ESP/EBP are 24-bit RAM indices set by the start-up code; vectors at ROM 0–9; programs for the OS from `0x1100000`). **The circuit still has 16-bit banks** (RAM from `0x10000`), so programs built now run only in the simulator until it is widened (TECHNICAL §2.4); `run_rom.py` refuses. A simulated CPU holds two 128 MB lists.
 - In C, every scalar is one word (`sizeof(char) == 1`, `CHAR_BIT == 32`), `double` is the 32-bit float, and there is no `long long`.
 
 ## Keeping the docs in sync
@@ -88,7 +88,7 @@ Most facts are written in more than one doc. When you change one of these, updat
 
 | when this changes | update |
 | --- | --- |
-| an instruction (encoding or behaviour) | `encoding.py` + `isa.py` + `alu.py`/`cpu.py` (both `_execute()` and the `_interpret()` loop) + `translate.py` (the code it writes); TECHNICAL §1, `compiler/assembly_syntax.md` §4, STRUCTURE "ISA cheat sheet", README if it's the one-paragraph summary |
+| an instruction (encoding or behaviour) | `encoding.py` + `asm_grammar.py` + `isa.py` + `alu.py`/`cpu.py` (both `_execute()` and the `_interpret()` loop) + `translate.py` (the code it writes); TECHNICAL §1 (and 1.8 for group 0x2), `compiler/assembly_syntax.md` §4, STRUCTURE "ISA cheat sheet", README if it's the one-paragraph summary |
 | assembler syntax, directives, pseudo-ops | `compiler/assembly_syntax.md`; TECHNICAL §4, STRUCTURE "Assembler conventions" |
 | a command, flag or output path | TECHNICAL §3.3 / §4.1 / §7; README "Quick start", STRUCTURE "Common commands", `assembly_syntax.md` §10, this file's Commands |
 | a stdlib function or the calling convention | the header of `stdlib.asm`; TECHNICAL §5.1–5.2, STRUCTURE "Assembler conventions" |
@@ -101,10 +101,11 @@ Most facts are written in more than one doc. When you change one of these, updat
 | a C library function or header | the header and its `compiler/libc/*.c`; `compiler/c_language.md` §7; TECHNICAL §10.5 for library structure |
 | a C test program | `compiler/src/cc/tests/<name>.c`, then `difftest.py <name> --update` (needs gcc) to write its `.expected` |
 | the compressed image format | `compiler/src/img/codec.py` (docstring, encode, decode) + `compiler/libc/gfx_image.c`; TECHNICAL §7.4, then remake the `.h` files in `compiler/examples/c/graphics/images/` |
-| the memory map (bank width, RAM base, stack, heap) | `compiler/src/asm/linker.py` + `cpu_sim/src/config.py` + `compiler/libc/malloc.c` (`HEAP_END`) + `stdlib.asm` (`HEAP_START`/`HEAP_END`) + `logisim/run_rom.py` (`BANK_BITS`); TECHNICAL §1.2/§2.4/§4.6, `assembly_syntax.md` §6, `c_language.md` §2 and §4, STRUCTURE "ISA cheat sheet", README one-paragraph summary, this file's key facts |
-| the screen's size (256×256, one pixel word: x 31–24, y 23–16, colour 15–0) | `cpu_sim/src/config.py` (`VIDEO_WIDTH`/`VIDEO_HEIGHT`) + `compiler/libc/include/gfx.h` (`GFX_WIDTH`/`GFX_HEIGHT`) + `SCREEN` in `compiler/src/img/__main__.py` + `logisim/CPU.circ` (RGB Video `resolution`, `width`, `height` and `scale`; `RGB_Display`'s two splitters and `X_coord`/`Y_coord` pins); TECHNICAL §2.2 and the device table, STRUCTURE, README, `compiler/c_language.md`; examples that place things by pixel (`snake.c`, `grapher.c`, `gfx_demo.c`) and `os/edit.c`'s comments |
+| the memory map (bank width, RAM base, stack, heap) | `compiler/src/asm/linker.py` (the vectors, `_header()`, the stack after the data) + `cpu_sim/src/config.py` + `compiler/libc/malloc.c` (`HEAP_END`) + `stdlib.asm` (`HEAP_START`/`HEAP_END`) + `logisim/run_rom.py` (`BANK_BITS`); TECHNICAL §1.2/§2.4/§4.6, `assembly_syntax.md` §6, `c_language.md` §2 and §4, STRUCTURE "ISA cheat sheet", README one-paragraph summary, this file's key facts |
+| interrupts (vectors, the saved word, the controller `0xAC`/`0xAD`, the timer period, NMI, the stack limit) | `cpu_sim/src/cpu.py` (`_enter`, `_return`, `_service`, `step()`, `run()`, `_interpret()`) + `devices.py` + `translate.py` (a block ends before group 0x2, PUSH/CALL check the limit) + `config.py` + `compiler/src/asm/linker.py` + `compiler/libc/interrupt.asm`/`cpu.h`; TECHNICAL §1.8 and §2.6 (the circuit change list), `compiler/c_language.md` §6, `c_decisions.md` |
+| the screen's size (256×256, one pixel word: x 31–24, y 23–16, colour 15–0) | `cpu_sim/src/config.py` (`VIDEO_WIDTH`/`VIDEO_HEIGHT`) + `compiler/libc/include/gfx.h` (`GFX_WIDTH`/`GFX_HEIGHT`) + `SCREEN` in `compiler/src/img/__main__.py` + `logisim/CPU.circ` (RGB Video `resolution`, `width`, `height` and `scale`; `RGB_Display`'s two splitters and `X_coord`/`Y_coord` pins); TECHNICAL §2.2 and the device table, STRUCTURE, README, `compiler/c_language.md`; examples that place things by pixel (`snake.c`, `grapher.c`, `gfx_demo.c`) and `tynix/edit.c`'s comments |
 | a file or folder added, moved or removed | STRUCTURE tree; README "Layout"; TECHNICAL §9 if it's outdated material |
-| a shell command, or the programs put in `/bin` | `os/shell.c` (header, `commands[]`), `os/make_disk.py` (`PROGRAMS`, `README`); TECHNICAL §11, STRUCTURE tree, the disk self-check's `SHELL_OUTPUT` |
+| a shell command, or the programs put in `/bin` | `tynix/shell.c` (header, `commands[]`), `tynix/make_disk.py` (`PROGRAMS`, `README`); TECHNICAL §11, STRUCTURE tree, the disk self-check's `SHELL_OUTPUT` |
 | a phase or feature finished, a choice made, a mistake of the session | the Obsidian vault (next section) |
 
 ## The Obsidian vault (outside the repo)

@@ -1,10 +1,10 @@
 /* shell.c - the OS (Tynix): a command shell in ROM for the files and programs on
  * the disk (simulator only)
  *
- *   python os/make_disk.py                (once: os/disk.img, the examples in /bin)
- *   python compiler/src/cc build os/shell.c
- *   python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img
- *   (or: python compiler/src/cc run os/shell.c --disk os/disk.img
+ *   python tynix/make_disk.py             (once: tynix/disk.img, the examples in /bin)
+ *   python compiler/src/cc build tynix/shell.c
+ *   python cpu_sim/src/main.py compiler/ROM/shell.rom --disk tynix/disk.img
+ *   (or: python compiler/src/cc run tynix/shell.c --disk tynix/disk.img
  *    --keys $'ls /bin\nprimes\nhalt\n')
  *
  * It checks the disk, then shows a prompt with the current directory. The
@@ -36,10 +36,12 @@
 #include <sys/statvfs.h>
 #include <sys/stat.h>
 #include <gfx.h>
+#include <cpu.h>
 
 #define LINE_MAX 256
 #define MAX_ARGS 32
 #define WIDTH 64                /* the text display's columns (the circuit's TTY) */
+#define EXIT_KILLED 130         /* the NMI's kill: _spawn_kill's status */
 #define EXIT_NEXT 254           /* a program that ends with this status asks the shell to run */
 #define NEXT_FILE "/.next"      /* the command lines in this file (visual_file_manager does) */
 #define NEXT_MAX 1024
@@ -49,6 +51,8 @@ static char *args[MAX_ARGS + 1];
 static char path[2 * LINE_MAX];
 static char cwd[512];
 static FILE *out;               /* where a built-in writes: stdout, or a file after > */
+static int running;             /* a program is running: the NMI can kill it */
+static char *running_name;
 static char *redirect;          /* the file after > or >>, or 0 */
 static int append;              /* >> */
 static char *next_text;         /* the lines a program left in NEXT_FILE, to run when it is back */
@@ -376,6 +380,36 @@ static char *take_next(void)
     return text;
 }
 
+/* The NMI (the Stop button, Esc in the window) while a program runs: ask
+   what to do. 1 ends the program: the handler returns the address of
+   _spawn_kill instead of the program's, so RTI restores the interrupt state
+   and then spawnv() comes back with status 130. With no program running
+   there is nothing to stop and it is ignored. Runs with interrupts off. */
+static unsigned on_nmi(void)
+{
+    int c;
+    if (!running)
+        return 0;
+    printf("\n[%s: 1 kill, 2 continue] ", running_name);
+    do
+        c = wait_key();
+    while (c != '1' && c != '2');
+    printf("%c\n", c);
+    if (c == '1') {
+        running = 0;                    /* an NMI while it unwinds has nothing to ask about */
+        return (unsigned)_spawn_kill;
+    }
+    return 0;
+}
+
+/* a program that was killed can have left blocks nothing points to */
+static void reclaim(const char *when)
+{
+    int n = fs_reclaim();
+    if (n > 0)
+        printf("[%s: freed %d lost block%s]\n", when, n, n == 1 ? "" : "s");
+}
+
 static int run_program(int argc, char **argv)
 {
     int status;
@@ -387,7 +421,12 @@ static int run_program(int argc, char **argv)
     if (redirect && (to = fopen(redirect, append ? "a" : "w")) == 0)
         return fail(argv[0], redirect);
     errno = 0;                          /* the program's own errno is another variable */
+    running_name = argv[0];
+    running = 1;
     status = spawnv_to(path, argv, to);
+    running = 0;
+    if (status == EXIT_KILLED)
+        reclaim("killed");
     if (to)
         fclose(to);                     /* after the program: spawnv forgot what the disk held */
     if (status == -1 && errno) {
@@ -500,10 +539,14 @@ int main(void)
     if (!is_dir("/")) {
         if (errno == ENODEV)
             printf("no disk, or not formatted: start the simulator with --disk FILE\n"
-                   "(python os/make_disk.py makes one)\n");
+                   "(python tynix/make_disk.py makes one)\n");
         else
             printf("disk: %s\n", strerror(errno));
     }
+    set_interrupt_handler(INT_NMI, on_nmi);
+    interrupts_on();
+    if (is_dir("/"))
+        reclaim("boot");
     for (;;) {
         printf("%s> ", getcwd(cwd, sizeof cwd));
         if (fgets(line, sizeof line, stdin) == 0)

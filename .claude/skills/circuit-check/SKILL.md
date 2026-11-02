@@ -13,7 +13,7 @@ The circuit (`logisim/CPU.circ`) is the ground truth; the simulator was written 
 Create `compiler/examples/asm/tests/diagNN.asm` with the next free number (look at the existing `diag*.asm`). Follow `diag11.asm`:
 
 - A header listing every result line: its RAM address, what it measures, and the value expected under each competing hypothesis (e.g. "truncates" vs "rounds"), so the output can be read off directly.
-- Store each result in a `.ram` `.space` area and also print it with `print_hex` + `print_newline` from the stdlib. Link the diag file **first** so its RAM data starts at `0x1004000` (`0x14000` on the 16-bit circuit, which `run_rom.py` won't run until it is widened: TECHNICAL 2.4).
+- Store each result in a `.ram` `.space` area and also print it with `print_hex` + `print_newline` from the stdlib. Link the diag file **first** so its RAM data starts at `0x1000000` (`0x10000` on the 16-bit circuit, which `run_rom.py` won't run until it is widened: TECHNICAL 2.4).
 - Put a fixed marker value in front of each test so a missing or shifted line is obvious.
 - End with `HALT`.
 - **No keyboard input.** The headless circuit run has no keyboard (stdin is closed), so anything that waits for a key hangs.

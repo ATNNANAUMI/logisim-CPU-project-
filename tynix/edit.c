@@ -1,6 +1,6 @@
 /* edit.c - a full-screen text editor on the RGB screen (a program for Tynix, in /bin)
  *
- *   python os/make_disk.py                 (builds it into /bin)
+ *   python tynix/make_disk.py              (builds it into /bin)
  *   (in the shell)   edit notes.txt
  *
  * The text shows on the 256 x 256 RGB screen, 42 columns by 31 lines, with a

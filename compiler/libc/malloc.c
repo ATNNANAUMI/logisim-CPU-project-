@@ -1,7 +1,7 @@
 /* malloc, calloc, realloc, free.
  *
- * The heap is the RAM after the program's own variables: from _end (a label
- * the C compiler's build puts after all other RAM data) to _heap_end, a word
+ * The heap is the RAM after the program's own variables and its stack: from
+ * _end (a symbol the linker defines: the first RAM word after both) to _heap_end, a word
  * crt0 holds: the end of RAM (0x2000000, linker.py's RAM_END, one past the
  * last word), or the program area (linker.py's PROGRAM_BASE) in a program
  * that runs others with spawnv(), since they are loaded there. Each block has a one-word

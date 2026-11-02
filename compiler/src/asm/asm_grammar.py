@@ -94,13 +94,13 @@ PROGRAM = [
 INSTRUCTIONS = [
     Rule("instruction", Diagram(Choice(
         0,
-        label("no operands", one_of("NOP", "CLF", "HALT")),
+        label("no operands", one_of("NOP", "CLF", "HALT", "RTI", "EI", "DI", "TRAP", "WAIT")),
         label("memory, copy", one_of("LD", "ST", "ALD", "AST", "CPY"),
               ref("register"), lit(","), ref("register")),
         label("load a value", lit("DATA"), ref("register"), lit(","), ref("value")),
         label("jump", lit("RJMP"), ref("target")),
         label("jump if", one_of("RJF", "RJNF"), ref("flags"), lit(","), ref("target")),
-        label("address, jump", one_of("ADDR", "JMRB"), ref("register")),
+        label("address, jump", one_of("ADDR", "JMRB", "GSP", "SSP", "GBP", "SBP", "SLIM"), ref("register")),
         label("input/output", lit("COMM"),
               one_of("INDATA", "INADDR", "OUTDATA", "OUTADDR"),
               Optional(lit(",")), ref("register")),

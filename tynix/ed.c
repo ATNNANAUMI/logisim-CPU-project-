@@ -1,6 +1,6 @@
 /* ed.c - a line editor for text files (a program for Tynix, in /bin)
  *
- *   python os/make_disk.py                 (builds it into /bin)
+ *   python tynix/make_disk.py              (builds it into /bin)
  *   (in the shell)   ed notes.txt
  *
  * Like Unix's ed, but the errors say what is wrong. The text is held in

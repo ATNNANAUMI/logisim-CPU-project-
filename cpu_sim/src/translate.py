@@ -23,9 +23,12 @@ A block function is
 
     block(regs, rom, ram, flags, esp, ebp, cpu) -> (iar, flags, esp, ebp, executed)
 
-It raises Stop(iar, flags, esp, ebp, executed) at HALT, at a stack wrap
-when config.STOP_ON_STACK_WRAP stops the CPU, and (a RAM block, with no
-stop) after a store over translated RAM code. The CPU can't write ROM, so a
+It raises Stop(iar, flags, esp, ebp, executed) at HALT, before a PUSH or
+CALL that would go past the stack limit (cpu.fault_pending is set and the
+iar is that instruction's), and (a RAM block, with no stop) after a store
+over translated RAM code. The instructions of group 0x2 (RTI EI DI TRAP
+WAIT GSP SSP GBP SBP SLIM) are never translated: a block ends before one and
+CPU._interpret() runs it. The CPU can't write ROM, so a
 ROM block stays right until the ROM is changed from outside; RAM code can
 change under its blocks, so the CPU keeps a map of the RAM words they were
 made from, which every RAM store checks (CPU._code_written() drops them).
@@ -45,7 +48,6 @@ MASK = config.WORD_MASK
 ADDR_MASK = config.ADDR_MASK
 RAM_BIT = config.RAM_BIT
 BANK_MASK = config.BANK_MASK
-STACK_MASK = config.STACK_MASK
 INDEX_MASK = config.STACK_INDEX_MASK
 
 MAX_LENGTH = 64             # instructions in a block at most
@@ -62,7 +64,7 @@ class Stop(Exception):
 
 def options():
     """The TWEAKS a translation depends on: a block is made for one setting."""
-    return (config.A_FLAG_SIGNED, config.SHR_ARITHMETIC, config.STOP_ON_STACK_WRAP,
+    return (config.A_FLAG_SIGNED, config.SHR_ARITHMETIC,
             config.DIV_TRUNCATE, config.FLOAT_NOP_RESULT)
 
 
@@ -192,6 +194,8 @@ def _scan(rom, ram, start):
         nxt = (pc + 1) & ADDR_MASK
         alu_op = word & 0x1000
         op = (word >> 8) & 0xF
+        if not alu_op and word & 0x2000 and op < 10:
+            break                           # RTI EI DI TRAP WAIT GSP ...: not translated
         takes = bool(word & 0x4000) if alu_op else op in (0x3, 0x4, 0x5, 0x6)
         if takes and nxt & RAM_BIT != bank:
             break                           # its operand would be in the other bank
@@ -223,7 +227,6 @@ def _flags_seen(items):
     CLF) are seen before others replace them: by a jump that tests them, or
     by a way out of the block (in RAM, a store can be one)."""
     stores_leave = bool(items[0][0] & RAM_BIT)
-    stops = config.STOP_ON_STACK_WRAP
     seen = [False] * len(items)
     live = True                                 # the block's last way out
     for i in range(len(items) - 1, -1, -1):
@@ -238,7 +241,7 @@ def _flags_seen(items):
             live = True
         elif stores_leave and (op in (0x2, 0xD) or op == 0xB and (word >> 4) & 7 in (0, 2, 4)):
             live = True                         # ST AST PUSH CALL SET: may leave (rewritten code)
-        elif op == 0xB and stops and (word >> 4) & 7 == 1:   # POP can stop
+        elif op == 0xB and (word >> 4) & 7 in (0, 2):   # PUSH, CALL: may fault (leave before)
             live = True
     return seen
 
@@ -297,6 +300,7 @@ class _Writer:
         self.out = None             # the output address, when an OUTADDR here set a known one
         self.video = False          # video (the bus's Video) loaded
         self.rc = False             # rc (cpu._ram_code) loaded
+        self.slim = False           # slim (cpu.slimit) loaded
         self.here = None            # (address after, instructions done) of the instruction
 
     # ------------------------------------------------------------ helpers
@@ -530,11 +534,19 @@ class _Writer:
                   f" | (({value} >> 24) & 0x{config.VIDEO_WIDTH - 1:X})")
         self.emit(f"video.pixels[{i}] = {value} & 0xFFFF")
         self.emit(f"video.dirty.add({i})")
+        self.emit("video.writes += 1")
         self.emit("video.used = True")
 
     def stack(self, kind, rb, nxt, done):
-        stops = config.STOP_ON_STACK_WRAP
         if kind in (0, 2):                                  # PUSH, CALL (the frame only)
+            if not self.slim:
+                self.emit("slim = cpu.slimit")
+                self.slim = True
+            # past the limit: the instruction is not executed, the CPU
+            # takes the fault vector (cpu._service) at the instruction
+            self.emit("if esp >= slim:")
+            self.emit("cpu.fault_pending = True", 2)
+            self.leave(_hex((nxt - 1) & ADDR_MASK), done - 1, indent=2, stop=True)
             slot = self.temp("s")
             if self.guard:
                 self.emit(f"{slot} = esp")
@@ -544,23 +556,13 @@ class _Writer:
                 self.ram_store("esp", "ebp", 1, written=slot)
                 self.emit("ebp = esp")
             self.emit("esp += 1")
-            self.emit(f"if esp > 0x{STACK_MASK:X}:")
-            self.emit("esp = cpu._bump(esp - 1, 1)", 2)
-            if stops:
-                self.emit("if cpu.stopped:", 2)
-                self.leave(_hex(nxt), done, indent=3, stop=True)
             self.rewritten(slot, 1)
         elif kind == 1:                                     # POP
-            self.emit("esp -= 1")
-            self.emit("if esp < 0:")
-            self.emit("esp = cpu._bump(esp + 1, -1)", 2)
-            if stops:                                       # R0 is popped, then it stops
-                self.emit("if cpu.stopped:", 2)
-                self.leave(_hex(nxt), done, indent=3, stop=True, r0="ram[esp]")
+            self.emit(f"esp = (esp - 1) & 0x{BANK_MASK:X}")
             self.set_reg(0, "ram[esp]")
         elif kind == 3:                                     # RET
             self.emit("esp = ebp")
-            self.emit(f"ebp = ram[ebp] & 0x{STACK_MASK:X}")
+            self.emit(f"ebp = ram[ebp] & 0x{BANK_MASK:X}")
         elif kind == 4:                                     # SET
             index = self.stack_index(rb)
             if self.guard:

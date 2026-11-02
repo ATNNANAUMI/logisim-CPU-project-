@@ -1,7 +1,7 @@
 /* diff.c - the lines that differ between two text files (a program for Tynix,
  * in /bin)
  *
- *   python os/make_disk.py                 (builds it into /bin)
+ *   python tynix/make_disk.py              (builds it into /bin)
  *   (in the shell)   diff from to
  *
  * Unix's normal format: a header like 2c2 (line 2 of `from` was changed to

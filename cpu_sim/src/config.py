@@ -22,13 +22,31 @@ ADDR_MASK = (1 << ADDR_BITS) - 1
 RAM_BIT = 1 << BANK_BITS
 ADDR_DIGITS = (ADDR_BITS + 3) // 4   # hex digits in a printed address
 
-STACK_WORDS = 1 << 14          # the bottom 16K words of RAM, 14-bit index
-STACK_MASK = STACK_WORDS - 1
-# STK SET/GET reach the RAM word EBP + RB, and that sum wraps at the RAM's
-# address width, across all of RAM, not at the stack area's 14 bits
-# (measured on the 16-bit circuit with diag11 and diag16, 2026-10-13; with
-# 24-bit banks it is taken to wrap at 24).
+# ESP and EBP are 24-bit indices into RAM (RAM word i is at address
+# RAM_BASE + i): the stack can be anywhere in RAM, whoever starts a program
+# (the linker's reset stub, later the OS) says where. STK SET/GET add EBP and
+# RB and that sum wraps at the same 24 bits (measured at 16 bits on the
+# circuit with diag11 and diag16, 2026-10-13; the widening is Phase 6).
 STACK_INDEX_MASK = BANK_MASK
+# The stack limit register (SLIM): a PUSH or CALL with ESP at or past it is
+# not executed, it takes the FAULT vector instead. Reset value: the last word.
+STACK_LIMIT_RESET = BANK_MASK
+
+# Interrupts (Phase 6, TECHNICAL 1.7). Vectors: the CPU jumps to these ROM
+# addresses; each holds an RJMP (2 words).
+VECTOR_RESET, VECTOR_NMI, VECTOR_IRQ, VECTOR_TRAP, VECTOR_FAULT = 0, 2, 4, 6, 8
+VECTORS_END = 10                # the first free ROM word
+# The interrupt controller (a COMM device): OUTDATA to INT_ACK_ADDR clears the
+# pending bits set in the word; INDATA gives pending (bits 7-0), the number
+# of the highest-priority pending and enabled source (15-8, 0xFF = none) and
+# the enable mask (23-16). INT_ENABLE_ADDR: OUTDATA sets the enable mask,
+# INDATA reads it. Sources, lower number = higher priority:
+INT_ACK_ADDR = 0xAC
+INT_ENABLE_ADDR = 0xAD
+IRQ_TIMER, IRQ_KEYBOARD = 0, 1
+# run() looks for interrupts between chunks of this many instructions (a
+# translated block is not stopped in the middle).
+INTERRUPT_CHUNK = 4096
 
 DISPLAY_ADDR = 0x5C
 HEX_DISPLAY_ADDR = 0x3C       # 8-digit hex display: shows the last word sent
@@ -47,6 +65,8 @@ VIDEO_HEIGHT = 256
 # Timer (planned wiring, not on the circuit yet): INDATA from TIMER_ADDR
 # reads milliseconds since reset, wrapping at 32 bits (C's clock()). The
 # simulator follows the computer's real clock and stops it while paused.
+# OUTDATA to TIMER_ADDR sets the interrupt period in milliseconds (0 = off):
+# source IRQ_TIMER is raised every period.
 TIMER_ADDR = 0x7C
 
 # Disk (simulator only: Logisim's RAM can't keep its contents in a file).
@@ -73,12 +93,6 @@ SHR_ARITHMETIC = False
 # Confirmed on the circuit (2026-10-02): truncate, so MOD keeps the
 # dividend's sign (-7 MOD 3 = -1).
 DIV_TRUNCATE = True
-
-# Confirmed on the circuit (2026-10-02): ESP and EBP are 14-bit registers,
-# so they overflow and wrap.  True stops the simulated CPU instead, which
-# can help catch a runaway stack while debugging.  (STK SET/GET add EBP and
-# RB in a wider sum that wraps across all of RAM: see STACK_INDEX_MASK.)
-STOP_ON_STACK_WRAP = False
 
 # Float opcodes with no defined result write this to R0. Confirmed on the
 # circuit (2026-10-13, diag16/diag17) for 1000, 1001, 1010 and 1110. Of the

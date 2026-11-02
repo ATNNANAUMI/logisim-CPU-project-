@@ -2,14 +2,27 @@
 
 Memory layout it builds:
 
-    ROM  0x0000000   RJMP start          (2 words, added here)
-         0x0000002   each file's ROM part, in the order given
-    RAM  0x1000000   stack (16K words), never touched by the linker
-         0x1004000   each file's RAM part, in the order given
+    ROM  0x0000000   the vectors, each an RJMP (2 words):
+                       0 reset -> the start-up code below, 2 NMI, 4 IRQ,
+                       6 TRAP, 8 FAULT (stack limit) -> a ROM label
+                       _nmi / _irq / _trap / _fault if some file has it
+                       .global, else the default (RTI, or HALT for a fault)
+         0x000000A   the start-up code (13 words, added here): ESP and EBP =
+                       _stack_base, the stack limit = _stack_limit, then
+                       RJMP start; and the default handlers
+         0x0000017   each file's ROM part, in the order given
+    RAM  0x1000000   each file's RAM part, in the order given
+         _stack_base the stack (16K words by default), after the data
+         _stack_limit = _end: the first RAM word after the stack (malloc's heap)
+
+There is no fixed stack area: ESP and EBP are set here, by the start-up
+code, so that is the only place that decides where the stack is.
 
 A program for the OS (link(..., base=PROGRAM_BASE)) goes all in RAM, to be
 loaded there from the disk: the entry jump at the base, the ROM parts after
-it, then the RAM parts. Its "ROM" words are then ordinary, writable RAM.
+it, then the RAM parts. Its "ROM" words are then ordinary, writable RAM. It
+has no vectors and no start-up code (the OS that loads it owns both, and
+the program runs on the stack of the program that started it).
 
 Each bank has a 24-bit address (16M words); the address bus is one bit wider
 and its top bit selects RAM. The constants below are the whole memory map for
@@ -32,13 +45,20 @@ MASK = 0xFFFFFFFF
 BANK_BITS = 24
 ROM_SIZE = 1 << BANK_BITS                  # words of ROM
 RAM_BASE = 1 << BANK_BITS                  # RAM word i is at address RAM_BASE + i
-STACK_WORDS = 0x4000                       # ESP and EBP are 14-bit
-RAM_DATA_START = RAM_BASE + STACK_WORDS
+STACK_WORDS = 0x4000                       # the stack link() reserves after the data (16K words)
+RAM_DATA_START = RAM_BASE                  # no fixed stack area: the data starts at RAM word 0
 RAM_END = RAM_BASE + (1 << BANK_BITS)      # one past the last RAM word
 PROGRAM_BASE = RAM_BASE + 0x100000         # where the OS loads programs (spawn.c)
 ENTRY = "start"
 ENTRY_WORD = 0x0400        # RJMP; the next word is the offset to start
-ENTRY_SIZE = 2
+ENTRY_SIZE = 2             # words of the entry jump of a program for the OS (base=...)
+VECTORS = {"_nmi": 2, "_irq": 4, "_trap": 6, "_fault": 8}   # where the CPU jumps (config.py)
+STARTUP = 10               # ROM address of the start-up code
+STARTUP_WORDS = 13         # DATA SSP SBP DATA SLIM DATA RJMP, then RTI and HALT
+ROM_HEADER = STARTUP + STARTUP_WORDS
+RTI_WORD, HALT_WORD = 0x2000, 0x0F00
+DATA_R1 = 0x0301
+SSP_R1, SBP_R1, SLIM_R1 = 0x2601, 0x2801, 0x2901
 
 
 @dataclass
@@ -53,7 +73,7 @@ class Symbol:
 @dataclass
 class Program:
     rom: list          # the ROM image, from address 0
-    ram_used: int      # words of RAM data (above the stack, or after the code with a base)
+    ram_used: int      # words of RAM data (and the stack) from the start of RAM, or after the code with a base
     symbols: list      # every label's final address (for the map file)
     lines: list = None # (address, file, line) where source lines start
     base: int = 0      # the address of rom[0]
@@ -183,13 +203,14 @@ def _view(obj, keep):
                  lines)
 
 
-def link(objects, libraries=(), base=None):
+def link(objects, libraries=(), base=None, stack_words=STACK_WORDS):
     """Join object files. Returns a Program; raises AsmErrors.
 
     libraries: the objects (from the list) to link as libraries: only the
     parts the program needs.
     base: link for that RAM address (a program the OS loads), code and data
-    together; None: the usual ROM image."""
+    together; None: the usual ROM image, with vectors and start-up code.
+    stack_words: the stack reserved after the data (a ROM image only)."""
     lib_ids = {id(o) for o in libraries}
     exported = {name for o in objects for name in o.globals}   # before anything is dropped
     keep = _choose_parts(objects, lib_ids)
@@ -198,8 +219,9 @@ def link(objects, libraries=(), base=None):
 
     # 1. Give each file its place in ROM and RAM.
     bases = []
+    is_exe = base is not None           # (`base` is reused as a loop variable below)
     origin = 0 if base is None else base
-    rom_next = origin + ENTRY_SIZE
+    rom_next = origin + (ENTRY_SIZE if base is not None else ROM_HEADER)
     ram_start = RAM_DATA_START
     if base is not None:
         ram_start = rom_next + sum(len(obj.rom) for obj in objects)
@@ -208,6 +230,9 @@ def link(objects, libraries=(), base=None):
         bases.append({"rom": rom_next, "ram": ram_next})
         rom_next += len(obj.rom)
         ram_next += obj.ram_size
+    stack_base = ram_next                       # the stack follows the data (a ROM image)
+    if base is None:
+        ram_next += stack_words
     if base is not None:
         if not RAM_DATA_START <= base < RAM_END:
             errors.append(AsmError(f"the base 0x{base:x} isn't in the RAM above the stack "
@@ -220,8 +245,8 @@ def link(objects, libraries=(), base=None):
             errors.append(AsmError(f"the program needs {rom_next} words of ROM, "
                                    f"only {ROM_SIZE} fit"))
         if ram_next > RAM_END:
-            errors.append(AsmError(f"RAM data needs {ram_next - RAM_DATA_START} words, "
-                                   f"only {RAM_END - RAM_DATA_START} fit above the stack"))
+            errors.append(AsmError(f"RAM data and stack need {ram_next - RAM_DATA_START} words, "
+                                   f"only {RAM_END - RAM_DATA_START} fit"))
 
     # 2. Work out every label's final address; collect the .global ones.
     symbols, table = [], {}
@@ -237,6 +262,12 @@ def link(objects, libraries=(), base=None):
                                        f"{table[name].source} and {obj.source}"))
             else:
                 table[name] = sym
+    # symbols of the linker itself: where the stack is, and the end of RAM data
+    # (a file that defines _end itself keeps its own)
+    for name, address in (("_stack_base", stack_base), ("_stack_limit", ram_next), ("_end", ram_next)):
+        if name not in table:
+            table[name] = Symbol(address, name, "<linker>", "ram", True)
+            symbols.append(table[name])
 
     # 3. The entry jump at address 0; its offset word is at address 1.
     start = table.get(ENTRY)
@@ -246,7 +277,10 @@ def link(objects, libraries=(), base=None):
     elif start.section != "rom":
         errors.append(AsmError(f"'start' in {start.source} is a RAM label, "
                                "it must be in ROM"))
-    rom = [ENTRY_WORD, enc.jump_offset(start.address, origin + 1) if start else 0]
+    if is_exe:
+        rom = [ENTRY_WORD, enc.jump_offset(start.address, origin + 1) if start else 0]
+    else:
+        rom = _header(table, start, stack_base - RAM_BASE, ram_next - RAM_BASE, errors)
 
     # 4. Copy each file's words, filling in the relocations.
     reported = set()
@@ -295,6 +329,29 @@ def link(objects, libraries=(), base=None):
     return Program(rom, ram_next - ram_start, symbols, lines, origin)
 
 
+def _header(table, start, stack_index, limit_index, errors):
+    """The vectors and the start-up code (ROM words 0 to ROM_HEADER - 1)."""
+    default = {"_nmi": STARTUP + 11, "_irq": STARTUP + 11, "_trap": STARTUP + 11,
+               "_fault": STARTUP + 12}                    # RTI, RTI, RTI, HALT
+    targets = {}
+    for name, vector in VECTORS.items():
+        sym = table.get(name)
+        if sym is not None and sym.section != "rom":
+            errors.append(AsmError(f"'{name}' in {sym.source} is a RAM label, "
+                                   "an interrupt handler must be in ROM"))
+        targets[vector] = sym.address if sym is not None and sym.section == "rom" else default[name]
+    rom = [ENTRY_WORD, enc.jump_offset(STARTUP, 1)]
+    for vector in (2, 4, 6, 8):
+        rom += [ENTRY_WORD, enc.jump_offset(targets[vector], vector + 1)]
+    rom += [DATA_R1, stack_index, SSP_R1, SBP_R1,          # ESP = EBP = the stack's first word
+            DATA_R1, limit_index, SLIM_R1,                 # the stack limit
+            DATA_R1, 0,                                    # R1 back to 0
+            ENTRY_WORD, enc.jump_offset(start.address, STARTUP + 10) if start else 0,
+            RTI_WORD, HALT_WORD]
+    assert len(rom) == ROM_HEADER
+    return rom
+
+
 def format_raw(words, per_line=8):
     """Logisim 'v2.0 raw' text. Runs of 4 or more equal words become count*value."""
     items, i = [], 0
@@ -317,7 +374,7 @@ def format_map(program, title):
     """A text list of every label and its final address."""
     lines = [f"# labels in {title}",
              "# address  section  label                     file",
-             f"{program.base:07x}    rom      (entry: RJMP start)"]
+             f"{program.base:07x}    rom      (vectors, start-up code, then RJMP start)"]
     for s in program.symbols:
         mark = "  (global)" if s.is_global else ""
         lines.append(f"{s.address:07x}    {s.section:<7}  {s.name:<25} {s.source}{mark}")

@@ -320,6 +320,52 @@ def check_library_override():
     assert out == "ABC!", repr(out)
 
 
+def check_interrupts():
+    """Interrupts from C: the example sleeps with WAIT while a timer IRQ and
+    a key IRQ are served by a C handler; an unhandled FAULT (stack limit)
+    stops the CPU; a TRAP with a handler returns; a handler can redirect
+    the return."""
+    root = HERE.parent.parent
+    program, _ = driver.build([str(root / "examples" / "c" / "basics" / "interrupts.c")])
+    cpu, text = driver.run_in_simulator(program.rom, "abc", 5_000_000)
+    assert text == ("keys typed before the first tick: abc\ntick 1\ntick 2\ntick 3\n"
+                    "tick 4\ntick 5\n5 ticks, stack pointer back where it was: yes\n"), text
+    assert cpu.halted and cpu.ie == 0 and cpu.esp < 0x200
+
+    source = """
+#include <stdio.h>
+#include <cpu.h>
+static int traps;
+static unsigned on_trap(void) { traps++; return 0; }
+static unsigned on_fault(void)
+{
+    printf("fault at stack %u\\n", stack_pointer() > 0x1000000);
+    halt();
+    return 0;
+}
+static int deep(int n) { return n == 0 ? 0 : 1 + deep(n - 1); }
+int main(void)
+{
+    set_interrupt_handler(INT_TRAP, on_trap);
+    software_interrupt();
+    software_interrupt();
+    printf("traps %d\\n", traps);
+    set_interrupt_handler(INT_FAULT, on_fault);
+    set_stack_limit(stack_pointer() + 200);
+    printf("deep 10 = %d\\n", deep(10));
+    printf("deep 1000 = %d\\n", deep(1000));
+    printf("not reached\\n");
+    return 0;
+}
+"""
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "t.c").write_text(source)
+        program, _ = driver.build([str(Path(tmp) / "t.c")])
+    cpu, text = driver.run_in_simulator(program.rom, "", 5_000_000)
+    assert text == "traps 2\ndeep 10 = 10\nfault at stack 1\n", text
+    assert cpu.halted
+
+
 def check_names_the_assembler_reserves():
     """C names that are instruction or register names get a _X prefix."""
     out = output(r"""
@@ -455,6 +501,7 @@ CHECKS = [
     check_input,
     check_globals_reset,
     check_library_override,
+    check_interrupts,
     check_names_the_assembler_reserves,
     check_mixed_with_assembly,
     check_big_memory,

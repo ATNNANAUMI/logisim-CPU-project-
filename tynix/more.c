@@ -1,6 +1,6 @@
 /* more.c - show text files a page at a time (a program for Tynix, in /bin)
  *
- *   python os/make_disk.py                 (builds it into /bin)
+ *   python tynix/make_disk.py              (builds it into /bin)
  *   (in the shell)   more [-n N] file...
  *
  * Shows N lines (default PAGE_LINES), then the prompt

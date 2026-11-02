@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""A disk for the OS (os/shell.c): python os/make_disk.py [IMG] [--new] [--size MB]
+"""A disk for the OS (tynix/shell.c): python tynix/make_disk.py [IMG] [--new] [--size MB]
 
-Makes the image (default os/disk.img, git-ignored like every *.img) when it
+Makes the image (default tynix/disk.img, git-ignored like every *.img) when it
 is missing or --new is given: TFS1, 64 MB, sparse. Then it builds every
 program in PROGRAMS with `cc build --exe` and puts it in /bin under its
 own name, replacing the old copy, and writes /readme.txt. Other files on
@@ -10,9 +10,9 @@ command line it also makes a Linux-like /home/user (Desktop, Documents,
 Downloads, Music, Pictures, Videos, and Documents/welcome.txt) and /tmp,
 where visual_file_manager starts; make(..., home=False) leaves them out.
 
-    python os/make_disk.py
-    python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img
-    (after: python compiler/src/cc build os/shell.c)
+    python tynix/make_disk.py
+    python cpu_sim/src/main.py compiler/ROM/shell.rom --disk tynix/disk.img
+    (after: python compiler/src/cc build tynix/shell.c)
 """
 import argparse
 import sys
@@ -25,8 +25,8 @@ import fs                               # compiler/src/disk
 import driver                           # compiler/src/cc
 
 EXAMPLES = ROOT / "compiler" / "examples" / "c"      # in folders by kind (games/, os/, ...)
-OS_DIR = ROOT / "os"
-DEFAULT_IMAGE = ROOT / "os" / "disk.img"
+OS_DIR = ROOT / "tynix"
+DEFAULT_IMAGE = ROOT / "tynix" / "disk.img"
 
 # compiler/examples/c/*/NAME.c -> /bin/NAME. Each one ends by itself, on
 # Ctrl-D or on q, so the shell gets the CPU back.
@@ -36,7 +36,7 @@ PROGRAMS = ["echo", "hello", "primes", "structs", "guess", "gfx_demo", "image_de
             "visual_file_manager"]
 
 README = """\
-This disk was made by os/make_disk.py for the shell in os/shell.c.
+This disk was made by tynix/make_disk.py for the shell in tynix/shell.c.
 
   help             the commands, and the programs in /bin
   ls -l /bin       the programs (cc build --exe), sizes in words

@@ -1,6 +1,6 @@
 /* grep.c - print the lines that contain some text (a program for Tynix, in /bin)
  *
- *   python os/make_disk.py                 (builds it into /bin)
+ *   python tynix/make_disk.py              (builds it into /bin)
  *   (in the shell)   grep [-i] [-n] [-v] text [path...]
  *
  * text is plain text, not a regular expression. -i ignores case, -n puts the

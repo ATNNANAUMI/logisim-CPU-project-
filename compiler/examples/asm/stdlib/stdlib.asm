@@ -71,8 +71,8 @@
 ;
 ; HEAP
 ;   malloc hands out RAM from HEAP_START (0x1800000) to the end of RAM
-;   (0x1FFFFFF), 8M words. Program RAM (.ram, from 0x1004000) must stay
-;   below HEAP_START: 8,372,224 words. Each block has one header word before it:
+;   (0x1FFFFFF), 8M words. Program RAM (.ram from 0x1000000, then the
+;   16K-word stack) must stay below HEAP_START: 8,372,224 words. Each block has one header word before it:
 ;   its size with the header, positive = free, negative = in use.
 ;   Neighbouring free blocks are joined the next time malloc passes them.
 ; ==================================================================

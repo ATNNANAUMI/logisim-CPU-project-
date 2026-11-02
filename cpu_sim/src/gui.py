@@ -21,8 +21,11 @@ MIN_SLICE = 0.004              # seconds of running per window tick at "max", at
 SCREEN_FPS = 30                # the RGB screen is redrawn this many times a second at most (0: every tick)
 STATE_FPS = 10                 # registers, flags, memory panes: at most this often while running at "max"
 GUI_SHARE = 0.25               # at "max" the window takes at most this share of the time (the rest is the program's)
-SETTLE_CHUNK = 2_000           # instructions run between two looks at whether pixels are still being drawn
+SETTLE_CHUNK = 20_000          # instructions run between two looks at whether pixels are still being drawn (longer than any gap
+                               # inside a frame: snake's blank-text loop for the score runs 4000 without a pixel)
 SETTLE_MAX = 0.010             # seconds of running on, at most, to reach a moment with no pixels being drawn
+HOLD_MAX = 0.25                # a picture that is still being drawn is held back this long, at most
+NMI_AGAIN = 0.5                # an Esc this long after the last one answers the OS's question: continue
 STATE_CHARS = 30               # fixed width of the status block, so it never resizes the window
 FULL_REDRAW = 400              # more changed pixels than this: redraw the whole RGB screen
                                # (one put of every pixel costs about as much as 400 puts of one)
@@ -36,11 +39,19 @@ def settle(execute, video, clock, until, running=lambda: True, chunk=SETTLE_CHUN
     clock() reaches `until` or the program stops (False: a program that draws
     all the time gets shown anyway)."""
     while running() and clock() < until:
-        before = (len(video.dirty), video.cleared)
+        before = (video.writes, video.cleared)
         execute(chunk)
-        if (len(video.dirty), video.cleared) == before:
+        if (video.writes, video.cleared) == before:
             return True
     return False
+
+
+def hold_screen(running, quiet, now, last, limit):
+    """Is the picture half drawn, so that the window should keep the one it
+    has? Only while the program runs and has not gone quiet, and not longer
+    than `limit` seconds after the last time the screen was shown (a program
+    that draws all the time is shown anyway)."""
+    return running and not quiet and now - last < limit
 
 
 def screen_due(running, now, last, period):
@@ -401,6 +412,9 @@ class SimulatorWindow(tk.Tk):
         self.rom_path = rom_path
         self._screen_period = 1 / screen_fps if screen_fps > 0 else 0.0
         self._screen_drawn = 0.0        # when the RGB screen was last drawn
+        self._settled = False           # the program was quiet when its last slice ended
+        self._pixels_seen = None        # how much was drawn when the screen was last looked at
+        self._nmi_time = 0.0            # when Esc was last pressed
         self._state_drawn = 0.0         # when the registers and panels were last drawn
         self._gui_cost = 0.01           # seconds a tick spends drawing the window (the average of the last ticks)
         self.info = DebugInfo.for_rom(rom_path)
@@ -472,6 +486,9 @@ class SimulatorWindow(tk.Tk):
         self.run_button = ttk.Button(row2, text="run", command=self.toggle_run)
         self.run_button.pack(side="left", padx=2)
         ttk.Button(row2, text="resume", command=self.resume).pack(side="left")
+        ttk.Button(row2, text="NMI (Esc)", command=self.nmi).pack(side="left", padx=2)
+        self.winfo_toplevel().bind("<Escape>", lambda _e: self.nmi())
+        self.bind("<Key>", self.on_nmi_answer)      # 1 or 2 when the keyboard field has no focus
 
         row2b = ttk.Frame(box)
         row2b.pack(fill="x", padx=4, pady=2)
@@ -552,9 +569,9 @@ class SimulatorWindow(tk.Tk):
             if name == "IAR":
                 self.cpu.iar = value & config.ADDR_MASK
             elif name == "ESP":
-                self.cpu.esp = value & config.STACK_MASK
+                self.cpu.esp = value & config.BANK_MASK
             else:
-                self.cpu.ebp = value & config.STACK_MASK
+                self.cpu.ebp = value & config.BANK_MASK
         except ValueError:
             pass
         self._show_pointer(name)
@@ -726,8 +743,42 @@ class SimulatorWindow(tk.Tk):
         self.cpu.resume()
         self.refresh()
 
+    def nmi(self) -> None:
+        """The non-maskable interrupt: the OS's kill switch (Esc). One press
+        is one NMI: a held key repeats, and a press while the last one is
+        still being served (the shell is asking 1 or 2) would come back as a
+        second menu the moment the first ends. The OS answers on the text
+        display, so that tab comes forward, with the keyboard field ready for
+        the answer; the RGB screen's tab returns when the program draws again."""
+        now = time.perf_counter()
+        pressed, self._nmi_time = self._nmi_time, now
+        if self.cpu.in_nmi:                 # the OS is asking (kill or continue)
+            if now - pressed > NMI_AGAIN:   # a second Esc, not the key repeating
+                self.cpu.bus.keyboard.type("2")
+                self._log("Esc again: continue")
+            return
+        if self.cpu.nmi_pending:
+            return
+        self._log("NMI")
+        self.cpu.nmi()
+        self.outputs.select(0)
+        self._screen_shown = False
+        self.key_entry.focus_set()
+        if not self.running:
+            self.set_running(True)
+        self.refresh()
+
+    def on_nmi_answer(self, event) -> None:
+        """The OS asks "1 kill, 2 continue" after an NMI: the answer counts
+        wherever the focus is (the keyboard field gets the other keys)."""
+        if self.cpu.in_nmi and event.char in ("1", "2") and self._focused() is not self.key_entry:
+            self.cpu.bus.keyboard.type(event.char)
+
     def on_key(self, event) -> str | None:
         """A key typed into the keyboard field goes into the buffer at once."""
+        if event.keysym == "Escape":
+            self.nmi()
+            return "break"
         code = key_code(event.keysym, event.char)
         if code is None:
             return None                     # let Tk handle Tab, Ctrl+V, ...
@@ -763,6 +814,12 @@ class SimulatorWindow(tk.Tk):
 
     def _run_tick(self) -> None:
         if self.running:
+            # the program's clock stands still while the OS asks "1 kill, 2
+            # continue" (a video would otherwise jump ahead by the wait)
+            if self.cpu.in_nmi:
+                self.cpu.bus.timer.pause()
+            else:
+                self.cpu.bus.timer.resume()
             hz = self.hz
             now = time.perf_counter()
             if hz == 0:                     # "max": a slice that makes a tick one screen period long,
@@ -772,8 +829,8 @@ class SimulatorWindow(tk.Tk):
                 while self.running and time.perf_counter() < end:
                     self._execute(10_000)
                 ran = time.perf_counter()
-                settle(self._execute, self.cpu.bus.video, time.perf_counter,
-                       ran + SETTLE_MAX, running=lambda: self.running)
+                self._settled = settle(self._execute, self.cpu.bus.video, time.perf_counter,
+                                       ran + SETTLE_MAX, running=lambda: self.running)
                 self._last_time = now
             else:
                 self._budget += hz * (now - self._last_time)
@@ -861,7 +918,11 @@ class SimulatorWindow(tk.Tk):
         if self.cpu.stopped:
             status = f"STOPPED ({self.cpu.error})"
         elif self.cpu.halted:
-            status = "HALTED - press resume"
+            status = "HALTED - press resume (NMI wakes it)"
+        elif self.cpu.in_nmi:
+            status = "NMI: 1 kill, 2 continue"
+        elif self.cpu.waiting:
+            status = "waiting for an interrupt (WAIT)"
         elif self.running:
             status = "running"
         else:
@@ -929,6 +990,13 @@ class SimulatorWindow(tk.Tk):
         now = time.perf_counter()
         if not screen_due(self.running, now, self._screen_drawn, self._screen_period):
             return                          # drawn a moment ago: the changes wait for the next turn
+        # half a picture (gfx_fill clears the screen, then fills it again) is
+        # not shown: wait for a look at which nothing was added since the last
+        seen = (video.writes, video.cleared)
+        quiet = self._settled or seen == self._pixels_seen
+        self._pixels_seen, self._settled = seen, False
+        if hold_screen(self.running, quiet, now, self._screen_drawn, HOLD_MAX):
+            return
         self._screen_drawn = now
         image = self.screen_image
         if video.cleared or len(video.dirty) > FULL_REDRAW:

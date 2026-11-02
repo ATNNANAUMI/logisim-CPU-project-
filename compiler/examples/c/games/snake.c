@@ -13,7 +13,7 @@
  * Grid: 16 x 14 cells, each 16 x 16 pixels, on the 256 x 256 screen. The top 32 pixels are
  * reserved for the score panel.
  * Controls: W/A/S/D. Press R to restart after game over, Q to quit (back to
- * the OS's shell when it was run from there: os/shell.c).
+ * the OS's shell when it was run from there: tynix/shell.c).
  */
 
 #define GRID_W 16
