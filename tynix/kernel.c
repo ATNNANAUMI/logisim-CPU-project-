@@ -259,7 +259,7 @@ static unsigned find_region(unsigned words)
             }
         }
     }
-    return at + words <= HIGH ? at : 0;
+    return words <= HIGH - at ? at : 0;           /* not at + words: a huge request wraps */
 }
 
 static int region_free(unsigned base, unsigned words)
@@ -270,7 +270,7 @@ static int region_free(unsigned base, unsigned words)
         if (t->state != FREE && t->words && base < t->base + t->words && t->base < base + words)
             return 0;
     }
-    return base >= TEX1_BASE && base + words <= HIGH;
+    return base >= TEX1_BASE && base <= HIGH && words <= HIGH - base;
 }
 
 /* ---------------------------------------------------------------- the end of a task */
@@ -498,6 +498,8 @@ static int load_program(struct task *parent, const char *path, char **argv, int 
         argc++;
     }
     words = n + zero + stack + MIN_HEAP + argc + 1 + chars;
+    if (want > HIGH - LOW)
+        return -ENOMEM;
     if (want > words)
         words = want;
     else if (!want && words < DEFAULT_REGION)

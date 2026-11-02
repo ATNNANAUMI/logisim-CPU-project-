@@ -380,6 +380,38 @@ has its own library) still holds for everything but the disk.
     shell benchmark, speed within noise. `translate.HOT` (50) was also
     measured at 20, 8 and 3: no consistent gain, a slower cold start, so
     it stays.
+70. **The way out of an interrupt can take an NMI anywhere.** Abusing the
+    OS (2026-11-02): an NMI that landed in 12 of the 50 instructions of
+    `int_back` (after `_int_depth` was lowered, before the program's
+    limit was loaded) was an "outermost" entry on a stack it did not
+    own, and the kernel stopped with `stack overflow at 0x36c6`. About 2% of Esc presses
+    did it while a program polled the keyboard (snake, the editors,
+    the video player: a system call returns about every 400
+    instructions). Now `_int_depth` is stored last and the limit is the
+    last RAM word while the stacks change; the `abuse` check puts an NMI
+    at five places of that code. A hardware way to hold the NMI off would
+    still be better (open for the circuit).
+71. **A system call is not preemptible and an NMI waits for it** (decision
+    62). A write of 1M words to the display is 20M instructions (0.2-0.4 s
+    at 50-100 MHz), 2^31 words would be hours with the OS unreachable. Left
+    as it is: a program can also `DI` and spin, and only the NMI gets
+    out of that; a cap on `n` would give short writes that callers may not expect.
+72. **Region requests are bounded and names are characters.** A TEX2 header
+    asking for 0xFFFFFFFF words wrapped `at + words <= HIGH` and wedged the
+    shell: `want` over the RAM available is now ENOMEM, and the searches
+    compare `words <= HIGH - at`. A file name with a word above 0x10FFFF
+    (or negative) is refused (`EINVAL`) like a space or a control character,
+    because `fs.py` could not show it; `fs.py` shows such a name as U+FFFD
+    and `fsck` reports it.
+73. **Damaged disks and damaged pictures are errors, not tracebacks.**
+    800 disk images with random words overwritten in the superblock, the
+    FAT and the directories gave 622 Python errors and 22 hangs in
+    `fs.py`/`fsck`; now a word past the end, a read past a chain, a
+    superblock that does not fit the file, and a directory that points back
+    up are `FsError`s and `fsck` problems. The C library refuses such a
+    superblock too (`df` counted 2 billion blocks). `tree` on a directory
+    loop still runs until its stack ends (139). The PNG reader turns a short
+    or damaged file into `ValueError`, and refuses more than 2^26 pixels.
 
 ## Measured on the circuit while doing this
 

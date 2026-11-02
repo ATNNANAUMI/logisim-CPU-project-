@@ -370,8 +370,13 @@ handler on the kernel's stack; on the way out, if the handler put a record in
 `_int_next`, that one becomes `_int_cur`, and ESP, EBP and the limit are
 loaded from it before `RESTORE` and `RTI`: the registers, flags and devices
 come back from *that* program's stack. An entry inside another (an NMI during
-a handler) stays on the stack it found and never switches. `_int_frame` is
-the outermost entry's saved word. Tynix (11) is built on this.
+a handler) stays on the stack it found and never switches. The NMI cannot be
+switched off, so the way out keeps `_int_depth` until the last instruction
+before `RESTORE` (an NMI in the stack switch is then an inner entry, not an
+outermost one) and sets the stack limit to the last RAM word while the stacks
+change (the kernel's limit is below every program's stack). Before that fix an
+NMI that landed in 12 of the 50 instructions of the way out stopped the OS.
+`_int_frame` is the outermost entry's saved word. Tynix (11) is built on this.
 
 ## 2. The circuit (`logisim/CPU.circ`)
 
@@ -1326,7 +1331,7 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 20 checks: fs_reclaim() and the NMI kill of a spinning program under the kernel, format (sparse, the superblock), text and
+python compiler/src/disk/selftest.py  # 21 checks: fs_reclaim() and the NMI kill of a spinning program under the kernel, format (sparse, the superblock), text and
                                       # binary round trips (block edges), overwriting frees
                                       # blocks, a directory past one block (entries reused),
                                       # subdirectories, . and .., mv, name rules, disk full, CLI,
@@ -1337,6 +1342,10 @@ python compiler/src/disk/selftest.py  # 20 checks: fs_reclaim() and the NMI kill
                                       # by another under the kernel (arguments, exit status,
                                       # fresh variables, the caller's directory and heap, load
                                       # errors, two copies at two addresses, a TEX1 program),
+                                      # `abuse`: an NMI at five places of the interrupt exit,
+                                      # a TEX2 region of 0xFFFFFFFF words, a file name that is no
+                                      # character, a bad name, a directory loop, a damaged
+                                      # superblock and a read past a chain in fsck/fs.py/the OS,
                                       # `multitask`: two programs sharing the CPU, two writing
                                       # files at once, kill with a file open, a stack overflow,
                                       # a background program waiting for keys, the NMI menu,
