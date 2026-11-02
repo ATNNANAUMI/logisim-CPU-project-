@@ -182,6 +182,8 @@ class Video:
         self.width, self.height = width, height
         self.pixels = [0] * (width * height)     # RGB565, row by row
         self.dirty = set()                       # indices changed since the window drew
+        self.writes = 0                          # pixels written ever (the window asks: is it still drawing? a
+                                                 # pixel painted over one already in `dirty` adds nothing to it)
         self.used = False                        # has anything been drawn
         self.cleared = True                      # everything changed (window redraws all)
 
@@ -191,11 +193,13 @@ class Video:
         i = y * self.width + x
         self.pixels[i] = value & 0xFFFF
         self.dirty.add(i)
+        self.writes += 1
         self.used = True
 
     def clear(self) -> None:
         self.pixels = [0] * (self.width * self.height)
         self.dirty.clear()
+        self.writes += 1
         self.cleared = True
 
     @staticmethod

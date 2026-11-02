@@ -395,7 +395,11 @@ static unsigned on_nmi(void)
         c = wait_key();
     while (c != '1' && c != '2');
     printf("%c\n", c);
-    return c == '1' ? (unsigned)_spawn_kill : 0;
+    if (c == '1') {
+        running = 0;                    /* an NMI while it unwinds has nothing to ask about */
+        return (unsigned)_spawn_kill;
+    }
+    return 0;
 }
 
 /* a program that was killed can have left blocks nothing points to */

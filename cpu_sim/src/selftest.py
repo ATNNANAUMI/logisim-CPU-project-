@@ -133,7 +133,7 @@ def test_window_pacing():
         return
 
     class Screen:
-        dirty, cleared = set(), False
+        dirty, cleared, writes = set(), False, 0
 
     def program(draws):                 # draws(k): does chunk number k add pixels?
         video, calls, now = Screen(), [], [0.0]
@@ -143,6 +143,7 @@ def test_window_pacing():
             calls.append(count)
             if draws(len(calls)):
                 video.dirty |= {(len(calls), i) for i in range(3)}
+                video.writes += 3
             now[0] += 0.001
         return video, execute, calls, lambda: now[0]
 
@@ -154,6 +155,10 @@ def test_window_pacing():
     assert gui.settle(execute, video, clock, until=0.0105) is False and len(calls) == 11
     assert gui.settle(execute, video, clock, until=9.0, running=lambda: False) is False
     assert len(calls) == 11                                        # a stopped program is not run on
+    assert gui.hold_screen(True, False, 1.0, 0.9, 0.25) is True    # still drawing: keep the last picture
+    assert gui.hold_screen(True, True, 1.0, 0.9, 0.25) is False    # quiet: show it
+    assert gui.hold_screen(True, False, 1.0, 0.5, 0.25) is False   # held long enough: show it anyway
+    assert gui.hold_screen(False, False, 1.0, 0.9, 0.25) is False  # a stopped program: what is there is shown
     video, execute, calls, clock = program(lambda k: False)        # a clear in the middle counts as drawing
     inner = execute
     video.cleared = False
@@ -887,6 +892,23 @@ def test_the_stack_lives_anywhere_in_ram():
     cpu = machine(rom)
     cpu.run(30)
     assert cpu.regs[2] == 0x00FFFFFE and cpu.mem.ram[0x00FFFFFE] == 5
+
+
+def test_run_only_looks_for_interrupts_in_chunks_when_one_can_come():
+    # starting _run() costs: with the timer off and no enabled request latched,
+    # nothing can arrive during a run(), so it is one chunk (it was half the speed)
+    cpu = CPU()
+    assert cpu._chunk(1_000_000) == 1_000_000
+    cpu.bus.keyboard.type("x")                          # latched, but source 1 is not enabled
+    assert cpu._chunk(1_000_000) == 1_000_000
+    cpu.bus.interrupts.set_enable(2)                    # now it is a request
+    assert cpu._chunk(1_000_000) == config.INTERRUPT_CHUNK
+    cpu = CPU()
+    cpu.bus.timer.set_period(10)
+    assert cpu._chunk(1_000_000) == config.INTERRUPT_CHUNK
+    cpu = CPU()
+    cpu.nmi()
+    assert cpu._chunk(1_000_000) == config.INTERRUPT_CHUNK
 
 
 def test_run_stops_at_breakpoints():

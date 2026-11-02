@@ -286,7 +286,8 @@ class CPU:
 
         Interrupts are looked for between chunks of config.INTERRUPT_CHUNK
         instructions (step() looks before every instruction), so one that
-        arrives while a chunk runs is taken up to a chunk later.
+        arrives while a chunk runs is taken up to a chunk later; with the
+        timer off and nothing latched, there are no chunks (see _chunk()).
         """
         total = 0
         while total < max_steps:
@@ -302,7 +303,7 @@ class CPU:
             if stop_at and total and self.iar in stop_at:
                 break
             # after RTI/EI exactly one instruction runs before interrupts are looked for
-            chunk = 1 if blocked else config.INTERRUPT_CHUNK
+            chunk = 1 if blocked else self._chunk(max_steps - total)
             done = self._run(min(max_steps - total, chunk), stop_at)
             total += done
             if self.halted or self.stopped or self.waiting:
@@ -310,6 +311,19 @@ class CPU:
             if done == 0 and not self.fault_pending:
                 break
         return total
+
+    def _chunk(self, left: int) -> int:
+        """How far run() goes before it looks for an interrupt again. With
+        the timer off and no enabled request latched, only the outside (a
+        typed key, an NMI) can raise one, and that happens between run()
+        calls, so the whole run is one chunk: starting _run() is not free
+        (it halved the speed). EI and RTI end a run anyway (inhibit); what is
+        left is a program that enables a latched source while interrupts are
+        on already: it is taken when this run() ends."""
+        bus = self.bus
+        if bus.timer.period or bus.interrupts.line or self.nmi_pending:
+            return config.INTERRUPT_CHUNK
+        return left
 
     def run_sleeping(self, max_steps: int = 1_000_000) -> int:
         """run(), but a CPU that goes to sleep (WAIT) is let sleep until the

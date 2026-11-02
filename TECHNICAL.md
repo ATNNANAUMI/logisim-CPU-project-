@@ -332,7 +332,9 @@ program crawl on.
 The timer (`0x7C`, planned wiring): `OUTDATA` sets the interrupt period in
 milliseconds (0 = off, at reset); every period it raises source 0. A key
 typed raises source 1. The NMI is a button (Esc and a "NMI" button in the
-simulator window, `CPU.nmi()`; a Logisim Button on the circuit).
+simulator window, `CPU.nmi()`; a Logisim Button on the circuit). The window
+ignores a press while the last one is still being served (a held key repeats),
+and brings the text display's tab forward, where the OS's menu is printed.
 
 **The simulator** looks for an interrupt before every instruction in
 `step()`, and between chunks of 4096 instructions in `run()` (translated
@@ -662,7 +664,7 @@ modules import each other by plain name, so run them as scripts
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 42 checks on the core |
+| `selftest.py` | 43 checks on the core |
 | `bench.py` | the simulator's speed on nine example programs (3.3) |
 
 ### 3.2 Execution model
@@ -686,7 +688,11 @@ times does, without building `Step` records or disassembling. It stops at
 `stop_at` (not checked for the first instruction, so a run can leave a
 breakpoint). It looks for interrupts between chunks of 4096 instructions
 (`INTERRUPT_CHUNK`; `step()` looks before every instruction), exactly one
-instruction after `RTI`/`EI`; `run_sleeping()` also lets a `WAIT`ing CPU sleep
+instruction after `RTI`/`EI`, but only while one can come: with the timer off
+and no enabled request latched the whole call is one chunk (`_chunk()`; starting
+`_run()` 244 times per million instructions had halved the speed: `life` 95 MHz
+instead of 190). A program that enables a latched source while interrupts are
+on already is interrupted when the `run()` call ends; `run_sleeping()` also lets a `WAIT`ing CPU sleep
 until the timer's next interrupt (what the headless runner and `cc run` use). Code that runs often is translated into Python
 (`translate.py`): once execution has jumped to an address 50 times
 (`translate.HOT`), the code from there becomes a *block*, one Python
@@ -777,12 +783,18 @@ that falls due in a pause comes late. At `max`:
   pause between ticks is 1 ms (it was 20 ms)
 * the registers, flags and memory panes are redrawn at most 10 times a second
   (`STATE_FPS`); in between only the picture is
-* before drawing, the program runs on, a chunk of 2000 instructions at a
+* before drawing, the program runs on, a chunk of 20,000 instructions at a
   time, while it is still adding pixels (`settle()`): the screen is shown at
   the first chunk that drew nothing new, so a frame that the program draws in
   a burst is not shown half done. A program that never stops drawing is shown
-  after at most 10 ms (`SETTLE_MAX`). The test is a growing set of changed
-  pixels, so redrawing pixels already changed in the same interval looks quiet
+  after at most 10 ms (`SETTLE_MAX`). The test is a count of the pixels written
+  (`Video.writes`; a set of changed pixels did not see a pixel painted over
+  another one, so `snake`, which fills the screen and then draws on it, was
+  shown as the bare background every third frame; and the chunk is 20,000 instructions, not 2000, because snake's loop that blanks the score's digits draws nothing for about 4000 instructions, which a chunk of 2000 took for the end of the frame: the SCORE label without its number). A picture that is still
+  being drawn is held back, and the last one stays up, until the program is
+  quiet or `HOLD_MAX` (0.25 s) has gone by. Esc stops the program's clock
+  (the timer, device `0x7C`) while the OS asks kill or continue, so a video
+  does not jump ahead by the wait
 * at a fixed speed (1 Hz … 1 MHz) ticks stay 20 ms apart with a budget of
   instructions each, and the screen is only held back to `--screen-fps`; a
   paused program always shows its screen exactly
@@ -1259,7 +1271,7 @@ python compiler/src/asm/selftest.py   # 22 checks: encodings, the interrupt grou
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 42 checks: interrupts (TRAP/RTI, the timer IRQ, the held-line guard, masking, NMI, HALT wake, WAIT, the stack limit, SSP/GSP, the controller), 24-bit stack, immediates, flags, carry flag, DIV/MOD by 0, RAM,
+python cpu_sim/src/selftest.py        # 43 checks: interrupts (TRAP/RTI, the timer IRQ, the held-line guard, masking, NMI, HALT wake, WAIT, the stack limit, SSP/GSP, the controller), 24-bit stack, immediates, flags, carry flag, DIV/MOD by 0, RAM,
                                       # ROM writes, stack, STK SET/GET across RAM, frames,
                                       # floats, FCMP flags, keyboard, backspace, key codes (arrows, Ctrl), the display's
                                       # backspace and form feed, ADDR/JMRB,

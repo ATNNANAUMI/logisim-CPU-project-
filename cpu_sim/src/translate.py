@@ -534,6 +534,7 @@ class _Writer:
                   f" | (({value} >> 24) & 0x{config.VIDEO_WIDTH - 1:X})")
         self.emit(f"video.pixels[{i}] = {value} & 0xFFFF")
         self.emit(f"video.dirty.add({i})")
+        self.emit("video.writes += 1")
         self.emit("video.used = True")
 
     def stack(self, kind, rb, nxt, done):
