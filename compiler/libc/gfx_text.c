@@ -34,6 +34,8 @@ int gfx_char(int x, int y, int c, int fg, int bg)
 {
     int col, row;
     unsigned int bits = 0, last = 0;
+    if (_gfx_hold)
+        _gfx_hold();                /* Tynix: wait to be the foreground program */
     if (c >= 32 && c < 127) {
         bits = font[2 * (c - 32)];
         last = font[2 * (c - 32) + 1];

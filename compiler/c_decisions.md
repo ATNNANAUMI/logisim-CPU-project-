@@ -288,6 +288,99 @@ The language itself is described in [`c_language.md`](c_language.md).
     on its own first push otherwise. The OS (Phase 7) switches stacks in the
     handler and sets the limit of the next task.
 
+### Multitasking: Tynix's kernel (2026-11-02, OS roadmap Phase 7)
+
+Decisions 36, 38, 40, 41 (a fixed load address, `spawnv` that loads over
+`0x1100000` and comes back by `longjmp`) and 43 (`_fs_forget` after each
+program) describe Phases 4–6 and are replaced by these; 37 (each program
+has its own library) still holds for everything but the disk.
+
+55. **Programs are relocated, not linked per slot (TEX2).** The linker
+    already resolved `abs` relocations; it now keeps their offsets, and
+    `--exe` writes them after the words. The kernel adds `load - base`.
+    Jumps are relative and need nothing. Fixed slots would have needed one
+    build per slot; a base register would have touched every address path
+    of the CPU. Region: first fit, 1M words unless the file asks
+    (`--region`): `diff`'s 1000 x 1000 table does not fit in 1M.
+56. **The filesystem lives only in the kernel** (Arthur's choice, Q1).
+    Each program's own `fs.c` kept a picture of the disk (the chain cache,
+    the allocation hint, the length in each open `FILE`) that another
+    program running at the same time makes wrong; interrupts off around each
+    seek/data pair would have fixed only the device, not those. Programs
+    now have `fopen` & co. as system calls on file numbers, with a 64-word
+    buffer in the program. The kernel closes a program's files when it
+    ends, which also answers Phase 6's wish ("files opened through the OS can
+    be closed properly").
+57. **The kernel is the ROM and the shell is `/bin/sh`** (Q13, asked after
+    the plan: the plan had them in one ROM). In one image, the kernel's real
+    `fopen` and the shell's system-call `fopen` clash by name, and a shell
+    calling `fs.c` directly as a preemptible task would need a lock in every
+    `fs.c` function. Cost: the OS needs a disk with `/bin/sh` to start.
+58. **One kernel stack, and kernel code never sleeps** (Q10, refined in
+    Q14). Every entry saves the 16 registers on the program's own stack
+    (inside the 64-word margin below its limit), then runs C on the
+    kernel's stack with interrupts off. A system call that must wait marks
+    the program blocked and returns; whoever ends the wait writes the answer
+    into the program's saved R0. So nothing in the kernel is re-entered
+    except by the NMI, and the switch is three words (`{esp, ebp, limit}`).
+    `interrupt.asm` does it for any kernel through `_int_kstack`,
+    `_int_cur`, `_int_next`: the hand-off's idea of a slot `int_finish`
+    checks.
+59. **Tickless** (Q3, after the Phase 6 fix that showed chunks of 4096
+    instructions halve the simulator's speed). The timer is on only with
+    two ready programs (10 ms slices) or a sleeper; one program alone runs
+    with it off, at full speed.
+60. **The keyboard stays in the device until the foreground program asks**
+    (Q4). The plan had a kernel buffer filled by the keyboard interrupt;
+    the device's FIFO already is one, and the self-checks type whole
+    sessions ahead (hundreds of keys) that a 64-key buffer would have
+    dropped. The interrupt only wakes a foreground program that waits.
+61. **Background drawing waits** (Q5) and **`gfx_lost()`** (Q6): every `gfx_`
+    call first runs `_gfx_hold` (0 in a ROM program, a check of the
+    foreground in a program for Tynix, a few instructions); a program that
+    caches the screen redraws when `gfx_lost()` says so. The kernel does
+    not clear the screen when the foreground changes: a picture left by a
+    program that ended stays, as before.
+62. **A kill during a system call waits for its end** (Q9): the NMI menu
+    marks it; the kernel entry it interrupted kills it on the way out.
+63. **Two opens of one file are kept in step by the kernel** (found by the
+    `spawn` self-check, which lost a line now and then: two copies of a
+    program appending to one log). Each kernel `FILE` keeps its own first
+    block and length; after every write the kernel saves the entry and
+    copies both into the others (`share()`). Writes to the same place are
+    not merged.
+64. **`fwrite` stops at a word of -1** (decision 48 again): the kernel
+    writes word by word and checks `ferror`, or `cp /bin/echo /e2` made a
+    program that would not load.
+65. **TEX1 still runs, alone, at `0x1100000`** (Q2): that megaword is kept
+    free; its old block points to a 5-word trampoline in the kernel's RAM
+    (`CPY R0, R2; DATA R1, 0; TRAP`). Its heap is not bounded (guess: no
+    TEX1 file is left on a disk made by `make_disk.py`).
+66. **No `bg` and no Ctrl-Z** (Q7: no Ctrl-Z): a program sent to the
+    background by the NMI menu keeps running, so there is nothing for `bg`
+    to resume; left for Phase 7b if suspending is wanted.
+67. **Fast path for `key_pressed()`.** The first system call walked the
+    16 task records three times (the timer, kills, the exclusive task):
+    1,335 instructions a call; with "changed" flags and an early answer
+    for `getkey` it is about 390, most of it the interrupt entry and exit.
+68. **The window keeps running while the CPU sleeps in `WAIT`.** The
+    kernel idles in `WAIT`, so `run()` returns short; the window took that
+    for a breakpoint and paused itself, and every key needed Run again.
+    Now a short run with `cpu.waiting` set is not a stop (a key, the timer
+    or the NMI wakes it); the trace path does the same. An idle OS shows a
+    low rate in the window for the same reason: a sleeping CPU runs no
+    instructions.
+69. **A RAM store drops only the translated blocks it changed.** Before, a
+    store to any word translated RAM code was made from dropped all RAM
+    blocks, so every program the kernel loaded threw away the shell's
+    translations too. `_word_blocks` maps each RAM word to its blocks; a
+    store re-checks those (`translate.still_there`) and drops the ones that
+    no longer match, so a program loaded again over identical words keeps
+    its code. Measured with pypy3: 307 -> 277 blocks translated in the
+    shell benchmark, speed within noise. `translate.HOT` (50) was also
+    measured at 20, 8 and 3: no consistent gain, a slower cold start, so
+    it stays.
+
 ## Measured on the circuit while doing this
 
 * `diag12`/`diag13`: the carry flag is a *borrow* for `SUB`, and `CMP`,

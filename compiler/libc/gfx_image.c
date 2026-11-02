@@ -171,6 +171,8 @@ int gfx_image(int x, int y, const unsigned int *img)
     int *above = row_a, *row = row_b, *swap;
     int w = img[0], h = img[1], k = img[2] & 0xFFFF, clear = img[3];
     int packed = img[2] >> 16, i, first, last, end;
+    if (_gfx_hold)
+        _gfx_hold();                /* Tynix: wait to be the foreground program */
 
     if (w < 1 || w > GFX_IMAGE_MAX_WIDTH || h < 1 || k < 1 || k > 256 || packed > 1)
         return -1;

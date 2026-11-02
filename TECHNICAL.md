@@ -43,7 +43,8 @@ chooses the bank:
 0x1000000 ─ 0x1FFFFFF   RAM  free: the linker puts .ram data from 0x1000000, then the stack
                         (16K words by default, `_stack_base` … `_stack_limit`), then
                         the heap (`_end` on); no fixed stack area
-0x1100000 ─ 0x1FFFFFF   RAM  (by convention) where spawnv() loads programs for the OS
+0x1100000 ─ 0x11FFFFF   RAM  (Tynix) where an old TEX1 program for the OS runs
+0x1200000 ─ 0x1FFFFFF   RAM  (Tynix) the regions of the programs the kernel runs (TEX2, 11)
 ```
 
 **The circuit is still the 16-bit version** (17-bit bus, bit 16 = RAM, 64K
@@ -57,12 +58,13 @@ before it can run these programs, and `logisim/run_rom.py` refuses until then.
 * There is no stack area. `ESP` and `EBP` are 24-bit indices into RAM; whoever
   starts a program decides where its stack is: the linker's start-up code for
   a ROM image (after the program's data, `ESP = EBP = _stack_base`, the limit
-  `_stack_limit`), the OS for a program it loads (Phase 7 gives each its own).
-  A program for the OS runs on the stack of the program that started it.
+  `_stack_limit`), the OS for a program it loads: Tynix's kernel gives each
+  its own, after the program's data, with the limit 64 words before its end
+  (11).
   `STK SET/GET` add `EBP` and `RB` and wrap across the whole RAM (see 1.6).
 * The IAR is 25 bits, so the CPU *can* fetch from RAM. The linker puts code
   there only for a program for the OS (`cc build --exe`, 4.6 and 10.4),
-  which `spawnv()` loads from the disk at `0x1100000`.
+  which Tynix's kernel loads from the disk into a region of RAM (11).
 
 ### 1.3 Instruction word
 
@@ -353,12 +355,23 @@ INT_NMI | INT_IRQ | INT_TRAP | INT_FAULT, fn)`, `interrupts_on()`,
 `timer_interrupt_every(ms)`, `set_stack_limit(address)`, `stack_pointer()`.
 A handler is `unsigned fn(void)` and runs with interrupts off; the entry
 code saves all 16 registers and the flags come back with `RTI`. It returns 0
-to go back where the program was, or an address to return to instead (the
-shell's NMI handler returns `_spawn_kill`'s). With no handler an NMI and a
-TRAP are ignored, an IRQ switches every source off, a FAULT halts.
-`compiler/examples/c/basics/interrupts.c` is the example. Programs for the
-OS (`--exe`) can't install handlers: the OS owns them (they would be writing
-to their own copy of the slots).
+to go back where the program was, or an address to return to instead. With
+no handler an NMI and a TRAP are ignored, an IRQ switches every source off, a
+FAULT halts. `compiler/examples/c/basics/interrupts.c` is the example.
+Programs for the OS (`--exe`) can't install handlers: the kernel owns them
+(they would be writing to their own copy of the slots).
+
+A kernel switches programs with five more words of `interrupt.asm`:
+`_int_kstack` (a stack of its own, as a RAM index; 0, the default, leaves
+everything as above), `_int_klimit`, `_int_cur` (the record `{esp, ebp,
+limit}` of what runs), `_int_next` and `_int_depth`. When `_int_kstack` is
+set, the outermost entry saves ESP and EBP into `*_int_cur` and runs the
+handler on the kernel's stack; on the way out, if the handler put a record in
+`_int_next`, that one becomes `_int_cur`, and ESP, EBP and the limit are
+loaded from it before `RESTORE` and `RTI`: the registers, flags and devices
+come back from *that* program's stack. An entry inside another (an NMI during
+a handler) stays on the stack it found and never switches. `_int_frame` is
+the outermost entry's saved word. Tynix (11) is built on this.
 
 ## 2. The circuit (`logisim/CPU.circ`)
 
@@ -592,7 +605,9 @@ around to the next fetch.
 ### 2.6 Phase 6 on the circuit: what to build (not done yet)
 
 Everything in 1.8 exists in the simulator only. To build it on the circuit
-(after 2.4, which widens the banks):
+(after 2.4, which widens the banks) the list below is all: Tynix's
+multitasking (Phase 7, 11) is software on it and asked for no more hardware
+(the timer of item 8 is what it needs most):
 
 1. **Widen `ESP`/`EBP` to 24 bits**: the two registers, the subtractor
    (`ESP − 1`), the decoder paths of `STK`, and the grounded padding bits of
@@ -715,7 +730,9 @@ then), shared by every `CPU` in the process, and made for the current
 TWEAKS (3.4). The CPU can't write ROM; RAM code (programs for the OS, 11)
 can change under its blocks, so a map of the RAM words they came from is
 checked by every RAM store (translated code, `_interpret()`, `step()`), and
-a store there drops all RAM blocks. ROM blocks only check that map once some
+a store there drops the RAM blocks made from that word that no longer match memory
+(`_word_blocks` lists them; a program loaded again over identical words keeps its
+code). ROM blocks only check that map once some
 RAM code is translated. After changing memory from outside while a program
 runs, call `forget_code()` (the window does when a word is edited).
 
@@ -734,7 +751,11 @@ loop alone did about 3); with pypy3 about 100 over the nine programs, and
 250 to 680 on programs that keep to a few hot loops (`life`, `sqrt`,
 `queens`, and `os` when it runs long). pypy3 compiles each block before it
 runs fast, so a program that ends within a few million instructions runs at
-5 to 40 MHz the first time.
+5 to 40 MHz the first time. `shell` and `os` boot Tynix's kernel (11) since
+Phase 7; on CPython (no pypy3 in the cloud machine; best of 3, noisy) `shell`
+went from 13–14 MHz to 10–12 (every file operation is now a system call:
+3.5% more instructions, and the interrupt entry and exit are group-0x2 code,
+never translated), and `os` stayed about the same (12.8–15.8 against 15.3–16.5).
 
 ### 3.3 Running it
 
@@ -1062,9 +1083,13 @@ The output is a v2.0 raw image (section 6).
 **A program for the OS** (`linker.link(..., base=PROGRAM_BASE)`, used by
 `cc build --exe`, 10.4) is linked all in RAM: the entry jump at the base
 (`0x1100000`), the ROM parts after it, then the RAM parts straight after the
-code. Every step above is the same; only the bases move, so the checks on
-`CALL`s and jumps to RAM labels still apply (they look at the label's
-section, not its address). The image must fit below the end of RAM.
+code, then `exe_stack` words of stack (`_stack_base`, then `_end`). Every step
+above is the same; only the bases move, so the checks on `CALL`s and jumps to
+RAM labels still apply (they look at the label's section, not its address).
+The image must fit below the end of RAM. The `Program` also keeps `relocs`:
+the offset of every word an `abs` relocation filled (a `DATA` or `CALL`
+address, a `.word label`), so a loader can move the program by adding
+`load - base` to those words; jumps are relative and need nothing.
 
 ---
 
@@ -1168,7 +1193,7 @@ Assembly is under `asm/` (`programs/`, `stdlib/`, `two_files/`, `tests/` for cir
 | `c/graphics/grapher.c` | C: a graphing calculator on the RGB screen. Type a function of x on the bottom line (`+ - * / ^`, implied products like `2x`, `\|x\|`, `sin cos tan sqrt ln log exp ...`, `pi`, `e`) and Enter: it is parsed into a small stack program and drawn, up to six functions in different colours, two pixels thick, over a grid with numbers on the axes; gaps where the value is not a number, jumps like tan's left unjoined. Commands `clear`, `reset`, `zoom f`, `in`, `out`, `move dx dy`, `view x0 x1 y0 y1`, `demo`, `help` (the list of what can be typed, also on the screen at the start). 100–200 ms a function in the simulator |
 | `c/graphics/qr.c` | C: a QR code encoder written from the standard, drawn on the RGB screen as big as it fits. Starts with this project's GitHub link; type any text and Enter for a new code (an empty line goes back to the link). Byte mode, versions 1–10, levels L/M/Q/H (`-D LEVEL=n`, M by default), Reed-Solomon over GF(256) with the blocks interleaved, and all eight masks scored by the standard's penalty rules (`-D MASK=n` forces one). `-D TEXT="..."` the first text, `-D DARK=c` the module colour. Every version and level decodes with `zbarimg` and matches `qrencode` module for module with the same mask. About 2.6 million instructions for the link (0.9 s in the simulator) |
 | `c/games/snake.c` | C: Snake on the RGB screen, a 16×14 grid of 8×8 cells under a score panel; `W`/`A`/`S`/`D` steer, `R` restarts after a game over, `Q` quits (`key_pressed()`, `wait_ms()`) |
-| `c/os/loader.c` | C: runs programs from the disk (simulator only): type a name and arguments, it runs `/bin/<name>` with `spawnv()` and shows the exit status; an empty line lists `/bin`. The first step towards the OS's shell, `tynix/shell.c` (11) |
+| `c/os/loader.c` | C: runs programs from the disk: type a name and arguments, it runs `/bin/<name>` with `spawnv()` and shows the exit status; an empty line lists `/bin`. The first step towards the OS's shell, `tynix/shell.c` (11); since Phase 7 a program for the OS itself (`--exe`, run from Tynix's shell) |
 | `c/os/echo.c` | C: a program for the OS (`cc build --exe`, then `disk put` into `/bin`): prints its arguments, like Unix `echo` |
 | `c/os/disk_notes.c` | C: files on the disk (simulator only, `--disk FILE` on a disk made by `python compiler/src/disk format`): prints `/notes.txt`, then adds each typed line to it (`!help` lists the commands: `!show`, `!ls`, `!clear`, `!quit`), so the next run shows them again |
 | `c/tests/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, `~` on registers, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
@@ -1301,7 +1326,7 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 19 checks: fs_reclaim() and the NMI kill of a spinning program through the shell, format (sparse, the superblock), text and
+python compiler/src/disk/selftest.py  # 20 checks: fs_reclaim() and the NMI kill of a spinning program under the kernel, format (sparse, the superblock), text and
                                       # binary round trips (block edges), overwriting frees
                                       # blocks, a directory past one block (entries reused),
                                       # subdirectories, . and .., mv, name rules, disk full, CLI,
@@ -1309,9 +1334,15 @@ python compiler/src/disk/selftest.py  # 19 checks: fs_reclaim() and the NMI kill
                                       # the shell and the `ed` and `edit` editors run on a disk,
                                       # (each reads what the other wrote; fsck clean after),
                                       # and spawnv(): a --exe program put on the disk, run
-                                      # three times (arguments, exit status, fresh variables,
-                                      # the caller's directory and heap, load errors), and
-                                      # tynix/shell.c on a disk from tynix/make_disk.py: a session
+                                      # by another under the kernel (arguments, exit status,
+                                      # fresh variables, the caller's directory and heap, load
+                                      # errors, two copies at two addresses, a TEX1 program),
+                                      # `multitask`: two programs sharing the CPU, two writing
+                                      # files at once, kill with a file open, a stack overflow,
+                                      # a background program waiting for keys, the NMI menu,
+                                      # the timer off with one program (a clock that counts
+                                      # instructions), and
+                                      # tynix/shell.c as /bin/sh on a disk from tynix/make_disk.py: a session
                                       # of every built-in, > and >>, quotes, a /bin program's
                                       # arguments and exit status, the error messages;
                                       # `tools`: more grep find tree du diff hexdump calc run by
@@ -1319,7 +1350,7 @@ python compiler/src/disk/selftest.py  # 19 checks: fs_reclaim() and the NMI kill
                                       # statuses, du against fs.py's block chains, > to a file),
                                       # then visual_file_manager's copy, cut, paste, rename,
                                       # delete, new folder, opening a file in `edit` and a program
-                                      # through the shell, read back with fs.py (11.3, 11.4)
+                                      # (spawnv), read back with fs.py (11.3, 11.4)
 python check_docs.py                  # 3 checks on the docs: every repo path they name
                                       # exists, every example (.asm, .c) and tynix/*.c is
                                       # listed (5.3, 11), every TWEAKS switch is in 3.4
@@ -1488,7 +1519,7 @@ blocks (256 for the FAT) and 65,278 free when new.
 ```
 python compiler/src/disk format disk.img [--size MB] [--force]   # new disk (64 MB, sparse); --force overwrites an existing file; without it a disk or any other existing file is refused
 python compiler/src/disk ls disk.img [PATH]                      # a directory: size (chars/words) and name
-python compiler/src/disk put disk.img HOST [PATH] [--binary]     # copy in (text unless --binary, or a TEX1
+python compiler/src/disk put disk.img HOST [PATH] [--binary]     # copy in (text unless --binary, or a TEX2/TEX1
                                                                  # program from cc build --exe); PATH: a
                                                                  # name or a directory, default /HOST's name
 python compiler/src/disk get disk.img PATH [HOST|-]              # copy out (- = the terminal)
@@ -1567,7 +1598,7 @@ how the compiler works.
 
 ```
 python compiler/src/cc compile prog.c [-o prog.asm]                 # C -> assembly
-python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map] [--no-libc] [--lib x.asm] [--exe]
+python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map] [--no-libc] [--lib x.asm] [--exe [--region WORDS]]
 python compiler/src/cc run   prog.c [...] [--keys TEXT] [--steps N] [--stats] [--trace] [--screen FILE.png] [--disk FILE]
         common options: -I dir, -D NAME[=value], -w (no warnings)
 ```
@@ -1579,7 +1610,9 @@ written. `build` and `run` also write `<name>.asm` for each `.c` next to the
 the simulator window's C view; `.loc` directives carry them). `run` builds, runs the image in the simulator without a window and
 prints the display; it exits with 2 if the program doesn't halt within
 `--steps` (default 50 million). `build --exe` writes `<name>.exe` instead,
-a program for the OS (10.4) for `python compiler/src/disk put`.
+a program for the OS (10.4) for `python compiler/src/disk put`; `--region N`
+asks Tynix for N words of RAM (code, data, stack and heap) instead of its
+default of 1M (`make_disk.py` gives `diff` 1.25M).
 
 ### 10.2 Modules
 
@@ -1692,30 +1725,31 @@ leads to after an unconditional jump.
   build: `start` calls every linked `_init_` routine, then
   `main(0, {NULL})`, then `exit` with main's result. crt0 also holds
   `_Exit` (HALT, in a loop) and `_heap_end`, the word where malloc's heap
-  ends: the end of RAM, or `0x1100000` when `spawnv` is linked (the build
-  then also checks that the program's variables end below it). The build
-  links, in order: crt0, the given files, the library files they need, and
-  a last object whose `.ram` label `_end` marks the end of all variables
-  (where malloc's heap starts).
+  ends: the end of RAM, or `0x1100000` in a program that defines the global
+  `_loads_programs` (Tynix's kernel: programs go above it; the build then
+  also checks that its variables end below it). The build links, in order:
+  crt0, the given files, the library files they need; the linker's `_end`
+  marks the end of the variables and the stack (where malloc's heap starts).
 * **Programs for the OS** (`build --exe`) are linked at `0x1100000` (4.6)
-  and saved as a TEX1 executable: a 5-word header (`0x31584554` "TEX1",
-  load address, n, entry, words to zero after the image) and the n words,
-  little-endian, so `disk put` stores it as a binary file (it spots the
-  magic). `spawnv()` (`spawn.c`) checks the header, copies the words with
-  `_fs_read` (one seek a block, about 14 instructions a word), zeroes the
-  variables, and jumps to the entry with R1 = a block: argc, argv, the
-  address to go back to, its current directory, and a `put` function for
-  stdout (0: the display; `spawnv_to(path, argv, out)` gives one that writes
-  to the caller's open `FILE`, which is how the shell's `>` works for
-  programs; `isatty(1)` in `file.c` is false exactly when `put` is set). That crt0 keeps the block, calls the `_init_` routines,
-  `_fs_inherit(cwd)` (when `fs.c` is linked) and `_set_stdout(put)` (when
-  `file.c` is), then `main(argc, argv)`; its `_Exit` jumps back to `spawn.asm`'s
-  `_spawn_return` with R0 = the status, which `longjmp`s to the stack
-  `spawnv()` had, so `exit()` works at any depth. The program has its own
-  copy of the library (its own heap, from its `_end` to the end of RAM, and
-  its own open files); afterwards `spawnv()` calls `_fs_forget()` so the
-  caller re-reads the disk. A `--exe` program can't link `spawnv` (it would
-  load over itself).
+  with a 16K-word stack after their data, against the library of
+  `compiler/libc/tynix/` (10.5), and saved as a TEX2 executable (the format
+  is in `compiler/libc/include/sys/tynix.h`): an 8-word header (`0x32584554`
+  "TEX2", the linked base, n, entry, words of data to zero, stack words,
+  region words wanted or 0, r) then the n words, then the r offsets of the
+  words that hold an address, little-endian, so `disk put` stores it as a
+  binary file (it spots the magic). The kernel (`tynix/kernel.c`, 11) picks a
+  region, copies the words with `_fs_read` (about 14 instructions a word),
+  adds `region - base` to the r words, zeroes the data, copies argv to the
+  top of the region, and starts it with R1 = a block (`B_ARGC`, `B_ARGV`,
+  `B_PID`, `B_END` the end of its heap, `B_OUT` whether stdout is a file,
+  `B_FG` the address of the kernel's foreground pid, `B_LOST`). That crt0
+  keeps the block, stores `B_END` into `_heap_end`, calls the `_init_`
+  routines and `_tx_start(block)` (`compiler/libc/tynix/sys.c`: `_set_stdout()` with a
+  function that sends stdout to fd 1 64 words at a time when `B_OUT`), then
+  `main(argc, argv)`; its `_Exit` is the system call exit (`TRAP` with R1 = 0,
+  R2 = the status). `isatty(1)` in `file.c` is false exactly when stdout is a
+  file. The old format, TEX1 (5-word header, fixed at `0x1100000`, no
+  relocations), is no longer written; the kernel still runs one (11).
 * Labels: C names as they are (or `_X` + name, 5 in `c_language.md`);
   compiler labels `_K<n>` (code), `_L<n>` (statements), `_S<n>` (strings),
   `_F<n>` (`__func__`), `_V<n>_<name>` (static locals), `_C<n>`, `_G<n>`.
@@ -1730,8 +1764,26 @@ screen, `fs.c` (files on the disk, TFS1 as in 7.6, `stat` and `statvfs`) and `di
 files only) and five assembly files: `runtime.asm` (`_pow2`, `_udiv`,
 `_umod`), `memory.asm` (`memcpy` and `memset`, 6 instructions a word instead of the
 13 and 9 of the compiled loops), `setjmp.asm`, `interrupt.asm` (the vector stubs and
-`set_interrupt_handler` & co. of `<cpu.h>`, 1.8), and `spawn.asm` (the jumps of `spawn.c`'s `spawnv`,
-10.4). `_Exit` is in the generated crt0.
+`set_interrupt_handler` & co. of `<cpu.h>`, 1.8, and the kernel's stack and
+task-switch words). `_Exit` is in the generated crt0.
+
+**The library of a program for Tynix** (`cc build --exe`): the files in
+`compiler/libc/tynix/` replace the ones of the same name, and add their own
+(`driver.library_sources(exe=True)`; they are cached in `compiler/ROM/libc/tynix/`):
+
+| file | what changes |
+| --- | --- |
+| `sys.asm` | `_syscall(n, a, b, c, d)`: `TRAP` with R1 = n, R2..R5 = a..d, the answer in R0 |
+| `sys.c` | `_tx_start` (crt0 calls it), `_tx_call` (a negative answer -> -1 and `errno`), stdout to fd 1 |
+| `fs.c` | `fopen` & co., `remove`, `rename`, `stat`, `statvfs`, `fs_reclaim` as system calls; a `FILE` is the kernel's file number with a 64-word buffer (`fd`, `buf` in `local.h`) |
+| `dir.c` | `mkdir`, `rmdir`, `chdir`, `getcwd`, `opendir`/`readdir`/`closedir` as system calls (4 directories open per program) |
+| `spawn.c` | `spawnv`, `spawnv_to`, `spawn`, `spawn_to`, `waitpid`, `kill`, `getpid`, `yield`, `set_foreground`, `tasks`, `halt_os` (`<unistd.h>`) |
+| `cpu.c` | the keyboard through the kernel (`key_pressed`, `wait_key`, getchar's `_read_key`: only the foreground program gets keys, and the waiting ones sleep), `wait_ms` sleeps, `_gfx_hold` (each `gfx_` call waits for the foreground), `gfx_lost()` |
+
+A ROM program keeps the plain files: `cpu.c`'s `_gfx_hold` is 0 and
+`gfx_lost()` is always 0. The C library itself has no `spawnv` any more
+outside Tynix (the old `spawn.c`/`spawn.asm` loaded one program over
+`0x1100000` and came back by `longjmp`).
 
 * The driver compiles each library file the first time it is needed and
   keeps the `.obj` (and the `.asm`, for reading) in `compiler/ROM/libc/`,
@@ -1784,22 +1836,19 @@ files only) and five assembly files: `runtime.asm` (`_pow2`, `_udiv`,
 ## 11. The OS: Tynix (`tynix/`)
 
 The OS is called Tynix (after tiny C; the shell's banner says `Tynix
-shell`). Simulator only (it needs the disk, 1.7 and 7.6). One program at a time,
-like CP/M or MS-DOS, with no memory protection. Since Phase 6 the CPU has
-interrupts (1.8), and the shell uses one: the NMI (Esc or the window's NMI
-button) while a program runs asks `[NAME: 1 kill, 2 continue]`; 1 ends the
-program with status 130 (the handler returns `_spawn_kill`'s address, so the
-RTI lands in code that `longjmp`s back into `spawnv`), and the shell then runs
-`fs_reclaim()` (freeing blocks nothing points to, which a program killed while
-it wrote can leave) and prints `[killed: freed N lost blocks]` if there were
-any. The shell runs `fs_reclaim()` at boot too (`[boot: ...]`). With no
-program running an NMI is ignored. Programs still can't be paused and
-resumed or run side by side: that is Phase 7 (several programs in RAM, a
-scheduler on the timer interrupt).
+shell`). Simulator only (it needs the disk, 1.7 and 7.6, the interrupts, 1.8,
+and the timer). Since Phase 7 it is a small kernel in ROM that runs several
+programs at once, preemptively, with no memory protection, in the style of
+AmigaOS: `tynix/kernel.c` boots, frees the blocks nothing points to
+(`fs_reclaim()`, `[boot: freed N lost blocks]`), and starts `/bin/sh`
+(`tynix/shell.c`, an ordinary program for the OS) in the foreground. Everything
+else is a system call: `TRAP` with R1 = its number (`compiler/libc/include/sys/tynix.h`).
+With no disk, or no `/bin/sh`, the kernel says so and halts.
 
 | file | what it is |
 | --- | --- |
-| `tynix/shell.c` | the OS's ROM: a command shell, built like any C program (19,380 words of ROM, 2,927 of RAM) |
+| `tynix/kernel.c` | the OS's ROM: tasks, memory, scheduling, system calls, the filesystem, keyboard and screen focus, the NMI menu (21,695 words of ROM, 38,078 of RAM with its 8K-word stack and 16 task records) |
+| `tynix/shell.c` | the shell, `/bin/sh` (16,468 words): built-ins, programs from `/bin`, `&`, `jobs`, `fg`, `kill`, `wait` |
 | `tynix/ed.c` | a line editor for text files, a program for `/bin` (15.8K words; section 11.1) |
 | `tynix/edit.c` | a full-screen editor on the RGB screen, a program for `/bin` (section 11.2) |
 | `tynix/more.c` | show text files a page at a time, a program for `/bin` (11.3; 12.4K words) |
@@ -1811,23 +1860,115 @@ scheduler on the timer interrupt).
 | `tynix/hexdump.c` | the values of files in hexadecimal (11.3; 11.6K words) |
 | `tynix/calc.c` | a 32-bit integer calculator (11.3; 7.6K words) |
 | `tynix/visual_file_manager.c` | a two-pane file manager on the RGB screen, in the style of yazi (section 11.4; 22.8K words) |
-| `tynix/make_disk.py` | makes `tynix/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds every program in its `PROGRAMS` list (from `tynix/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; from the command line it also makes a Linux-like `/home/user` (`Desktop`, `Documents` with `welcome.txt`, `Downloads`, `Music`, `Pictures`, `Videos`) and `/tmp` when missing (`make(..., home=True)`; the self-checks leave them out); other files on the disk are kept. Twelve C examples, `ed`, `edit` and the nine tools of 11.3 and 11.4, 2.8K–22.8K words each |
-| `tynix/run_with_video.sh` | builds the shell and the disk (`make_disk.py`), builds `video_player.c` with `--exe` (a `clip.h` argument is passed as `-D VIDEO=...`), puts it in `/bin/video_player` and starts the simulator on it, all under pypy3 when it is installed (`PY` picks another interpreter, `SIM_ARGS` adds simulator options, `DISK` picks another image). `video_player` is not in `PROGRAMS`: its video is part of the program (17K words for the 4 s demo clip, millions for a long one) |
+| `tynix/make_disk.py` | makes `tynix/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds `shell.c` as `/bin/sh` and every program in its `PROGRAMS` list (from `tynix/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; from the command line it also makes a Linux-like `/home/user` (`Desktop`, `Documents` with `welcome.txt`, `Downloads`, `Music`, `Pictures`, `Videos`) and `/tmp` when missing (`make(..., home=True)`; the self-checks leave them out); other files on the disk are kept. Twelve C examples, `ed`, `edit` and the nine tools of 11.3 and 11.4, 2.8K–22.8K words each; `REGIONS` gives `diff` 1.25M words of RAM (`--region`) |
+| `tynix/run_with_video.sh` | builds the kernel and the disk (`make_disk.py`), builds `video_player.c` with `--exe` (a `clip.h` argument is passed as `-D VIDEO=...`), puts it in `/bin/video_player` and starts the simulator on it, all under pypy3 when it is installed (`PY` picks another interpreter, `SIM_ARGS` adds simulator options, `DISK` picks another image). `video_player` is not in `PROGRAMS`: its video is part of the program (17K words for the 4 s demo clip, millions for a long one) |
 
 ```
 python tynix/make_disk.py [IMG] [--new] [--size MB]
-python compiler/src/cc build tynix/shell.c
-python cpu_sim/src/main.py compiler/ROM/shell.rom --disk tynix/disk.img
-python compiler/src/cc run tynix/shell.c --disk tynix/disk.img --keys $'ls /bin\nprimes\nhalt\n'
+python compiler/src/cc build tynix/kernel.c
+python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img
+python compiler/src/cc run tynix/kernel.c --disk tynix/disk.img --keys $'ls /bin\nprimes\nhalt\n'
 ```
 
-At start the shell prints a line and checks for a formatted disk
-(`opendir("/")`). Without one it says how to attach one and goes on: the
-commands that need no disk still work, the others say `No such device`.
-Then it prompts with the current directory (`/docs> `), reads a line with
-`fgets` (the C library echoes it and handles backspace), splits it into
-words at spaces (`"..."` and `'...'` keep spaces in one word; the quotes go)
-and takes out `> FILE` or `>> FILE`. The first word picks the command.
+**Programs and memory.** `cc build --exe` writes TEX2 (10.4): the kernel takes
+a region of RAM, first fit above `0x1200000` (`0x1100000`–`0x11FFFFF` stays free
+for an old TEX1 program, which can only go there), of 1M words or what the
+file asks for (`--region`; at least its words, data, stack, argv and 1K of
+heap). The region holds `[code + data][16K-word stack][heap ... argv]`: the
+argv strings are copied to its top (the caller may change its own copy, or
+end, while the child runs) and the heap ends below them (`B_END`). The
+program is relocated (its r words get `region - 0x1100000` added), its data
+zeroed, and it starts with a made-up interrupt frame on its stack: RTI goes
+to its entry with interrupts on and R1 = its block. Up to 15 programs (16
+task records, record 0 is the idle task), as many as fit in 14M words
+(fourteen of 1M). The shell itself is at `0x1200000`, so the first program
+typed goes to `0x1300000`.
+
+**Switching.** An interrupt or a `TRAP` leaves `[devices][saved word][R0 ...
+R15]` on the program's own stack (1.8); the kernel's C code then runs on the
+kernel's own 8K-word stack (`_int_kstack`), with interrupts off, and chooses
+which program the `RTI` goes back to by putting its record `{esp, ebp, limit}`
+in `_int_next`. So nothing in the kernel is ever re-entered (a system call
+is never interrupted, except by the NMI), and a program's whole state is its
+stack. The stack limit is set 64 words before the end of each stack: the 18
+words of an interrupt entry always fit, and a program that runs past it gets
+`[NAME: stack overflow at 0x...]` and ends with status 139, alone (a fault
+inside the kernel halts). Round robin, 10 ms slices: the timer is on only while
+two programs want the CPU, or one sleeps (`wait_ms`; the period is then the
+time to the first wake-up); with one program running it is off, so it runs at
+full speed (the simulator's `run()` keeps one chunk, 3.2). With nothing ready
+the idle task executes `WAIT`.
+
+**Waiting.** A system call that has to wait (a key, a child's end, a time, the
+foreground) marks the program blocked and returns to another one; whoever
+ends the wait (the keyboard interrupt, the end of the child, the timer) writes
+the answer into the waiting program's saved R0 and marks it ready. So one
+kernel stack is enough: kernel code never sleeps.
+
+**System calls** (numbers in `sys/tynix.h`; the C library of 10.5 wraps them):
+
+| call | what it does |
+| --- | --- |
+| `exit(status)` | the end: the kernel flushes and closes its open files, frees its region, tells the parent |
+| `spawn(path, argv, out_fd, flags)` | load a program; `SPAWN_FG` gives it the foreground; `out_fd` (a file the caller opened) becomes its stdout |
+| `wait(pid or -1, flags, &pid)` | its exit status; blocks, or `WAIT_NOHANG`. `WAIT_BACKGROUND` when the NMI menu sent it to the background |
+| `kill(pid)`, `getpid`, `yield`, `sleep(ms)` | |
+| `tasks(buf, max)`, `foreground(pid)`, `halt` | `struct task_info` for `jobs`; the keyboard and screen to that program; close every file and stop |
+| `open close read write seek length` | files by number: fd 0 the keyboard, 1 stdout (the display, or a file), 2 the display, 3 and up opened files, 16 per program, 32 in all (each a `FILE` of the kernel's `fs.c`, shared by the fds that point to it) |
+| `stat remove rename mkdir rmdir chdir getcwd opendir readdir statvfs reclaim` | the filesystem, with each program's own current directory |
+| `getkey(wait)`, `waitfg` | the keyboard (only the foreground program's call reads it; a background one waits), wait to be the foreground |
+
+A negative answer is `-errno`. A `key_pressed()` costs about 390 instructions
+(the interrupt entry and exit are most of it; the kernel answers it before
+anything else).
+
+**The filesystem is only in the kernel.** Each program used to link its own
+`fs.c`, with its own idea of the disk (a cache of the last chain, the
+allocation hint, the length of each open file): with two programs running,
+those go out of date. Now one `fs.c` serves everybody and runs with
+interrupts off, so a disk transaction (seek, then data) is never split. Two
+programs that open the same file get two kernel `FILE`s; after every write the
+kernel saves the file's entry and gives the others its first block and
+length (`share()`), so two programs appending to one log both land at its end
+(the `multitask` check fails without it). The disk's blocks are consistent
+after any kill: the kernel closes what the program had open. What two
+programs write to the *same* place of a file at once is not merged (as in
+Unix without locks).
+
+**Keyboard and screen.** The keys stay in the keyboard device's buffer until
+the foreground program asks: `getchar`, `wait_key` sleep in the kernel until a
+key comes (the keyboard interrupt wakes them), `key_pressed()` answers at once.
+A background program that reads the keyboard waits until it is brought
+forward. The text display is shared (lines interleave). Only the foreground
+program draws on the RGB screen: every `gfx_` call of a background one waits
+(a video pauses); when one gets the foreground back, `gfx_lost()` returns 1
+once and `edit`, `visual_file_manager`, `snake` and `game_of_life` draw
+everything again (the screen can't be read back). The others (`grapher`,
+`qr`, `gfx_demo`, `image_demo`) don't, and show what is left until they draw
+again.
+
+**The NMI** (Esc, or the window's NMI button) asks about the foreground
+program: `[NAME: 1 kill, 2 continue, 3 background, 4 tasks]`. 1 ends it with
+status 130 (when the NMI came during a system call, at the end of that call,
+so the filesystem is never left half written); 3 gives the keyboard back to
+its parent (the shell prints `[pid] NAME &` and goes on: the program keeps
+running); 4 lists the tasks and asks again. With the shell in front an NMI
+does nothing. The window passes the keys 1–4 to the menu wherever the focus
+is, and a second Esc answers 2.
+
+**Old programs.** A TEX1 file (the fixed-address format of Phases 4–6) is run
+at `0x1100000` with its old block (argc, argv, a way back in RAM: `CPY R0,
+R2; DATA R1, 0; TRAP`, its directory, no stdout file) and alone: the other
+programs wait until it ends, since it uses the disk and the keyboard with its
+own copy of the library; afterwards the kernel forgets what it knew about the
+disk (`_fs_forget()`). Its heap is not bounded by the kernel (its crt0 says the
+end of RAM): rebuild it.
+
+At start the shell prints its banner, then prompts with the current
+directory (`/docs> `), reads a line with `fgets` (the C library echoes it and
+handles backspace), splits it into words at spaces (`"..."` and `'...'` keep
+spaces in one word; the quotes go), takes out `> FILE` or `>> FILE`, and a
+last word `&`. The first word picks the command.
 
 Built-in commands (the `commands[]` table, which `help` also prints):
 
@@ -1844,44 +1985,42 @@ Built-in commands (the `commands[]` table, which `help` also prints):
 | `mkdir dir...`, `rmdir dir...` | |
 | `df` | `statvfs("/")`: 1 KB blocks, used, free (it reads the whole FAT: 0.9 million instructions on 64 MB) |
 | `clear` | a form feed (12) to the text display, `gfx_clear()` for the RGB screen |
-| `halt` | `exit(0)`: the CPU halts. Ctrl-D at the prompt does the same |
+| `halt` | `halt_os()`: the kernel closes every open file and the CPU halts. Ctrl-D at the prompt does the same |
+| `jobs` | `tasks()`: every program the kernel holds, its pid, name, state (running, waiting, ended) and region, `(front)` on the foreground one |
+| `fg pid` | `set_foreground(pid)`, then wait for it as for a program typed at the prompt |
+| `kill pid...` | end those programs (status 130); their files are closed by the kernel |
+| `wait [pid]` | wait for that program to end (its status is the command's); none: for every job |
 
 A built-in writes to `out`: the display, or the file after `>` (`fopen`
 `"w"`, a text file) or `>>` (`"a"`), closed after the command. Error
 messages always go to the display. A command with the wrong arguments
-prints its usage.
+prints its usage. A built-in can't run in the background (`&` is ignored with a
+message).
 
 Any other first word is a program: a word with a `/` is a path (relative
-ones start at the current directory), else `/bin/NAME`. `spawnv(path,
-words)` (10.4) loads it at `0x1100000` and runs it in the current
-directory with the words as `argv`; the shell's variables and heap stay
-below `0x1100000`. When it ends, the shell prints `[NAME: exit status N]`
-if N isn't 0. If it can't be loaded the shell says `NAME: no such command`
+ones start at the current directory), else `/bin/NAME`. `spawn_to(path,
+words, out, SPAWN_FG)` loads it and runs it in the current directory with the
+words as `argv`, and the shell waits for it (`waitpid`). When it ends, the shell prints `[NAME: exit status N]`
+if N isn't 0 (130 killed, 139 past its stack). If it can't be loaded the shell says `NAME: no such command`
 (a plain name not in `/bin`) or the path and `strerror` (`Exec format
-error` for a text file, `Is a directory`). `>` and `>>` work after a
-program too: the shell opens the file and passes it to `spawnv_to()`, and
-whatever the program writes to `stdout` (`printf`, `putchar`, `puts`,
-`fputs(stdout)`) goes to the file; its errors (`stderr`) and the echo of the
-keys it reads stay on the display. The program must not rewrite that file
-itself (the shell's `FILE` would not see it). If the program can't be
+error` for a text file, `Is a directory`, `Cannot allocate memory`). `>` and `>>` work after a
+program too: the shell opens the file and passes it as the program's stdout
+(the kernel keeps it open for the program, so the shell closes its own
+`FILE` at once); whatever the program writes to `stdout` (`printf`, `putchar`,
+`puts`, `fputs(stdout)`) goes to the file; its errors (`stderr`) and the echo of the
+keys it reads stay on the display. If the program can't be
 loaded the file has been made (empty) anyway, as in a Unix shell.
 
-A program that never ends keeps the CPU: nothing can stop it from the
-outside. The examples `make_disk.py` puts in `/bin` end by themselves, on
-Ctrl-D (`grapher`, `qr`) or on `q` (`snake`, `game_of_life`).
+With `&` at the end of the line the shell doesn't wait: it prints `[pid] NAME
+&` and prompts again. Before each prompt it collects the background jobs
+that ended (`waitpid(-1, ..., WAIT_NOHANG)`) and prints `[pid] done: NAME, exit
+status N`. A program that never ends no longer keeps the CPU: the NMI menu or
+`kill` ends it, and the others run meanwhile.
 
-A program cannot start another program: `spawnv()` loads the child over
-the caller at `0x1100000`, so the build refuses it (10.4). One that wants to
-run something and come back (`visual_file_manager`, 11.4) writes command
-lines into the file `/.next`, one per line (the program to run, then itself
-again with the arguments that restore its state), and ends with exit status
-254 (`EXIT_NEXT` in `shell.c`). When the shell sees that status and finds
-`/.next` it reads and deletes the file (at most 1024 chars), prints no
-`[NAME: exit status 254]`, and, back at its prompt loop, runs each line as if
-typed, so redirects and built-ins work. This is a loop in `main`, not a call
-inside `run_program`: a long session of open-and-return does not deepen the
-stack. A program that exits with 254 and leaves no `/.next` gets the usual
-status message.
+Any program can start another now (`spawnv()`, `spawn()`): the child gets its
+own region, so the caller stays as it was. `visual_file_manager` (11.4) opens
+a file in `edit` that way; the `/.next` file and exit status 254 that it used
+in Phase 5 to ask the shell are gone.
 
 ### 11.1 The editor: `ed` (`tynix/ed.c`)
 
@@ -1994,7 +2133,7 @@ columns for the folder's entries (folders first, then by name; folders in cyan; 
 cursor is an inverted row; `*` marks a selected entry, `+` / `x` a copied / cut one) and 21 for a
 preview of the entry under the cursor (42 columns are too narrow for yazi's
 three panes): the first lines of a text file (2000 chars at most are read), a
-folder's entries, `program, N words` for a TEX1 program or `binary, N words`.
+folder's entries, `program, N words` for a TEX2 or TEX1 program or `binary, N words`.
 Under them the full name of the entry (a name too long for the list takes up
 to 4 rows, and shrinks the panes accordingly; one that fits shows its size on
 the right: `36 chars`), and the status line: `entry/count  N KB free`
@@ -2006,7 +2145,7 @@ Directories larger than the screen scroll.
 | --- | --- |
 | `j` `k`, Down Up | move; `g` `G` first / last; Ctrl-F Ctrl-B a page |
 | `h`, Left | the parent folder (the cursor on the folder it came from) |
-| `l`, Right, Enter | into a folder; open a file: text in `edit`, a TEX1 program is run, other binaries refused |
+| `l`, Right, Enter | into a folder; open a file: text in `edit`, a program (TEX2 or TEX1) is run, other binaries refused |
 | space | select the entry (`*`) and move down, as yazi does; `y`, `x` and `d` then act on all the selected entries of the folder (up to 64 for the clipboard) instead of the one under the cursor. The selection is forgotten when the folder is read again |
 | `y` `x` `p` | copy / cut, paste the whole clipboard into the current folder. `y` or `x` again on a lone entry that is already on the clipboard takes it off. Never over an existing name (it stops there; what was pasted stays pasted, a cut keeps only the items not moved yet). A cut is `rename()`: atomic, so a file cannot be lost, and a folder can be moved (not into itself). A copy is the `cp` code of `shell.c` (text or binary like the original); a folder is copied with everything in it (`copy_tree`, down to `MAX_DEPTH` 32 levels, each level's names read first and the directory closed, since only 4 can be open), but not into itself. If a copy fails (disk full), the half-written file or folder is removed (`remove_tree`) |
 | `r` | rename: the name is typed on the status line (Backspace edits, Enter does it, Ctrl-G or Ctrl-Q cancels) |
@@ -2020,18 +2159,17 @@ Ctrl-D is not used (Tynix's end of input). Bad paths and failed calls show
 `NAME: strerror(errno)` on the status line; there is no crash path through
 `errno`. Arguments: `visual_file_manager [dir [name]]` starts in `dir` with the cursor
 on `name`; with no argument it starts in `/home/user` when that folder exists
-(`make_disk.py` makes it), else in the shell's folder. A third argument `clip`
-(only the manager itself passes it) means "load the clipboard from
-`/.clipboard`", a file it wrote just before leaving, one line `copy` or `cut`
-and then one path a line; it is deleted after reading.
+(`make_disk.py` makes it), else in the shell's folder.
 
-Opening uses the shell (the end of 11): the manager writes `/.clipboard` (if it
-holds anything) and `/.next` with two lines, for example `edit /docs/a.txt` and
-`visual_file_manager /docs a.txt clip`, and exits with status 254; the shell runs them, so the program
-or editor runs, then the manager starts again from scratch, the whole screen
-redrawn, in the same folder, on the same entry and with the same clipboard.
-Names the shell cannot pass on (with a quote, `>` or non-ASCII char) are
-refused with a message. The self-check `tools` drives it through the shell
+Opening: `spawnv("/bin/edit", {"edit", path})` for a text file, `spawnv(path,
+...)` for a program, in the foreground and in the manager's folder; the
+manager waits, keeping its state (folder, cursor, clipboard) in its own
+region of RAM, then reads the folder again and draws the whole screen again;
+a status other than 0 is shown on the status line. It also draws everything
+again when it gets the foreground back (`gfx_lost()`). Until Phase 7 a program
+could not start another, so the manager left through the shell (`/.next`,
+exit status 254, its clipboard in `/.clipboard`, a `clip` argument to start
+again with it); that is gone. The self-check `tools` drives it through the shell
 (copy, a refused paste over an existing name, cut, rename, space-select several entries then cut, copy and delete them, `y` twice and `u` taking things off the clipboard, `~` and the start in `/home/user`, a no to `delete?`, delete (a nested folder, its blocks freed), a nested folder copied and one copied into itself refused, a copy that runs out of disk leaving nothing behind, new folder, `Enter` opening a
 file in `edit` with typed keys and coming back with the clipboard, `Enter` on a
 program) and reads the disk back with `fs.py`; it does not look at pixels

@@ -53,7 +53,7 @@ logisim-CPU-project-/
 │   │   ├── selftest.py       22 checks (incl. building every compiler/examples program)
 │   │   └── asm_grammar.py    generates railroad-diagram HTML of the grammar (needs railroad-diagrams)
 │   ├── src/cc/               C compiler (run as `python compiler/src/cc <cmd>`); imports src/asm's modules
-│   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; build: --exe; run: --keys --steps --stats --trace)
+│   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; build: --exe --region; run: --keys --steps --stats --trace)
 │   │   ├── lexer.py, preprocessor.py   tokens; #include/#define/#if, macro expansion (hide sets)
 │   │   ├── typesys.py        types (sizes in words), promotions, compatibility
 │   │   ├── nodes.py          syntax tree Node, Obj (variable/function)
@@ -61,7 +61,7 @@ logisim-CPU-project-/
 │   │   ├── regalloc.py       which locals get registers; which a call must keep
 │   │   ├── codegen.py        tree → assembly (Val/Addr model, calls, frames, switch tables)
 │   │   ├── peephole.py       clean-ups per function
-│   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0 (ROM or --exe), link, TEX1 .exe, run in simulator
+│   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0 (ROM or --exe), link, TEX2 .exe (+ relocations), libc/tynix/ for --exe, run in simulator
 │   │   ├── cerror.py         CError (file:line:col: error: ...)
 │   │   ├── selftest.py       18 checks (incl. interrupts from C, every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
@@ -80,10 +80,12 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       19 checks (incl. fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv, tynix/shell.c, tynix/ed.c, tynix/edit.c, the nine tools)
+│   │   └── selftest.py       20 checks (incl. fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/ed.c, tynix/edit.c, the nine tools)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), memory.asm (memcpy, memset), setjmp.asm,
-│   │                         spawn.c + spawn.asm (spawnv: load a --exe program from the disk, run it, come back)
+│   │                         interrupt.asm (vector stubs; a kernel's stack and task switch); include/sys/tynix.h (system calls, TEX2)
+│   │   └── tynix/            the library of a program for the OS (--exe), replacing namesakes: sys.asm (TRAP), sys.c, fs.c, dir.c,
+│   │                         spawn.c (spawnv, spawn, waitpid, kill, ...), cpu.c (keys and wait_ms through the kernel, gfx hold)
 │   ├── examples/             example programs, in folders by kind (asm/ and c/)
 │   │   ├── asm/              assembly
 │   │   │   ├── programs/     hello, print_a-z, count_0-9, sum_1-10, abs_value, stack_reverse, echo (no stdlib); guess, untested (with stdlib)
@@ -106,16 +108,18 @@ logisim-CPU-project-/
 │   │       │                 qr (QR code encoder: the repo link, then any typed text; checked with zbarimg/qrencode)
 │   │       ├── tests/        circuit_test (self-checking, for the circuit); benchmark (twelve square roots, Quake III and Newton,
 │   │       │                 timed and checked against sqrt()); sqrt_benchmark (library sqrt vs the old bit-by-bit one)
-│   │       └── os/           programs for the disk and the OS: loader (runs /bin programs with spawnv), echo (build --exe),
+│   │       └── os/           programs for the disk and the OS: loader (build --exe; runs /bin programs with spawnv), echo (build --exe),
 │   │                         disk_notes (files on the disk: shows /notes.txt, adds typed lines; --disk FILE)
 │   └── ROM/                  build output (.obj/.rom/.map/.asm), git-ignored, created on first build;
 │                             ROM/libc/ caches the compiled C library
 │
-├── tynix/                    the OS, Tynix (simulator only), CP/M / DOS style: one program at a time
-│   ├── shell.c               the OS's ROM: checks the disk, prompts with the current directory; built-ins help ls
-│   │                         cd pwd cat echo rm mv cp mkdir rmdir df clear halt (> and >> to a file); any other
-│   │                         name runs /bin/NAME (or a path) with spawnv() and waits; a program that exits 254
-│   │                         with command lines in /.next has them run (how the file manager launches things)
+├── tynix/                    the OS, Tynix (simulator only), AmigaOS style: several programs at once, preemptive, no protection
+│   ├── kernel.c              the OS's ROM: boots, starts /bin/sh; TEX2 loader (regions from 0x1200000, relocation; TEX1 alone
+│   │                         at 0x1100000), round robin on the timer (tickless), system calls (TRAP), the only fs.c,
+│   │                         keyboard and screen focus, NMI menu (1 kill, 2 continue, 3 background, 4 tasks), FAULT = 139
+│   ├── shell.c               /bin/sh: prompts with the current directory; built-ins help ls cd pwd cat echo rm mv cp
+│   │                         mkdir rmdir df clear halt jobs fg kill wait (> and >> to a file); any other name runs
+│   │                         /bin/NAME (or a path) and waits, or not with & at the end
 │   ├── ed.c                  a line editor for text files (a program for /bin: a, i, c, d, p, s, /find, w, q)
 │   ├── edit.c                a full-screen editor on the RGB screen (a program for /bin: arrows, ^S save, ^Q quit)
 │   ├── more.c                show files a page at a time (-n N; space, Enter, q)
@@ -124,8 +128,8 @@ logisim-CPU-project-/
 │   ├── diff.c, hexdump.c     changed lines of two text files (LCS, Unix normal format); values in hex
 │   ├── calc.c                32-bit integer calculator (C precedence; no argument: a line at a time)
 │   ├── visual_file_manager.c a two-pane yazi-like file manager on the RGB screen (j k h l, space select, y x p, u, r d a, ~ home, q)
-│   ├── make_disk.py          tynix/disk.img (git-ignored): TFS1, ed and the C examples built --exe in /bin, /readme.txt, /home/user (Documents, Downloads, ...)
-│   └── run_with_video.sh     builds the shell and the disk, puts video_player in /bin (a clip.h argument picks the video), starts the simulator
+│   ├── make_disk.py          tynix/disk.img (git-ignored): TFS1, /bin/sh, ed and the C examples built --exe in /bin, /readme.txt, /home/user (Documents, Downloads, ...)
+│   └── run_with_video.sh     builds the kernel and the disk, puts video_player in /bin (a clip.h argument picks the video), starts the simulator
 │
 └── cpu_sim/
     ├── src/                  simulator (modules import each other by plain name: run as scripts)
@@ -226,8 +230,9 @@ The design follows the "But How Do It Know?" style: a single bus,
   `OUTDATA` = seek to a word, `INDATA` = size in words; `0x8D` `OUTDATA`/
   `INDATA` = write/read one word and move on. No disk: the ports are empty.
   Filesystem on it: TFS1 (`compiler/src/disk/fs.py`), made/edited by
-  `python compiler/src/disk`. Programs for the OS (`cc build --exe`) run
-  from RAM at `0x1100000`, loaded by C's `spawnv()`.
+  `python compiler/src/disk`. Programs for the OS (`cc build --exe`, TEX2)
+  run from RAM, each in its own region (from `0x1200000`) that Tynix's kernel
+  loads and relocates.
   Videos: `compiler/src/img/video.py` -> frames that `video_player.c` draws
   on time (about 350k instructions a 128×96 frame: python and pypy3 keep up at 12 fps).
 
@@ -273,12 +278,16 @@ The design follows the "But How Do It Know?" style: a single bus,
   can equal EOF: use `fread`/`feof`); `dirent.h`, `unistd.h` (mkdir, chdir, getcwd),
   `sys/statvfs.h` (free space), `sys/stat.h` (`stat`: type, text or binary, size);
   `fs.c` is linked only into programs that call `fopen`. Paths `/a/b` or relative.
-* Programs for the OS: `cc build --exe` links for RAM at `0x1100000` (code and
-  data together) and writes a TEX1 `.exe` (5-word header + words); `spawnv(path,
-  argv)` loads one from the disk, runs it with argc/argv and returns its exit
-  status (longjmp back). crt0 holds `_Exit` and `_heap_end` (the OS's heap stops
-  at `0x1100000` when `spawnv` is linked). Each program has its own libc copy.
-  `tynix/shell.c` is the shell that runs them (built-ins + `/bin/NAME`).
+* Programs for the OS: `cc build --exe` links at `0x1100000` (code, data, a 16K
+  stack) and writes a TEX2 `.exe` (8-word header + words + relocation offsets,
+  `include/sys/tynix.h`) with `compiler/libc/tynix/`'s files in place of their
+  namesakes: files, directories, keys, `spawnv`/`spawn`/`waitpid`/`kill`,
+  `wait_ms` are system calls (`TRAP`, R1 = number, R2..R5 arguments, R0 the
+  answer, negative = -errno). crt0 takes argc, argv and the heap's end
+  (`_heap_end`) from the block in R1 and exits by `TRAP`. The kernel
+  (`tynix/kernel.c`, a ROM program; `_loads_programs` keeps its heap below
+  `0x1100000`) runs them several at once; `tynix/shell.c` is `/bin/sh`.
+  `gfx_lost()`: redraw after another program had the screen.
 * Tests: `compiler/src/cc/tests/*.c` must print exactly gcc's output
   (`.expected`); `difftest.py` checks with gcc.
 
@@ -296,14 +305,14 @@ python logisim/microcode/microcode.py [--list]                     # control sec
 python logisim/microcode/verify.py [--quick]                        # that ROM against CONTROL_SECTION's gates (a few minutes)
 python compiler/src/cc run prog.c [--keys $'12\n'] [--stats]      # C: build + run in the simulator
 python compiler/src/cc build prog.c [more.c x.asm] [-o prog.rom]   # C: -> compiler/ROM/prog.rom (+ prog.asm)
-python compiler/src/cc build prog.c --exe                          # C: -> prog.exe, a program for the OS (disk put it)
+python compiler/src/cc build prog.c --exe [--region N]             # C: -> prog.exe, a program for the OS (TEX2; disk put it)
 python run.py build prog.c                                          # C or asm: build, then open the simulator
 python compiler/src/cc/tests/difftest.py [--update]                # C tests against gcc
 python compiler/src/img pic.png [--colors 16] [--size 64x]         # PNG -> pic.h for gfx_image(x, y, pic)
 python compiler/src/img/video.py clip.mp4 [--fps 10] [--seconds 5]  # video -> clip.h for video_player.c (needs ffmpeg)
 python compiler/src/disk format disk.img; python compiler/src/disk put disk.img notes.txt   # disk images (ls get cat rm mkdir mv df fsck)
-python tynix/make_disk.py; python compiler/src/cc build tynix/shell.c           # the OS: tynix/disk.img with /bin, the shell's ROM
-python cpu_sim/src/main.py compiler/ROM/shell.rom --disk tynix/disk.img          # run it, type help
+python tynix/make_disk.py; python compiler/src/cc build tynix/kernel.c          # the OS: tynix/disk.img with /bin/sh and /bin, the kernel's ROM
+python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img         # run it, type help (primes &, jobs, fg N, kill N)
 tynix/run_with_video.sh [clip.h]                                                 # the same with video_player in /bin: type /bin/video_player
 pypy3 compiler/src/cc run compiler/examples/c/graphics/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
 pypy3 cpu_sim/src/bench.py [life sqrt ...]                          # simulator speed in MHz (python: --scale 0.1 by default)
@@ -333,5 +342,12 @@ pypy3 cpu_sim/src/bench.py [life sqrt ...]                          # simulator 
 * The circuit runs about 160 instructions a second: a C program for the
   circuit should avoid `printf` in loops (a float `printf` costs thousands of
   instructions). `compiler/examples/c/tests/circuit_test.c` takes about 15 000.
+* Tynix (Phase 7): a program for the OS shares the CPU, so a busy loop costs
+  the others; `key_pressed()` is a system call (~390 instructions). Two opens
+  of one file are kept in step by the kernel after each write, but writes to
+  the same place of a file are not merged. Interrupt handlers belong to the
+  kernel: `--exe` programs must not install their own. A TEX1 program runs
+  alone and its heap is not bounded. Only the foreground program draws;
+  programs that cache the screen must check `gfx_lost()`.
 * Outdated notes: `logisim/cpu datas/` (see TECHNICAL.md §9). The old
   hand-assembled programs were removed on 2026-10-06 (still in git history).

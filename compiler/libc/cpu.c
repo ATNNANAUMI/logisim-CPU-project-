@@ -1,5 +1,26 @@
-/* cpu.h: the hex display, direct keyboard access and waiting */
+/* cpu.h: the hex display, direct keyboard access and waiting. A program for
+ * Tynix gets compiler/libc/tynix/cpu.c instead (the keys and the waiting go
+ * through the kernel). */
 #include <cpu.h>
+#include <gfx.h>
+#include "local.h"
+
+void (*_gfx_hold)(void);        /* gfx.h: 0 here (nothing to wait for) */
+
+int gfx_lost(void)
+{
+    return 0;
+}
+
+/* getchar's key: wait for one, no echo (local.h) */
+int _read_key(void)
+{
+    int c;
+    do
+        c = __builtin_in(_KEYBOARD);
+    while (c == 0);
+    return c;
+}
 
 void show_hex(unsigned int value)
 {

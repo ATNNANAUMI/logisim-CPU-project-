@@ -3,7 +3,9 @@
     python compiler/src/cc compile prog.c          -> compiler/ROM/prog.asm
     python compiler/src/cc build prog.c [more]     -> compiler/ROM/prog.rom
     python compiler/src/cc build prog.c --exe      -> compiler/ROM/prog.exe, a program for
-                                                      the OS (spawnv() runs it from the disk)
+                                                      the OS (TEX2: the Tynix kernel loads it
+                                                      from the disk; --region N asks for N
+                                                      words of RAM instead of the default)
     python compiler/src/cc run prog.c [more]       build, then run it in the simulator
 
 build and run take .c, .asm and .obj files together. The C library is
@@ -54,8 +56,11 @@ def main(argv=None):
         add_common(p)
         if name == "build":
             p.add_argument("--exe", action="store_true",
-                           help="a program for the OS: linked for RAM, saved as a TEX1 .exe "
-                                "for the disk (spawnv() runs it)")
+                           help="a program for the OS: saved as a TEX2 .exe for the disk "
+                                "(the Tynix kernel loads it anywhere in RAM)")
+            p.add_argument("--region", type=int, default=0, metavar="WORDS",
+                           help="with --exe: the RAM it gets (code, data, stack and heap; "
+                                "default: the kernel's, 1M words)")
         if name == "run":
             p.add_argument("--keys", default="", help="keys typed before the program starts")
             p.add_argument("--steps", type=int, default=50_000_000,
@@ -88,7 +93,7 @@ def main(argv=None):
                                   asm_dir=out.parent, use_libc=not args.no_libc, warn=warn,
                                   libs=args.lib, exe=exe)
         if exe:
-            out.write_bytes(driver.exe_bytes(program))
+            out.write_bytes(driver.exe_bytes(program, args.region))
         else:
             out.write_text(driver.format_rom(program), encoding="utf-8")
         if args.map or args.command == "build":
@@ -97,8 +102,8 @@ def main(argv=None):
             out.with_suffix(".map").write_text(driver.format_map(program, out.name),
                                                encoding="utf-8")
         if exe:
-            print(f"{out}: {len(program.rom)} words loaded at 0x{program.base:x}, "
-                  f"{program.ram_used} words of RAM after them")
+            print(f"{out}: {len(program.rom)} words, {program.ram_used} words of data and "
+                  f"{program.stack_words} of stack after them, {len(program.relocs)} relocations")
             return 0
         if args.command == "build":
             print(f"{out}: {len(program.rom)} words of ROM, {program.ram_used} words of RAM")

@@ -242,7 +242,8 @@ Exactly one file must define `.global start`. That's where the program begins.
 
 A C program built as a program for the OS (`cc build --exe`) is laid out
 the same way but all in RAM from `0x1100000`: the entry jump, the ROM parts,
-then the RAM parts (TECHNICAL 4.6).
+then the RAM parts, then its stack; the linker keeps the list of words that
+hold an address, so Tynix's kernel can move it anywhere in RAM (TECHNICAL 4.6).
 
 **Libraries.** A file given with `--lib` (section 10) is a library: only the
 functions the program uses go in. The assembler cuts each file into

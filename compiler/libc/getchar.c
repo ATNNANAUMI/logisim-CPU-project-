@@ -16,15 +16,6 @@ static int pos;
 static int at_eof;
 static int pushed = EOF;
 
-int _read_key(void)
-{
-    int c;
-    do
-        c = __builtin_in(_KEYBOARD);
-    while (c == 0);
-    return c;
-}
-
 static void read_line(void)
 {
     len = pos = 0;

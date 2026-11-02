@@ -6,6 +6,8 @@
 
 void gfx_clear(void)
 {
+    if (_gfx_hold)
+        _gfx_hold();                /* Tynix: wait to be the foreground program */
     __builtin_out(GFX_CLEAR_DEVICE, 0);
 }
 
@@ -18,6 +20,8 @@ void gfx_fill(int color)
 
 void gfx_pixel(int x, int y, int color)
 {
+    if (_gfx_hold)
+        _gfx_hold();                /* Tynix: wait to be the foreground program */
     if (x >= 0 && x < GFX_WIDTH && y >= 0 && y < GFX_HEIGHT)
         PIXEL(x, y, color);
 }
@@ -25,6 +29,8 @@ void gfx_pixel(int x, int y, int color)
 void gfx_hline(int x, int y, int w, int color)
 {
     unsigned int word, last;
+    if (_gfx_hold)
+        _gfx_hold();                /* Tynix: wait to be the foreground program */
     if (y < 0 || y >= GFX_HEIGHT)
         return;
     if (x < 0) {
@@ -49,6 +55,8 @@ void gfx_hline(int x, int y, int w, int color)
 void gfx_vline(int x, int y, int h, int color)
 {
     int word, last;
+    if (_gfx_hold)
+        _gfx_hold();                /* Tynix: wait to be the foreground program */
     if (x < 0 || x >= GFX_WIDTH)
         return;
     if (y < 0) {
@@ -171,6 +179,8 @@ void gfx_fill_circle(int cx, int cy, int r, int color)
 void gfx_bitmap(int x, int y, int w, int h, const int *pixels)
 {
     int i, j;
+    if (_gfx_hold)
+        _gfx_hold();                /* Tynix: wait to be the foreground program */
     for (j = 0; j < h; j++)
         for (i = 0; i < w; i++) {
             int c = *pixels++;

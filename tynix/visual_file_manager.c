@@ -38,13 +38,12 @@
  *
  * Ctrl-D is not used (it is Tynix's end of input).
  *
- * Opening a file: a program for the OS cannot call spawnv() (the other
- * program would be loaded over this one), so it asks the shell to do it:
- * it writes the commands to run into the file /.next (the program, then this
- * manager again, started in the same folder on the same entry and with the
- * same clipboard, which goes through the file /.clipboard: `visual_file_manager
- * DIR NAME clip`) and exits with status 254. tynix/shell.c runs those lines, so the manager comes back with the whole
- * screen drawn again, however much the program left on it.
+ * Opening a file: spawnv() runs the program (edit for a text file) in the
+ * foreground, in this folder, and waits for it; the kernel gives each its own
+ * RAM, so this manager stays as it was, clipboard and all. Then the folder is
+ * read again (the program may have changed it) and the whole screen is drawn
+ * again, however much the program left on it. The same happens when the
+ * manager comes back to the foreground (gfx_lost()).
  *
  * The screen code (the cache of what each cell shows, the 33 ms frame, key
  * polling) is edit.c's, written again here for a grid of cells; both could
@@ -72,14 +71,12 @@
 #define PREVIEW_W (COLS - PREVIEW_X)                    /* 21 */
 #define PATH_MAX 512
 #define NAME_MAX 127
-#define EXIT_NEXT 254           /* tynix/shell.c runs the commands in /.next after this status */
-#define NEXT_FILE "/.next"
-#define CLIP_FILE "/.clipboard" /* the clipboard, carried over to the next start of this program */
 #define HOME "/home/user"       /* where it starts with no argument, and what ~ goes to */
 #define CLIP_MAX 64
 #define MAX_DEPTH 32            /* folders inside folders that copy and delete will go down (the stack is small) */
 #define PREVIEW_CHARS 2000      /* at most this many chars of a text file are read for the preview */
-#define TEX1 0x31584554         /* the first word of a program (compiler/libc/spawn.c) */
+#define TEX1 0x31584554         /* the first word of a program (sys/tynix.h) */
+#define TEX2 0x32584554
 
 #define INVERT 0x100            /* a cell's attributes, added to its char */
 #define CYAN 0x200
@@ -92,7 +89,6 @@ struct entry {
     int sel;                    /* marked with the space bar */
 };
 
-static char *prog;              /* argv[0]: how to start this program again */
 static char cwd[PATH_MAX];      /* the folder shown: absolute, "/" or without a trailing / */
 static struct entry *list;      /* sorted: folders first, then by name */
 static int count;
@@ -263,7 +259,7 @@ static int is_program(const char *path)
         return 0;
     c = fgetc(f);
     fclose(f);
-    return c == TEX1;
+    return c == TEX1 || c == TEX2;
 }
 
 /* ---- the selection and the clipboard ---- */
@@ -543,14 +539,6 @@ static void blank_screen(void)
 
 /* ---- actions ---- */
 
-static int shell_safe(const char *s)
-{
-    for (; *s; s++)
-        if (*s <= ' ' || *s >= 127 || *s == '"' || *s == '\'' || *s == '>')
-            return 0;
-    return 1;
-}
-
 /* a name that can be a file: 1-127 chars, no '/', space or control char */
 static int good_name(const char *s)
 {
@@ -589,76 +577,26 @@ static void go_to(const char *path)
     update_free();
 }
 
-/* the clipboard into CLIP_FILE (for the next start of this program); 0, or -1 with the message set */
-static int save_clip(void)
+/* run a program in front and come back: the folder and the screen again */
+static void run_program(const char *path, char **args)
 {
-    FILE *f = fopen(CLIP_FILE, "w");
-    int i;
-    if (f == 0) {
-        fail(CLIP_FILE);
-        return -1;
+    int r = spawnv(path, args);
+    if (r == -1)
+        fail(path);
+    else if (r == SPAWN_BACKGROUND)
+        message = "sent to the background (jobs in the shell)";
+    else if (r) {
+        static char text[64];
+        sprintf(text, "%.30s: exit status %d", args[0], r);
+        message = text;
     }
-    fprintf(f, "%s\n", clip_cut ? "cut" : "copy");
-    for (i = 0; i < nclip; i++)
-        fprintf(f, "%s\n", clips[i]);
-    if (fclose(f) || ferror(f)) {
-        remove(CLIP_FILE);
-        say("", CLIP_FILE, "could not write (disk full?)");
-        return -1;
-    }
-    return 0;
-}
-
-/* the clipboard another start of this program left in CLIP_FILE, which is deleted */
-static void load_clip(void)
-{
-    static char line[PATH_MAX + 2];
-    FILE *f = fopen(CLIP_FILE, "r");
-    int first = 1;
-    if (f == 0)
-        return;
-    while (fgets(line, sizeof line, f)) {
-        line[strcspn(line, "\n")] = 0;
-        if (first)
-            clip_cut = strcmp(line, "cut") == 0;
-        else if (line[0])
-            clip_add(line);
-        first = 0;
-    }
-    fclose(f);
-    remove(CLIP_FILE);
-}
-
-/* leave for the shell: it runs cmd, then this program again where we are */
-static void open_with(const char *cmd, const char *path)
-{
-    FILE *f;
-    int again = strlen(prog) + strlen(cwd) + strlen(list[cur].name) + 16;
-    if (!shell_safe(path) || !shell_safe(cwd) || !shell_safe(list[cur].name) || again > 250) {
-        say("", list[cur].name, "a name the shell cannot pass on");
-        return;
-    }
-    if (nclip && save_clip())
-        return;
-    if ((f = fopen(NEXT_FILE, "w")) == 0) {
-        fail(NEXT_FILE);
-        remove(CLIP_FILE);
-        return;
-    }
-    fprintf(f, "%s\n%s %s %s%s\n", cmd, prog, cwd, list[cur].name, nclip ? " clip" : "");
-    if (fclose(f) || ferror(f)) {
-        remove(NEXT_FILE);
-        remove(CLIP_FILE);
-        say("", NEXT_FILE, "could not write (disk full?)");
-        return;
-    }
-    status = EXIT_NEXT;
-    quit = 1;
+    reload(0);
+    blank_screen();
 }
 
 static void open_entry(void)
 {
-    char path[PATH_MAX], cmd[PATH_MAX + 8];
+    char path[PATH_MAX];
     struct stat st;
     if (count == 0 || !cur_path(path)) {
         message = count ? "path too long" : "nothing here";
@@ -677,10 +615,12 @@ static void open_entry(void)
             message = "no /bin/edit to open it with";
             return;
         }
-        sprintf(cmd, "edit %s", path);
-        open_with(cmd, path);
-    } else if (is_program(path))
-        open_with(path, path);
+        char *args[] = {"edit", path, 0};
+        run_program("/bin/edit", args);
+    } else if (is_program(path)) {
+        char *args[] = {path, 0};
+        run_program(path, args);
+    }
     else
         say("", list[cur].name, "not a text file or a program");
 }
@@ -1096,8 +1036,7 @@ int main(int argc, char **argv)
 {
     int k, stale = 1;
     unsigned int last = 0;
-    prog = argv[0];
-    if (argc > 4 || (argc == 4 && strcmp(argv[3], "clip") != 0)) {
+    if (argc > 3) {
         printf("usage: visual_file_manager [dir [name]]\n");
         return 1;
     }
@@ -1110,8 +1049,6 @@ int main(int argc, char **argv)
     }
     else if (chdir(HOME) == 0)                  /* no argument: the home folder, if there is one */
         getcwd(cwd, sizeof cwd);
-    if (argc == 4)
-        load_clip();
     if (load_dir(cwd)) {
         printf("visual_file_manager: %s: %s\n", cwd, strerror(errno));
         return 1;
@@ -1122,6 +1059,10 @@ int main(int argc, char **argv)
     blank_screen();
     message = "? keys";
     while (!quit) {
+        if (gfx_lost()) {                       /* back in front: everything again */
+            blank_screen();
+            stale = 1;
+        }
         if ((k = key_pressed()) == 0) {         /* no key: redraw if something changed and a frame has passed */
             if (stale && (unsigned int)clock() - last >= FRAME_MS) {
                 refresh();

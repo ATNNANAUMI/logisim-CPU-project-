@@ -333,7 +333,18 @@ def check_vectors_and_startup_code():
     # a program for the OS has neither vectors nor start-up code
     exe = linker.link([assemble("        .global start\nstart: HALT", "m.asm")[0]],
                       base=linker.PROGRAM_BASE)
-    assert len(exe.rom) == 3 and exe.ram_used == 0
+    assert len(exe.rom) == 3 and exe.ram_used == 0 and exe.relocs == []
+    # its relocations: the words that hold an address (DATA, CALL), not the relative jumps;
+    # with exe_stack the stack follows its data
+    exe = linker.link([assemble("        .global start\nstart: DATA R1, v\n        CALL f\n"
+                                "        RJMP start\nf: RET\n        .ram\nv: .space 3", "m.asm")[0]],
+                      base=linker.PROGRAM_BASE, exe_stack=50)
+    words = {r: exe.rom[r] for r in exe.relocs}
+    v = linker.PROGRAM_BASE + len(exe.rom)
+    assert words[3] == v and exe.ram_used == 3 and exe.stack_words == 50, (exe.relocs, words)
+    assert all(linker.PROGRAM_BASE <= w < v + 3 for w in words.values()), words
+    addr = {sym.name: sym.address for sym in exe.symbols}
+    assert addr["_stack_base"] == v + 3 and addr["_end"] == v + 53
 
 
 def check_errors():

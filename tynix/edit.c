@@ -357,6 +357,10 @@ int main(int argc, char **argv)
     blank_screen();
     message = "^G keys";
     while (!quit) {
+        if (gfx_lost()) {                       /* back in front after another program drew: all again */
+            blank_screen();
+            stale = 1;
+        }
         if ((k = key_pressed()) == 0) {         /* no key: redraw if something changed and a frame has passed */
             if (stale && (unsigned int)clock() - last >= FRAME_MS) {
                 refresh();

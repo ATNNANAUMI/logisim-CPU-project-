@@ -14,15 +14,15 @@ FILE *stdin = &in_file;
 FILE *stdout = &out_file;
 FILE *stderr = &err_file;
 
-/* crt0 of a program for the OS, with the word the shell passed in the block:
-   put (or 0) is where the program's stdout goes (spawn.c, spawnv_to) */
+/* a program for Tynix whose stdout is a file (the shell's >): put is the
+   function that sends it there (compiler/libc/tynix/sys.c) */
 void _set_stdout(int (*put)(int, FILE *))
 {
     out_file.put = put;
 }
 
 /* unistd.h: 1 for the keyboard and the display; 0 for stdout once a shell's
-   `>` gave the program a file (spawnv_to), so a program can tell */
+   `>` gave the program a file (spawnv_to, spawn_to), so a program can tell */
 int isatty(int fd)
 {
     if (fd == 1)
