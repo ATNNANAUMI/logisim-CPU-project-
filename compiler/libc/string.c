@@ -209,17 +209,24 @@ char *strerror(int errnum)
     switch (errnum) {
     case 0: return "Success";
     case 2: return "No such file or directory";
+    case 3: return "No such process";
+    case 5: return "Input/output error";
     case 8: return "Exec format error";
     case 9: return "Bad file descriptor";
+    case 10: return "No child processes";
+    case 11: return "Resource temporarily unavailable";
+    case 12: return "Cannot allocate memory";
     case 16: return "Device or resource busy";
     case 17: return "File exists";
     case 19: return "No such device";
     case 20: return "Not a directory";
     case 21: return "Is a directory";
     case 22: return "Invalid argument";
+    case 23: return "Too many open files in system";
     case 24: return "Too many open files";
     case 28: return "No space left on device";
     case 36: return "File name too long";
+    case 38: return "Function not implemented";
     case 39: return "Directory not empty";
     case 33: return "Numerical argument out of domain";
     case 34: return "Numerical result out of range";

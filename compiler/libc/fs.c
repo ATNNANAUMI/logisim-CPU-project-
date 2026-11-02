@@ -25,7 +25,7 @@
 #define E_FLAGS 130
 #define SB_ROOT 6               /* superblock: the root's first block, length */
 #define SB_ROOT_LEN 7
-#define MAX_OPEN 8
+#define MAX_OPEN 32                 /* the Tynix kernel holds every program's */
 
 char _fs_cwd[_FS_PATH] = "/";
 
@@ -48,20 +48,13 @@ static void disk_write(unsigned addr, unsigned value)
     __builtin_out(DATA_PORT, value);
 }
 
-/* after a program run by spawnv() (with its own copy of this file) has
-   used the disk: what is remembered about it may be out of date */
+/* after a program with its own copy of this file (an old TEX1 program the
+   Tynix kernel ran) has used the disk: what is remembered may be out of date */
 void _fs_forget(void)
 {
     mounted = 0;
     hint = 0;
     cache_first = 0;
-}
-
-/* a program run by spawnv() starts in its caller's directory */
-void _fs_inherit(const char *cwd)
-{
-    if (cwd && strlen(cwd) < _FS_PATH)
-        strcpy(_fs_cwd, cwd);
 }
 
 int _fs_mount(void)

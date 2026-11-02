@@ -640,6 +640,25 @@ def test_translated_code_follows_changes():
             cpu.halted, cpu.iar = False, RAM
             cpu.run(1000) if fast else [cpu.step() for _ in range(1000)]
             assert cpu.halted and cpu.iar == RAM | 11 and cpu.regs[2] == 42, (fast, cpu.regs)
+        # a store drops only the blocks made from the word it changed: block A
+        # (words 0-2: DATA R1,5 ; HALT) and block B (10-12: ADD R1,#1 ; HALT)
+        cpu = CPU()
+        cpu.mem.ram[:13] = [0x0301, 5, 0x0F00] + [0] * 7 + [0x5010, 1, 0x0F00]
+        for start in (0, 10):
+            cpu.halted, cpu.iar = False, RAM | start
+            cpu.run(100)
+        a, b = RAM, RAM | 10
+        assert cpu.regs[0] == 6 and a in cpu._code and b in cpu._code
+        cpu._code_written(11)                       # a store of the value it had: both stay
+        assert a in cpu._code and b in cpu._code
+        cpu.mem.ram[11] = 7                         # ADD R1,#7 now
+        cpu._code_written(11)
+        assert a in cpu._code and b not in cpu._code and not cpu._ram_code[11]
+        cpu.halted, cpu.iar = False, RAM
+        cpu.run(100)                                # block A, kept: R1 = 5 again
+        cpu.halted, cpu.iar = False, RAM | 10
+        cpu.run(100)
+        assert cpu.regs[0] == 12, cpu.regs[0]       # the new word ran
     finally:
         translate.HOT = saved
 

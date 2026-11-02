@@ -1,18 +1,22 @@
-/* shell.c - the OS (Tynix): a command shell in ROM for the files and programs on
- * the disk (simulator only)
+/* shell.c - Tynix's shell: /bin/sh, the first program the kernel starts
+ * (tynix/kernel.c; simulator only)
  *
- *   python tynix/make_disk.py             (once: tynix/disk.img, the examples in /bin)
- *   python compiler/src/cc build tynix/shell.c
- *   python cpu_sim/src/main.py compiler/ROM/shell.rom --disk tynix/disk.img
- *   (or: python compiler/src/cc run tynix/shell.c --disk tynix/disk.img
+ *   python tynix/make_disk.py             (tynix/disk.img: this shell built --exe
+ *                                          as /bin/sh, the examples in /bin)
+ *   python compiler/src/cc build tynix/kernel.c
+ *   python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img
+ *   (or: python compiler/src/cc run tynix/kernel.c --disk tynix/disk.img
  *    --keys $'ls /bin\nprimes\nhalt\n')
  *
- * It checks the disk, then shows a prompt with the current directory. The
- * built-in commands (help lists them) work on the files: ls cd pwd cat echo
- * rm mv cp mkdir rmdir df clear halt. Any other name is a program: /bin/NAME,
- * or a path when the name has a '/' (./prog, /games/snake); spawnv() loads
- * it, runs it in the current directory and comes back here when it ends.
- * A program that can't be loaded gives a message and the shell goes on.
+ * A prompt with the current directory. The built-in commands (help lists
+ * them) work on the files: ls cd pwd cat echo rm mv cp mkdir rmdir df clear
+ * halt, and on the programs that run: jobs fg kill wait. Any other name is a
+ * program: /bin/NAME, or a path when the name has a '/' (./prog,
+ * /games/snake), which the kernel loads next to the others and runs in the
+ * current directory; the shell waits for it, or with `&` at the end of the
+ * line, doesn't (it runs in the background: it can print, but it waits for
+ * the keyboard and the screen until `fg` brings it forward). A program that
+ * can't be loaded gives a message and the shell goes on.
  *
  * Words are split at spaces; "..." or '...' keep spaces inside one word.
  * Output can go to a file: `echo hi > a.txt`, `ls >> list.txt`, and a
@@ -21,11 +25,9 @@
  * file copies the keyboard up to Ctrl-D, so `cat > notes.txt` writes a
  * file. Ctrl-D at the prompt, or `halt`, stops the CPU.
  *
- * A program can't start another (spawnv() would load the child over it). One
- * that wants to leave and come back, like visual_file_manager, writes command
- * lines into /.next and ends with exit status 254 (EXIT_NEXT): the shell reads
- * and deletes the file and runs each line as if typed, once it is back at its
- * prompt loop (a loop, not a nested call, so the stack does not grow).
+ * The NMI (Esc) belongs to the kernel: on the program in front it asks
+ * kill / continue / background / tasks; "background" gives the keyboard
+ * back to this shell, which prints the job's number.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,21 +43,20 @@
 #define LINE_MAX 256
 #define MAX_ARGS 32
 #define WIDTH 64                /* the text display's columns (the circuit's TTY) */
-#define EXIT_KILLED 130         /* the NMI's kill: _spawn_kill's status */
-#define EXIT_NEXT 254           /* a program that ends with this status asks the shell to run */
-#define NEXT_FILE "/.next"      /* the command lines in this file (visual_file_manager does) */
-#define NEXT_MAX 1024
+#define MAX_JOBS 16
 
 static char line[LINE_MAX];
 static char *args[MAX_ARGS + 1];
 static char path[2 * LINE_MAX];
 static char cwd[512];
 static FILE *out;               /* where a built-in writes: stdout, or a file after > */
-static int running;             /* a program is running: the NMI can kill it */
-static char *running_name;
 static char *redirect;          /* the file after > or >>, or 0 */
 static int append;              /* >> */
-static char *next_text;         /* the lines a program left in NEXT_FILE, to run when it is back */
+static int background;          /* the line ended with & */
+static struct job {             /* the programs this shell left running */
+    int pid;
+    char name[32];
+} jobs[MAX_JOBS];
 
 /* "cmd: what: No such file or directory"; returns the command's status, 1 */
 static int fail(const char *cmd, const char *what)
@@ -307,7 +308,135 @@ static int cmd_clear(int argc, char **argv)
 static int cmd_halt(int argc, char **argv)
 {
     printf("CPU halted\n");
-    exit(0);
+    halt_os();                          /* the kernel closes every file */
+    return 0;
+}
+
+/* ---------------------------------------------------------------- jobs */
+
+static struct job *job_of(int pid)
+{
+    int i;
+    for (i = 0; i < MAX_JOBS; i++)
+        if (jobs[i].pid == pid)
+            return &jobs[i];
+    return 0;
+}
+
+static void add_job(int pid, const char *name)
+{
+    struct job *j = job_of(0);
+    if (j) {
+        j->pid = pid;
+        strncpy(j->name, name, sizeof j->name - 1);
+        j->name[sizeof j->name - 1] = 0;
+    }
+    printf("[%d] %s &\n", pid, name);
+}
+
+/* how a program ended, when it is worth saying (130: killed, 139: past its
+   stack, which the kernel has already said) */
+static void report(const char *name, int status)
+{
+    if (status)
+        printf("[%s: exit status %d]\n", name, status);
+}
+
+/* the background jobs that ended since the last prompt */
+static void reap(void)
+{
+    int pid, status;
+    struct job *j;
+    while ((pid = waitpid(-1, &status, WAIT_NOHANG)) > 0)
+        if ((j = job_of(pid))) {
+            printf("[%d] done: %s, exit status %d\n", pid, j->name, status);
+            j->pid = 0;
+        }
+}
+
+/* wait for a program in front; one the NMI menu sends back becomes a job */
+static int wait_for(int pid, const char *name)
+{
+    int status;
+    struct job *j;
+    if (waitpid(pid, &status, 0) < 0)
+        return 1;
+    if (status == SPAWN_BACKGROUND) {
+        if (!job_of(pid))
+            add_job(pid, name);
+        else
+            printf("[%d] %s &\n", pid, name);
+        return 0;
+    }
+    if ((j = job_of(pid)))
+        j->pid = 0;
+    report(name, status);
+    return status;
+}
+
+static int number(const char *s, int *n)
+{
+    char *end;
+    *n = strtol(s, &end, 10);
+    return *s && !*end;
+}
+
+static int cmd_jobs(int argc, char **argv)
+{
+    static const char *const states[] = {"", "running", "waiting", "ended"};
+    struct task_info t[16];
+    int n = tasks(t, 16), i;
+    if (argc > 1)
+        return -1;
+    fprintf(out, "  pid  name          state    RAM\n");
+    for (i = 0; i < n; i++)
+        fprintf(out, "  %3d  %-12s  %-7s  %dK at 0x%x%s\n", t[i].pid, t[i].name,
+                states[t[i].state], t[i].words / 1024, t[i].base, t[i].fg ? "  (front)" : "");
+    return 0;
+}
+
+static int cmd_fg(int argc, char **argv)
+{
+    int pid;
+    struct job *j;
+    if (argc != 2 || !number(argv[1], &pid))
+        return -1;
+    if (set_foreground(pid))
+        return fail(argv[0], argv[1]);
+    j = job_of(pid);
+    return wait_for(pid, j ? j->name : argv[1]);
+}
+
+static int cmd_kill(int argc, char **argv)
+{
+    int pid, i, status = 0;
+    if (argc < 2)
+        return -1;
+    for (i = 1; i < argc; i++)
+        if (!number(argv[i], &pid) || kill(pid, 0))
+            status = fail(argv[0], argv[i]);
+    return status;
+}
+
+static int cmd_wait(int argc, char **argv)
+{
+    int pid, status;
+    struct job *j;
+    if (argc > 2 || (argc == 2 && !number(argv[1], &pid)))
+        return -1;
+    if (argc == 1) {                    /* every job */
+        while ((pid = waitpid(-1, &status, 0)) > 0)
+            if ((j = job_of(pid))) {
+                printf("[%d] done: %s, exit status %d\n", pid, j->name, status);
+                j->pid = 0;
+            }
+        return 0;
+    }
+    if (waitpid(pid, &status, 0) < 0)
+        return fail(argv[0], argv[1]);
+    if ((j = job_of(pid)))
+        j->pid = 0;
+    return status;
 }
 
 static const struct command {
@@ -328,6 +457,10 @@ static const struct command {
     {"df", "df", "free space on the disk", cmd_df},
     {"clear", "clear", "clear the screens", cmd_clear},
     {"halt", "halt", "stop the CPU (Ctrl-D too)", cmd_halt},
+    {"jobs", "jobs", "the programs running, their RAM", cmd_jobs},
+    {"fg", "fg pid", "bring a program to the front, wait", cmd_fg},
+    {"kill", "kill pid...", "end programs (status 130)", cmd_kill},
+    {"wait", "wait [pid]", "wait for a program (none: all)", cmd_wait},
 };
 
 #define N_COMMANDS (int)(sizeof commands / sizeof commands[0])
@@ -356,63 +489,9 @@ static int cmd_help(int argc, char **argv)
 
 /* ---------------------------------------------------------------- programs */
 
-/* a program cannot start another (spawnv() would load it over itself), so
-   one that wants to leave and come back writes command lines into NEXT_FILE
-   and ends with EXIT_NEXT: the shell runs the lines, the last one usually
-   starting the program again. Returns the file's text (deleted from the
-   disk, malloc'd), or 0 if there is none. */
-static char *take_next(void)
-{
-    FILE *f = fopen(NEXT_FILE, "r");
-    char *text;
-    int c, n = 0;
-    if (f == 0)
-        return 0;
-    if ((text = malloc(NEXT_MAX + 1)) == 0) {
-        fclose(f);
-        return 0;
-    }
-    while (n < NEXT_MAX && (c = fgetc(f)) != EOF)
-        text[n++] = c;
-    text[n] = 0;
-    fclose(f);
-    remove(NEXT_FILE);
-    return text;
-}
-
-/* The NMI (the Stop button, Esc in the window) while a program runs: ask
-   what to do. 1 ends the program: the handler returns the address of
-   _spawn_kill instead of the program's, so RTI restores the interrupt state
-   and then spawnv() comes back with status 130. With no program running
-   there is nothing to stop and it is ignored. Runs with interrupts off. */
-static unsigned on_nmi(void)
-{
-    int c;
-    if (!running)
-        return 0;
-    printf("\n[%s: 1 kill, 2 continue] ", running_name);
-    do
-        c = wait_key();
-    while (c != '1' && c != '2');
-    printf("%c\n", c);
-    if (c == '1') {
-        running = 0;                    /* an NMI while it unwinds has nothing to ask about */
-        return (unsigned)_spawn_kill;
-    }
-    return 0;
-}
-
-/* a program that was killed can have left blocks nothing points to */
-static void reclaim(const char *when)
-{
-    int n = fs_reclaim();
-    if (n > 0)
-        printf("[%s: freed %d lost block%s]\n", when, n, n == 1 ? "" : "s");
-}
-
 static int run_program(int argc, char **argv)
 {
-    int status;
+    int pid;
     FILE *to = 0;
     if (strchr(argv[0], '/'))
         strcpy(path, argv[0]);
@@ -420,27 +499,21 @@ static int run_program(int argc, char **argv)
         sprintf(path, "/bin/%s", argv[0]);
     if (redirect && (to = fopen(redirect, append ? "a" : "w")) == 0)
         return fail(argv[0], redirect);
-    errno = 0;                          /* the program's own errno is another variable */
-    running_name = argv[0];
-    running = 1;
-    status = spawnv_to(path, argv, to);
-    running = 0;
-    if (status == EXIT_KILLED)
-        reclaim("killed");
+    pid = spawn_to(path, argv, to, background ? 0 : SPAWN_FG);
     if (to)
-        fclose(to);                     /* after the program: spawnv forgot what the disk held */
-    if (status == -1 && errno) {
+        fclose(to);                     /* the program has its own hold on the file */
+    if (pid < 0) {
         if (errno == ENOENT && !strchr(argv[0], '/'))
             printf("%s: no such command (help lists them)\n", argv[0]);
         else
             printf("%s: %s\n", path, strerror(errno));
         return 127;
     }
-    if (status == EXIT_NEXT && (next_text = take_next()))
-        return 0;                       /* the lines run when this one is done: no loop in the stack */
-    if (status)
-        printf("[%s: exit status %d]\n", argv[0], status);
-    return status;
+    if (background) {
+        add_job(pid, argv[0]);
+        return 0;
+    }
+    return wait_for(pid, argv[0]);
 }
 
 /* ---------------------------------------------------------------- one line */
@@ -480,6 +553,7 @@ static int split(char *s)
     int n = 0;
     char *w;
     redirect = 0;
+    background = 0;
     for (;;) {
         while (*s == ' ' || *s == '\t')
             s++;
@@ -492,6 +566,11 @@ static int split(char *s)
                     printf("> needs a file name\n");
                 return -1;
             }
+            continue;
+        }
+        if (*s == '&' && (s[1] == 0 || s[1] == '\n' || s[1] == ' ')) {
+            background = 1;             /* the last word: run it in the background */
+            s++;
             continue;
         }
         w = word(&s);
@@ -521,6 +600,8 @@ static void run_line(char *s)
         run_program(argc, args);
         return;
     }
+    if (background)
+        printf("%s: a built-in command can't run in the background\n", args[0]);
     out = stdout;
     if (redirect && (out = fopen(redirect, append ? "a" : "w")) == 0) {
         fail(args[0], redirect);
@@ -536,37 +617,14 @@ static void run_line(char *s)
 int main(void)
 {
     printf("Tynix shell: help lists the commands\n");
-    if (!is_dir("/")) {
-        if (errno == ENODEV)
-            printf("no disk, or not formatted: start the simulator with --disk FILE\n"
-                   "(python tynix/make_disk.py makes one)\n");
-        else
-            printf("disk: %s\n", strerror(errno));
-    }
-    set_interrupt_handler(INT_NMI, on_nmi);
-    interrupts_on();
-    if (is_dir("/"))
-        reclaim("boot");
     for (;;) {
+        reap();
         printf("%s> ", getcwd(cwd, sizeof cwd));
         if (fgets(line, sizeof line, stdin) == 0)
             break;                      /* Ctrl-D */
         run_line(line);
-        while (next_text) {
-            char *text = next_text, *nl;
-            next_text = 0;
-            for (nl = text; *nl; ) {
-                char *start = nl;
-                while (*nl && *nl != '\n')
-                    nl++;
-                if (*nl)
-                    *nl++ = 0;
-                if (strlen(start) < LINE_MAX)
-                    run_line(start);
-            }
-            free(text);
-        }
     }
     printf("\nCPU halted\n");
+    halt_os();
     return 0;
 }

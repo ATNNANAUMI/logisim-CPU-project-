@@ -30,7 +30,7 @@ from fs import FileSystem, FsError
 
 MB = 1 << 20
 
-EXE_MAGIC = b"TEX1"         # a program for the OS (compiler/libc/spawn.c)
+EXE_MAGICS = (b"TEX2", b"TEX1")   # a program for the OS (compiler/libc/include/sys/tynix.h)
 
 
 def size_text(node):
@@ -68,7 +68,7 @@ def cmd_put(disk, args):
     target = disk.lookup(path)
     if target is not None and target.is_dir:
         path = path.rstrip("/") + "/" + Path(args.host).name
-    binary = args.binary or data[:4] == EXE_MAGIC
+    binary = args.binary or data[:4] in EXE_MAGICS
     node = disk.put(path, data, binary=binary)
     print(f"{path}: {size_text(node)}")
 

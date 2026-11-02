@@ -50,6 +50,12 @@ struct _FILE {
     unsigned word;
     int word_dirty;
     int entry_dirty;     /* first or length changed since the entry was saved */
+    /* a program for Tynix (tynix/fs.c): the file is the kernel's number fd,
+       words go to and from it through buf */
+    int fd;
+    unsigned *buf;
+    int buf_len, buf_pos;   /* words in buf, the next one to read */
+    int buf_out;            /* buf holds words to write (else words read) */
 };
 
 /* the filesystem (fs.c, TFS1: the format is in compiler/src/disk/fs.py) */
@@ -77,8 +83,7 @@ void _fs_save(_Node *node);
 void _fs_unlink(_Node *node);   /* free its blocks and its entry */
 int _fs_empty(_Node *dir);
 int _fs_normalize(const char *path, char *out);
-void _fs_forget(void);          /* spawn.c: after a program has used the disk */
-void _fs_inherit(const char *cwd);      /* crt0 of a program for the OS */
+void _fs_forget(void);          /* tynix/kernel.c: after a TEX1 program has used the disk */
 extern char _fs_cwd[_FS_PATH];
 
 #endif

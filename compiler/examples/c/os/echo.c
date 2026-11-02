@@ -1,11 +1,11 @@
-/* echo.c - a program for the OS (loader.c runs it from the disk): prints
- * its arguments on one line, like Unix echo; with none, says how it was
- * called
+/* echo.c - a program for the OS (Tynix runs it from /bin; make_disk.py puts
+ * it there): prints its arguments on one line, like Unix echo; with none,
+ * says how it was called
  *
  *   python compiler/src/cc build compiler/examples/c/os/echo.c --exe
- *   python compiler/src/disk put test.img compiler/ROM/echo.exe /bin/echo
+ *   python compiler/src/disk put tynix/disk.img compiler/ROM/echo.exe /bin/echo
  *
- * then, in loader.c: echo hello world  ->  hello world
+ * then, in the shell (or loader.c): echo hello world  ->  hello world
  */
 #include <stdio.h>
 

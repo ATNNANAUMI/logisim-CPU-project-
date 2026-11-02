@@ -6,7 +6,7 @@
 #include <errno.h>
 #include "local.h"
 
-#define MAX_DIRS 4
+#define MAX_DIRS 16                 /* the Tynix kernel holds every program's */
 
 struct _DIR {
     _Node node;

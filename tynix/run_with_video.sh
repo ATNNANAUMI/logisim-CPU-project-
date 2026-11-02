@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_with_video.sh - the OS shell in the simulator window, with video_player in /bin
+# run_with_video.sh - Tynix (the kernel and its shell) in the simulator window, with video_player in /bin
 #
 #   tynix/run_with_video.sh                 plays what video_player.c includes by default (VIDEO there)
 #   tynix/run_with_video.sh clip.h          plays that one (made by python compiler/src/img/video.py clip.mp4),
@@ -14,7 +14,7 @@
 # Even so a few frames at the start come late (pypy's warm-up), and more in
 # the window, which pauses the simulator between its 50 ms slices.
 #
-# Builds the shell and tynix/disk.img (what is already on the disk stays; delete
+# Builds the kernel and tynix/disk.img (what is already on the disk stays; delete
 # the file for a fresh one), builds video_player as a program for the OS and
 # puts it in /bin, then starts the simulator. In the window: run, speed "max",
 # the "RGB screen" tab, and type /bin/video_player in the shell.
@@ -30,9 +30,9 @@ if [ $# -ge 1 ]; then
     CLIP_ARGS=(-I "$(dirname "$clip")" -D "VIDEO=\"$clip\"")
 fi
 
-"$PY" compiler/src/cc build tynix/shell.c
+"$PY" compiler/src/cc build tynix/kernel.c
 "$PY" tynix/make_disk.py "$DISK"
 "$PY" compiler/src/cc build compiler/examples/c/graphics/video_player.c --exe \
     -o compiler/ROM/video_player.exe "${CLIP_ARGS[@]}"
 "$PY" compiler/src/disk put "$DISK" compiler/ROM/video_player.exe /bin/video_player --binary
-eval "\"$PY\" cpu_sim/src/main.py compiler/ROM/shell.rom --disk \"$DISK\" ${SIM_ARGS:-}"
+eval "\"$PY\" cpu_sim/src/main.py compiler/ROM/kernel.rom --disk \"$DISK\" ${SIM_ARGS:-}"

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""A disk for the OS (tynix/shell.c): python tynix/make_disk.py [IMG] [--new] [--size MB]
+"""A disk for the OS (tynix/kernel.c): python tynix/make_disk.py [IMG] [--new] [--size MB]
 
 Makes the image (default tynix/disk.img, git-ignored like every *.img) when it
-is missing or --new is given: TFS1, 64 MB, sparse. Then it builds every
+is missing or --new is given: TFS1, 64 MB, sparse. Then it builds the shell
+(tynix/shell.c) as /bin/sh, which the kernel starts at boot, and every
 program in PROGRAMS with `cc build --exe` and puts it in /bin under its
 own name, replacing the old copy, and writes /readme.txt. Other files on
 the disk are kept, so what was written from the OS survives a rebuild. From the
@@ -11,8 +12,8 @@ Downloads, Music, Pictures, Videos, and Documents/welcome.txt) and /tmp,
 where visual_file_manager starts; make(..., home=False) leaves them out.
 
     python tynix/make_disk.py
-    python cpu_sim/src/main.py compiler/ROM/shell.rom --disk tynix/disk.img
-    (after: python compiler/src/cc build tynix/shell.c)
+    python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img
+    (after: python compiler/src/cc build tynix/kernel.c)
 """
 import argparse
 import sys
@@ -34,9 +35,13 @@ PROGRAMS = ["echo", "hello", "primes", "structs", "guess", "gfx_demo", "image_de
             "snake", "game_of_life", "grapher", "qr", "disk_notes", "ed", "edit",
             "more", "grep", "find", "tree", "du", "diff", "hexdump", "calc",
             "visual_file_manager"]
+SOURCES = {"sh": "shell"}               # /bin/sh is tynix/shell.c
+REGIONS = {"diff": 0x140000}            # RAM a program asks for (cc build --exe --region):
+                                        # diff's table of 1001 x 1001 words does not fit in 1M
 
 README = """\
-This disk was made by tynix/make_disk.py for the shell in tynix/shell.c.
+This disk was made by tynix/make_disk.py for Tynix (tynix/kernel.c, which
+starts the shell, /bin/sh from tynix/shell.c).
 
   help             the commands, and the programs in /bin
   ls -l /bin       the programs (cc build --exe), sizes in words
@@ -55,6 +60,10 @@ This disk was made by tynix/make_disk.py for the shell in tynix/shell.c.
   diff a.txt b.txt   what changed between two text files
   hexdump /readme.txt   the values in hex
   calc 0x1100000 + 256   integer calculator (calc alone: a line at a time)
+  primes > p.txt &   runs in the background; jobs lists what runs,
+                   fg N brings one forward, kill N ends it
+  Esc              (the NMI) on the program in front: kill, continue,
+                   background, or the list of tasks
 
 On the RGB screen (the simulator window's tab): snake and
 game_of_life (q quits), gfx_demo, image_demo, grapher and qr
@@ -94,15 +103,15 @@ def make(image=DEFAULT_IMAGE, programs=PROGRAMS, new=False, size_mb=64, log=prin
     with fs.FileSystem(str(image)) as disk:
         if disk.lookup("/bin") is None:
             disk.mkdir("/bin")
-        for name in programs:
-            source = OS_DIR / f"{name}.c"           # the OS's own programs
+        for name in ["sh"] + [p for p in programs if p != "sh"]:
+            source = OS_DIR / f"{SOURCES.get(name, name)}.c"   # the OS's own programs
             if not source.exists():
                 found = sorted(EXAMPLES.rglob(f"{name}.c"))
                 if len(found) != 1:
                     raise fs.FsError(f"{name}.c: found {len(found)} times under compiler/examples/c")
                 source = found[0]
             program, _ = driver.build([str(source)], exe=True)
-            disk.put(f"/bin/{name}", driver.exe_bytes(program), binary=True)
+            disk.put(f"/bin/{name}", driver.exe_bytes(program, REGIONS.get(name, 0)), binary=True)
             sizes[name] = len(program.rom)
             log(f"/bin/{name}: {len(program.rom)} words")
         disk.put("/readme.txt", README.encode())

@@ -1,20 +1,19 @@
-/* loader.c - runs programs from the disk (simulator only): type a program's
- * name and its arguments, it is loaded from /bin and run with spawnv(), and
- * its exit status is shown; then the next one. A first step towards the
- * OS's shell.
+/* loader.c - runs programs from the disk: type a program's name and its
+ * arguments, it is loaded from /bin and run with spawnv(), and its exit
+ * status is shown; then the next one. It was the first step towards the
+ * OS's shell; since Phase 7 spawnv() exists only in programs that Tynix runs
+ * (the kernel loads the child in its own RAM), so it is one of those itself:
  *
- *   python compiler/src/disk format test.img        (once: an empty disk)
- *   python compiler/src/disk mkdir test.img /bin
- *   python compiler/src/cc build compiler/examples/c/os/echo.c --exe
- *   python compiler/src/disk put test.img compiler/ROM/echo.exe /bin/echo
- *   (any C program works: cc build compiler/examples/c/basics/primes.c --exe, ...)
- *   python compiler/src/cc build compiler/examples/c/os/loader.c
- *   python cpu_sim/src/main.py compiler/ROM/loader.rom --disk test.img
- *   (or: python compiler/src/cc run compiler/examples/c/os/loader.c
- *    --disk test.img --keys $'echo hello world\n\x04')
+ *   python tynix/make_disk.py                       (once: tynix/disk.img)
+ *   python compiler/src/cc build compiler/examples/c/os/loader.c --exe
+ *   python compiler/src/disk put tynix/disk.img compiler/ROM/loader.exe /bin/loader
+ *   python compiler/src/cc build tynix/kernel.c
+ *   python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img
+ *   (then type loader in the shell; or: python compiler/src/cc run tynix/kernel.c
+ *    --disk tynix/disk.img --keys $'loader\necho hello world\n\x04halt\n')
  *
  * A name with a '/' is a path (/bin/echo, ../x); without, it is looked up
- * in /bin. An empty line lists /bin; Ctrl-D stops.
+ * in /bin. An empty line lists /bin; Ctrl-D stops (back to the shell).
  */
 #include <stdio.h>
 #include <string.h>

@@ -26,8 +26,9 @@ display at `0x5C`, a hex number display at `0x3C` and a keyboard at `0xF0`
 millisecond timer at `0x7C`, wiring planned, which C's `clock()` reads,
 and, in the simulator only, a disk kept in a file at `0x8C`/`0x8D`, with a
 filesystem that C's `fopen` reads and writes and `compiler/src/disk` edits
-from the PC, and programs that C's `spawnv` loads from it into RAM and runs;
-`tynix/shell.c` is a small OS for it: a command shell in ROM).
+from the PC; Tynix, `tynix/`, is a small OS for it: a preemptive multitasking
+kernel in ROM that loads several programs from the disk into RAM at once,
+with a Unix-like shell, `/bin/sh`).
 Every ALU result goes to **R0**.
 
 ## Requirements
@@ -74,7 +75,7 @@ C programs go through the C compiler, which links the C library on its own:
 ```
 python compiler/src/cc run compiler/examples/c/basics/hello.c          # build + run in the simulator, print the display
 python compiler/src/cc build compiler/examples/c/basics/primes.c       # -> compiler/ROM/primes.rom (+ primes.asm to read)
-python compiler/src/cc build compiler/examples/c/os/echo.c --exe   # -> echo.exe, a program for the disk (see c/os/loader.c)
+python compiler/src/cc build compiler/examples/c/os/echo.c --exe   # -> echo.exe, a program for Tynix's /bin
 python run.py build compiler/examples/c/games/guess.c                 # build, then open the simulator window
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/primes.rom
 ```
@@ -90,13 +91,13 @@ pypy3 compiler/src/cc run compiler/examples/c/graphics/video_player.c -I . -D 'V
 python compiler/src/cc run compiler/examples/c/graphics/image_demo.c --screen out.png
 ```
 
-The OS, Tynix (simulator only): a shell in ROM that runs the programs on the disk:
+The OS, Tynix (simulator only): a kernel in ROM that runs the programs on the disk, several at once:
 
 ```
-python tynix/make_disk.py                       # tynix/disk.img: the C examples in /bin, built --exe
-python compiler/src/cc build tynix/shell.c
-python cpu_sim/src/main.py compiler/ROM/shell.rom --disk tynix/disk.img   # type help, ls /bin, primes, snake ...
-tynix/run_with_video.sh [clip.h]                # the shell with video_player in /bin, in the window
+python tynix/make_disk.py                       # tynix/disk.img: /bin/sh and the C examples in /bin, built --exe
+python compiler/src/cc build tynix/kernel.c
+python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img   # type help, ls /bin, primes &, jobs, snake ...
+tynix/run_with_video.sh [clip.h]                # the OS with video_player in /bin, in the window
 ```
 
 ## A taste of the assembly
@@ -145,7 +146,7 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 | `compiler/src/disk/` | disk tool: makes and edits disk images (TFS1 filesystem) for the simulator's `--disk` |
 | `compiler/src/img/` | image converter: PNG -> compressed picture for `gfx_image()` (`gfx.h`); `video.py`: a video -> frames for `video_player.c` |
 | `compiler/libc/` | the C library: headers (`include/`), C and assembly sources |
-| `tynix/` | the OS, Tynix (simulator only): `shell.c`, a command shell in ROM that runs programs from the disk; `ed.c`, a line editor; `edit.c`, a full-screen editor on the RGB screen; `more`, `grep`, `find`, `tree`, `du`, `diff`, `hexdump`, `calc` (one `.c` each) and `visual_file_manager.c`, a yazi-like file manager on the RGB screen; `make_disk.py`, a disk with these and the C examples in `/bin` |
+| `tynix/` | the OS, Tynix (simulator only): `kernel.c`, the ROM (programs side by side, the filesystem, system calls); `shell.c`, the shell (`/bin/sh`); `ed.c`, a line editor; `edit.c`, a full-screen editor on the RGB screen; `more`, `grep`, `find`, `tree`, `du`, `diff`, `hexdump`, `calc` (one `.c` each) and `visual_file_manager.c`, a yazi-like file manager on the RGB screen; `make_disk.py`, a disk with these and the C examples in `/bin` |
 | `compiler/examples/` | example programs: `asm/` (programs, the standard library `stdlib/stdlib.asm`, `tests/` circuit diagnostics) and `c/` in folders by kind (`basics/`, `games/`, `graphics/`, `tests/`, `os/`) |
 | `compiler/ROM/` | build output for ROM images (ignored by git) |
 | `compiler/assembly_syntax.md` | full assembly language reference |

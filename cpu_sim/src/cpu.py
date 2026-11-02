@@ -57,6 +57,7 @@ class CPU:
     _code_check: bool = field(default=False, init=False, repr=False, compare=False)
     _code_ram: object = field(default=None, init=False, repr=False, compare=False)
     _ram_code: object = field(default=None, init=False, repr=False, compare=False)
+    _word_blocks: dict = field(default_factory=dict, init=False, repr=False, compare=False)
     _heat: dict = field(default_factory=dict, init=False, repr=False, compare=False)
     _trees: list = field(default_factory=lambda: [None, None], init=False, repr=False,
                          compare=False)
@@ -96,6 +97,7 @@ class CPU:
         self._redispatch = [translate.REDISPATCH] * 2
         self._code_rom = self._code_ram = None
         self._ram_code = None       # bytearray: 1 for each RAM word a block was made from
+        self._word_blocks = {}      # RAM word -> the addresses of the blocks made from it
         self._code_check = False
 
     def _check_code(self) -> None:
@@ -118,6 +120,7 @@ class CPU:
                 for word in translate.words(self._code[address][2]):
                     marks[word & config.BANK_MASK] = 0
             del self._code[address]
+        self._word_blocks.clear()
         self._trees[1] = None
         self._outside[1], self._redispatch[1] = 0, translate.REDISPATCH
 
@@ -132,9 +135,29 @@ class CPU:
 
     def _code_written(self, offset: int) -> None:
         """A store went to RAM word offset, which translated code was made
-        from: that code is wrong now (the store's instruction then leaves its
-        block, and running goes on from the new words)."""
-        self._drop_ram_code()
+        from. The blocks made from that word that no longer match memory are
+        dropped (a program loaded again over the same words, or a word written
+        with the value it had, keeps its code); the store's instruction then
+        leaves its block, and running goes on from the new words."""
+        rom, ram, marks = self.mem.rom, self.mem.ram, self._ram_code
+        dropped = False
+        for address in list(self._word_blocks.get(offset, ())):
+            block = self._code[address]
+            if translate.still_there(rom, ram, block[2]):
+                continue
+            dropped = True
+            del self._code[address]
+            for word in translate.words(block[2]):
+                word &= config.BANK_MASK
+                users = self._word_blocks.get(word)
+                if users is not None:
+                    users.discard(address)
+                    if not users:
+                        del self._word_blocks[word]
+                        marks[word] = 0
+        if dropped:
+            self._trees[1] = None
+            self._outside[1], self._redispatch[1] = 0, translate.REDISPATCH
 
     def _stored(self, addr: int) -> None:
         """step()'s writes: the same check as translated code's."""
@@ -404,7 +427,9 @@ class CPU:
                         if self._ram_code is None:
                             self._guard_stores()
                         for word in translate.words(block[2]):
-                            self._ram_code[word & config.BANK_MASK] = 1
+                            word &= config.BANK_MASK
+                            self._ram_code[word] = 1
+                            self._word_blocks.setdefault(word, set()).add(iar)
                 function, length, _ = block
                 if count + length > max_steps:      # the last few: one at a time
                     self.iar, self.flags, self.esp, self.ebp = iar, flags, esp, ebp

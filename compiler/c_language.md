@@ -25,7 +25,7 @@ Run from the project root:
 python compiler/src/cc run prog.c                  # build, then run in the simulator (no window)
 python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map]
 python compiler/src/cc compile prog.c [-o prog.asm]   # C to assembly only
-python compiler/src/cc build prog.c --exe          # a program for the OS: prog.exe, for the disk
+python compiler/src/cc build prog.c --exe          # a program for the OS (Tynix): prog.exe, for the disk
 python run.py build prog.c                         # build, then open the simulator window
 ```
 
@@ -49,8 +49,9 @@ python run.py build prog.c                         # build, then open the simula
   assembler's `--lib`).
 * `build --exe` makes a **program for the OS**: `compiler/ROM/prog.exe`, to
   copy to the disk (`python compiler/src/disk put disk.img
-  compiler/ROM/prog.exe /bin/prog`) and run with `spawnv()` (section 4).
-  Any C program works; it gets `argc`/`argv` from its caller.
+  compiler/ROM/prog.exe /bin/prog`) and run from Tynix's shell or with
+  `spawnv()` (section 4). Any C program works; it gets `argc`/`argv` from its
+  caller. `--region N` asks for N words of RAM instead of the default 1M.
 * On the circuit: `python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom`.
   The circuit runs about 160 instructions a second, so keep circuit runs
   small: `hello.c` takes 1 400 instructions, a `printf` with a float a few
@@ -150,7 +151,8 @@ RAM  0x1000000 global and static variables
      _stack_base the stack (16K words), grows upward; ESP and EBP are set by
                the linker's start-up code, the vectors are in ROM 0-9
      _end      the heap (malloc) up to 0x1FFFFFF (up to 0x10FFFFF in a
-               program that calls spawnv: programs are loaded from 0x1100000)
+               program that defines _loads_programs, the Tynix kernel:
+               programs are loaded from 0x1100000)
 ```
 
 * `start` (in the generated start-up code, crt0) calls each file's
@@ -164,15 +166,18 @@ RAM  0x1000000 global and static variables
   recursion can run past the 16K words of stack: the next `PUSH`/`CALL`
   takes the FAULT vector (the stack limit), which halts the CPU unless
   the program installed a handler (`set_interrupt_handler(INT_FAULT, ...)`).
-* **A program for the OS** (`build --exe`) lives all in RAM: its code,
-  constants and variables from `0x1100000`, its heap after them up to
-  `0x1FFFFFF`. `spawnv(path, argv)` loads it from the disk and calls
-  `main(argc, argv)`; `exit()` or the end of `main` goes back to the caller
-  with the status (`spawnv`'s result) instead of halting. Its variables
-  start fresh on every run, it starts in the caller's current directory,
-  and it shares the stack with the caller (above the caller's frame). It
-  has its own copy of the library: open files, `errno`, the heap and
-  `atexit` are its own. Nothing protects the caller's memory from it.
+* **A program for the OS** (`build --exe`) lives all in RAM, in a region
+  Tynix's kernel gives it (1M words unless built with `--region`): its code,
+  constants and variables, then its own 16K-word stack, then its heap up to
+  where the kernel put its `argv` at the top of the region. It is linked for
+  `0x1100000` and moved by the kernel (TEX2 keeps the list of words to
+  relocate). The kernel calls `main(argc, argv)`; `exit()` or the end of
+  `main` ends it (a system call) and the status goes to whoever waits for
+  it. Its variables start fresh on every run, it starts in its parent's
+  current directory, and it runs side by side with other programs (the timer
+  switches between them). It has its own copy of the library: `errno`, the
+  heap and `atexit` are its own; files, directories and the keyboard are the
+  kernel's (system calls). Nothing protects other programs' memory from it.
 
 
 ## 5. Calling convention and mixing with assembly
@@ -242,8 +247,13 @@ power function is `ipow`, so it doesn't clash with C's `pow`.)
 | `set_stack_limit(address)`, `stack_pointer()` | the stack limit (a `PUSH`/`CALL` at or past that RAM address takes the `INT_FAULT` handler, which halts the CPU if there is none) and `ESP` as a RAM address |
 
 Interrupts are simulator only so far (TECHNICAL 1.8; the circuit needs 2.6).
-A program for the OS (`--exe`) can't install handlers: the OS owns them
-(`tynix/shell.c` handles the NMI).
+A program for the OS (`--exe`) can't install handlers: the kernel owns them
+(`tynix/kernel.c`: the timer, the keyboard, `TRAP` for its system calls, the
+NMI menu, the FAULT that ends a program past its stack). Under it, `wait_ms`
+sleeps (other programs run), `key_pressed`/`wait_key`/`getchar` read the keys
+only in the foreground program, and every `gfx_` call waits for the
+foreground; `gfx_lost()` (in `gfx.h`) returns 1 once after the screen was
+someone else's, so a program that remembers what it drew draws it again.
 
 **Inline assembly:** `asm("text");` (also `__asm__`) puts its text, one
 instruction per line, into the output. Inside a function the compiler keeps
@@ -269,6 +279,7 @@ screen, which can't be read back.
 | `gfx_text(x, y, s, fg, bg)` | a string, `\n` goes to the next row under x; returns the x after it |
 | `gfx_bitmap(x, y, w, h, pixels)` | `w*h` colours row by row, `GFX_NONE` ones skipped |
 | `gfx_image(x, y, img)` | a compressed picture, top-left corner at (x, y); returns 0, or -1 if `img` isn't one. `GFX_IMAGE_WIDTH(img)`, `GFX_IMAGE_HEIGHT(img)`: its size |
+| `gfx_lost()` | 1 once after another program had the screen (Tynix: draw everything again), else 0; always 0 outside Tynix |
 
 Pictures: `python compiler/src/img picture.png` writes `picture.h` next to
 the PNG, holding `static const unsigned int picture[]` (in ROM once
@@ -366,24 +377,34 @@ space in blocks of `f_bsize` (256) chars: `f_blocks`, `f_bfree` (=
 `f_bavail`), `f_namemax` (127); `f_files` and friends are 0. It reads the
 whole FAT (14 instructions a block, 0.9 million on a 64 MB disk).
 
-**unistd.h: `spawnv(path, argv)`** runs the program in the file `path` (made
-with `cc build --exe`) with `argv[0]`, `argv[1]`, ... up to a `NULL`, waits
-for it and returns its exit status (like DOS's `spawnv(P_WAIT, ...)`), or
--1 with `errno` set when it can't be loaded: `ENOENT`, `EISDIR`, or
-`ENOEXEC` (not a program). It starts in the current directory. Close the
-files you have open first: the caller's open `FILE`s don't see the
-program's changes. `spawnv_to(path, argv, out)` is the same with the
-program's `stdout` (what `printf`, `putchar` and `puts` write) going to the
-open `FILE` `out` instead of the display (the shell's `>`); `stderr` and the
-keyboard echo stay on the display. A `--exe` program can't call `spawnv` (the build
-refuses); to start another program and come back it asks the shell
-(TECHNICAL 11.4). `isatty(fd)` (not standard in what it covers) says whether
+**unistd.h, programs** (only in a program for the OS, `--exe`: the Tynix kernel
+does the work; TECHNICAL §11). `spawnv(path, argv)` runs the program in the
+file `path` (made with `cc build --exe`) with `argv[0]`, `argv[1]`, ... up to a
+`NULL` in the foreground, waits for it and returns its exit status (130:
+killed, 139: past its stack; like DOS's `spawnv(P_WAIT, ...)`), or -1 with
+`errno` set when it can't be loaded: `ENOENT`, `EISDIR`, `ENOEXEC` (not a
+program), `ENOMEM` (no room in RAM), `EAGAIN` (16 tasks already), or
+`SPAWN_BACKGROUND` when the NMI menu sent it to the background (it goes on).
+It starts in the current directory and in its own RAM, so the caller is
+untouched. `spawnv_to(path, argv, out)` is the same with the program's
+`stdout` (what `printf`, `putchar` and `puts` write) going to the open `FILE`
+`out` instead of the display (the shell's `>`); `stderr` and the keyboard echo
+stay on the display. `spawn(path, argv, flags)` and `spawn_to(path, argv, out,
+flags)` start it and return its pid at once (`SPAWN_FG`: it gets the
+keyboard and screen); `waitpid(pid, &status, flags)` waits for a child (`-1`:
+any; `WAIT_NOHANG`: 0 while it runs; -1 with `ECHILD` when there is none);
+`kill(pid, sig)` ends one (`sig` is not used; `ESRCH`); `getpid()`; `yield()`
+lets the others run; `set_foreground(pid)`; `tasks(buf, max)` fills
+`struct task_info` (`<sys/tynix.h>`) for each program; `halt_os()` closes every
+file and stops the CPU. `isatty(fd)` (not standard in what it covers) says whether
 `fd` 0, 1 or 2 is the console: 1 is not when the shell's `>` gave the program a
 file, so a program can leave out a prompt that would end up in the file
-(`more` does). `tynix/shell.c` (TECHNICAL §11) is a shell built on it.
+(`more` does). `tynix/shell.c` (TECHNICAL §11) is the shell built on these.
+`errno.h` gained `ESRCH EIO ECHILD EAGAIN ENOMEM ENFILE ENOSYS` with Linux's
+messages.
 
 **stdlib.h:** `malloc`, `calloc`, `realloc`, `free` (first fit, from
-`_end` to the end of RAM, or to `0x1100000` with `spawnv`); `exit`, `atexit`, `_Exit`, `abort`; `abs`,
+`_end` to the end of RAM, or of the program's region under Tynix); `exit`, `atexit`, `_Exit`, `abort`; `abs`,
 `labs`, `div`, `ldiv`; `atoi`, `atol`, `atof`, `strtol`, `strtoul`, `strtod`,
 `strtof`; `rand` (0..32767, the generator from the C standard's example, so
 not the same numbers as glibc), `srand`; `qsort`, `bsearch`; `getenv`

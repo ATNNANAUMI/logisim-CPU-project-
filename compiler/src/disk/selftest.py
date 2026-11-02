@@ -8,6 +8,7 @@ import importlib.util
 import io
 import os
 import random
+import re
 import tempfile
 import traceback
 from pathlib import Path
@@ -35,6 +36,19 @@ def raises(text, call, *args, **kwargs):
         assert text in str(e), (text, str(e))
     else:
         raise AssertionError(f"no error ({text})")
+
+
+_KERNEL = []
+
+
+def _kernel():
+    """tynix/kernel.c built once: the ROM that boots /bin/sh from the disk."""
+    if not _KERNEL:
+        import sys
+        sys.path.append(str(HERE.parent / "cc"))
+        import driver                   # compiler/src/cc
+        _KERNEL.append(driver.build([str(HERE.parent.parent.parent / "tynix" / "kernel.c")])[0])
+    return _KERNEL[0]
 
 
 def check_format():
@@ -429,7 +443,7 @@ int main(int argc, char **argv)
     zeros[299] = 9;
     for (i = 0; i < argc; i++)
         printf(" %s", argv[i]);
-    printf("\n");
+    printf(" (at 0x%x)\n", (unsigned)main & ~0xFFFFF);     /* where the kernel put it */
     f = fopen("log.txt", "a");
     fprintf(f, "%s;", argv[argc - 1]);
     fclose(f);
@@ -451,14 +465,21 @@ int main(void)
     char *one[] = { "prog", "a", 0 }, *three[] = { "prog", "b", "c", 0 };
     char *kept = malloc(20), line[40];
     FILE *f;
+    int a, b, sa, sb;
     strcpy(kept, "kept");
     chdir("/work");
     printf("-> %d\n", spawnv("/bin/prog", one));
     printf("-> %d\n", spawnv("/bin/prog", three));
     printf("-> %d\n", spawnv("../bin/prog", one));
+    a = spawn("/bin/prog", one, 0);             /* two copies at once, at two addresses */
+    b = spawn("/bin/prog", three, 0);
+    waitpid(a, &sa, 0);
+    waitpid(b, &sb, 0);
+    printf("-> %d %d\n", sa, sb);
     printf("%d %d", spawnv("/none", one) == -1 && errno == ENOENT,
            spawnv("/work", one) == -1 && errno == EISDIR);
-    printf(" %d %s\n", spawnv("/bin/text", one) == -1 && errno == ENOEXEC, kept);
+    printf(" %d %s (at 0x%x)\n", spawnv("/bin/text", one) == -1 && errno == ENOEXEC, kept,
+           (unsigned)main & ~0xFFFFF);
     f = fopen("log.txt", "r");
     fgets(line, sizeof line, f);
     printf("%s\n", line);
@@ -467,11 +488,33 @@ int main(void)
 """
 
 
+OLD_TEX1 = r"""
+        .global start
+; a program in the old fixed-address format (TEX1): it prints OK and exits
+; with status 7 by jumping to the address in word 2 of its block (R1)
+start:
+        DATA R2, 0x5C
+        COMM OUTADDR, R2
+        DATA R2, 79
+        COMM OUTDATA, R2
+        DATA R2, 75
+        COMM OUTDATA, R2
+        DATA R2, 10
+        COMM OUTDATA, R2
+        DATA R0, 2
+        ALD R1, R0
+        CPY R0, R3
+        DATA R0, 7
+        JMRB R3
+"""
+
+
 def check_spawn():
-    """A program built with --exe, put on the disk by the tool, run three
-    times by spawnv() from a ROM program: arguments, exit status (from main
-    and from exit() deep down), fresh variables each run, the caller's
-    directory and heap, and the files it writes."""
+    """Programs built with --exe (TEX2), put on the disk by the tool and run
+    by spawnv() from another such program, under the kernel: arguments, exit
+    status (from main and from exit() deep down), fresh variables each run,
+    the caller's directory and heap, the files it writes; each loaded at
+    another address (relocated); an old TEX1 program still runs."""
     import sys
     sys.path.append(str(HERE.parent / "cc"))
     import driver                       # compiler/src/cc
@@ -481,36 +524,45 @@ def check_spawn():
         tmp = Path(tmp)
         (tmp / "prog.c").write_text(SPAWNED)
         (tmp / "spawner.c").write_text(SPAWNER)
+        (tmp / "old.asm").write_text(OLD_TEX1)
         program, _ = driver.build([str(tmp / "prog.c")], exe=True)
         assert program.base == linker.PROGRAM_BASE and program.rom[0] == linker.ENTRY_WORD
+        assert program.relocs and program.stack_words == driver.EXE_STACK
         (tmp / "prog.exe").write_bytes(driver.exe_bytes(program))
+        spawner, _ = driver.build([str(tmp / "spawner.c")], exe=True)
+        (tmp / "spawner.exe").write_bytes(driver.exe_bytes(spawner))
+        old, _ = driver.build([str(tmp / "old.asm")], use_libc=False, exe=True)
+        words = [0x31584554, old.base, len(old.rom), old.base, 0] + old.rom
+        (tmp / "old.exe").write_bytes(b"".join(w.to_bytes(4, "little") for w in words))
         image = str(tmp / "s.img")
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             for args in (["format", image, "--size", "1"], ["mkdir", image, "/bin"],
-                         ["mkdir", image, "/work"], ["put", image, str(tmp / "prog.exe"), "/bin/prog"]):
+                         ["mkdir", image, "/work"], ["put", image, str(tmp / "prog.exe"), "/bin/prog"],
+                         ["put", image, str(tmp / "spawner.exe"), "/bin/spawner"],
+                         ["put", image, str(tmp / "old.exe"), "/bin/old"]):
                 assert cli.main(args) == 0, out.getvalue()
+        sys.path.append(str(HERE.parent.parent.parent / "tynix"))
+        import make_disk                # tynix/: /bin/sh
+        make_disk.make(image, programs=[], log=lambda _: None)
         with FileSystem(image) as disk:
             node = disk.lookup("/bin/prog")
-            assert not node.packed and node.length == len(program.rom) + 5   # stored as words
-            disk.put("/bin/text", b"TEX1 but packed text")
-        spawner, _ = driver.build([str(tmp / "spawner.c")])
-        heap_end = next(s.address for s in spawner.symbols if s.name == "_heap_end")
-        assert spawner.rom[heap_end] == linker.PROGRAM_BASE, hex(spawner.rom[heap_end])
-        try:
-            (tmp / "bad.c").write_text("#include <unistd.h>\nint main(void) { return spawnv(0, 0); }\n")
-            driver.build([str(tmp / "bad.c")], exe=True)
-        except driver.BuildError as e:
-            assert "can't call spawnv()" in str(e), e
-        else:
-            raise AssertionError("--exe with spawnv() built")
-        cpu, text = driver.run_in_simulator(spawner.rom, "", 20_000_000, disk=image)
-    expect = ("1 0 2 /work: prog a\n-> 2\n"
-              "1 0 3 /work: prog b c\n-> 43\n"
-              "1 0 2 /work: prog a\n-> 2\n"
-              "1 1 1 kept\n"
-              "a;c;a;\n")
-    assert cpu.halted and text == expect, text
+            assert not node.packed and node.length == len(program.rom) + 8 + len(program.relocs)
+            disk.put("/bin/text", b"TEX2 but packed text")
+        kernel = _kernel()
+        heap_end = next(sym.address for sym in kernel.symbols if sym.name == "_heap_end")
+        assert kernel.rom[heap_end] == linker.PROGRAM_BASE, hex(kernel.rom[heap_end])
+        cpu, text = driver.run_in_simulator(kernel.rom, "spawner\nold\njobs\nhalt\n", 40_000_000,
+                                            disk=image)
+    expect = ("Tynix shell: help lists the commands\n/> spawner\n"
+              "1 0 2 /work: prog a (at 0x1400000)\n-> 2\n"
+              "1 0 3 /work: prog b c (at 0x1400000)\n-> 43\n"
+              "1 0 2 /work: prog a (at 0x1400000)\n-> 2\n"
+              "1 0 2 /work: prog a (at 0x1400000)\n1 0 3 /work: prog b c (at 0x1500000)\n-> 2 43\n"
+              "1 1 1 kept (at 0x1300000)\n"
+              "a;c;a;a;c;\n"
+              "/> old\nOK\n[old: exit status 7]\n/> jobs\n")
+    assert cpu.halted and text.startswith(expect), text
     return f"{cpu.instructions} instructions"
 
 
@@ -629,12 +681,12 @@ def check_shell():
 
     image = os.path.join(TMP.name, "shell.img")
     sizes = make_disk.make(image, programs=["echo"], new=True, size_mb=1, log=lambda _: None)
-    shell, _ = driver.build([str(root / "tynix" / "shell.c")])
-    cpu, text = driver.run_in_simulator(shell.rom, SHELL_KEYS, 50_000_000, disk=image)
+    kernel = _kernel()
+    cpu, text = driver.run_in_simulator(kernel.rom, SHELL_KEYS, 50_000_000, disk=image)
     assert cpu.halted, text
     help_text, sep, rest = text.partition("/> mkdir docs\n")
     assert help_text.startswith("Tynix shell: help lists the commands\n/> help\n  help ") and \
-        help_text.endswith("programs in /bin (type the name):\n  echo\n"), help_text
+        help_text.endswith("programs in /bin (type the name):\n  sh  echo\n"), help_text
     with FileSystem(image) as disk:
         used = disk.blocks - disk.free_blocks()
         df = (f"{disk.blocks} blocks of 1 KB (256 words): {used} used, "
@@ -643,9 +695,10 @@ def check_shell():
         assert got == SHELL_OUTPUT.format(df=df, readme=len(make_disk.README)), got
         assert disk.get("/p.txt") == b"r1 r2\nr3\n"       # a program's output, > and >>
         assert disk.get("/a.txt") == b"two  spaces\nmore\n" == disk.get("/b.txt")
-        assert disk.lookup("/e2").length == sizes["echo"] + 5 and not disk.lookup("/e2").packed
-        assert disk.get("/typed.txt") == b"line 1\n"
-        assert disk.lookup("/bin/echo").length == sizes["echo"] + 5
+        echo = disk.lookup("/bin/echo").length
+        assert disk.lookup("/e2").length == echo and not disk.lookup("/e2").packed
+        assert disk.get("/typed.txt") == b"line 1\n" and disk.get("/e2") == disk.get("/bin/echo")
+        assert echo > sizes["echo"] + 8           # TEX2: the header, the words, the relocations
         assert disk.check() == [], disk.check()
     return f"{cpu.instructions} instructions"
 
@@ -673,8 +726,8 @@ def check_reclaim():
         disk.set_fat(tail, extra[0])
         disk.set_fat(extra[0], extra[1])
         assert disk.free_blocks() == before - 5 and len(disk.check()) == len(lost)
-    shell, _ = driver.build([str(root / "tynix" / "shell.c")])
-    cpu, text = driver.run_in_simulator(shell.rom, "cat /a.txt > /copy.txt\nhalt\n", 50_000_000,
+    kernel = _kernel()
+    cpu, text = driver.run_in_simulator(kernel.rom, "cat /a.txt > /copy.txt\nhalt\n", 50_000_000,
                                         disk=image)
     assert cpu.halted and "[boot: freed 5 lost blocks]\n" in text, text
     with FileSystem(image) as disk:
@@ -682,15 +735,15 @@ def check_reclaim():
         assert disk.get("/a.txt") == b"x" * 700 and disk.get("/big.txt") == b"y" * 3000
         assert len(disk.chain(disk.lookup("/a.txt").first)) == 1
         assert disk.free_blocks() == before - 1             # only /copy.txt is new
-    cpu, text = driver.run_in_simulator(shell.rom, "halt\n", 50_000_000, disk=image)
+    cpu, text = driver.run_in_simulator(kernel.rom, "halt\n", 50_000_000, disk=image)
     assert "freed" not in text, text                        # nothing left to free
     return f"{cpu.instructions} instructions"
 
 
 def check_kill():
-    """The NMI (the kill switch): while a program from /bin spins, the shell's
-    NMI handler asks; 2 goes on, 1 ends it with status 130 and the shell comes
-    back at its prompt. At the prompt an NMI does nothing."""
+    """The NMI (the kill switch): while a program from /bin spins, the
+    kernel's NMI handler asks; 2 goes on, 1 ends it with status 130 and the
+    shell comes back at its prompt. At the prompt an NMI does nothing."""
     import sys
     root = HERE.parent.parent.parent
     sys.path.append(str(root / "tynix"))
@@ -710,10 +763,10 @@ def check_kill():
         (Path(tmp) / "spin.exe").write_bytes(driver.exe_bytes(program))
         with FileSystem(image) as disk:
             disk.put("/bin/spin", (Path(tmp) / "spin.exe").read_bytes(), binary=True)
-    shell, _ = driver.build([str(root / "tynix" / "shell.c")])
+    kernel = _kernel()
 
     cpu = CPU()
-    cpu.mem.load_rom(shell.rom)
+    cpu.mem.load_rom(kernel.rom)
     cpu.bus.attach_disk(image)
 
     def until(text, limit=200):
@@ -731,7 +784,7 @@ def check_kill():
         cpu.bus.keyboard.type("spin\n")
         until("spinning")
         cpu.nmi()
-        until("[spin: 1 kill, 2 continue] ")
+        until("[spin: 1 kill, 2 continue, 3 background, 4 tasks] ")
         cpu.bus.keyboard.type("2")
         cpu.run(100_000)
         assert cpu.bus.display.text.endswith("] 2\n") and cpu.ie == 1 and not cpu.in_nmi
@@ -742,10 +795,168 @@ def check_kill():
         cpu.bus.keyboard.type("echo back\nhalt\n")
         cpu.run(2_000_000)
         assert cpu.halted and "back\n" in cpu.bus.display.text
-        assert cpu.bus.display.text.count("1 kill, 2 continue") == 2
+        assert cpu.bus.display.text.count("1 kill, 2 continue, 3 background, 4 tasks") == 2
     finally:
         cpu.bus.attach_disk(None)
     with FileSystem(image) as disk:
+        assert disk.check() == [], disk.check()
+    return f"{cpu.instructions} instructions"
+
+
+TASK_PROGRAMS = {
+    "count": r"""
+#include <stdio.h>
+#include <stdlib.h>
+int main(int argc, char **argv)
+{
+    int i, j, n = atoi(argv[2]);
+    volatile int x = 0;
+    for (i = 0; i < n; i++) {
+        printf("%s%d ", argv[1], i);
+        for (j = 0; j < 20000; j++)     /* about 0.3 million instructions */
+            x++;
+    }
+    return 3;
+}
+""",
+    "writer": r"""
+#include <stdio.h>
+#include <string.h>
+int main(int argc, char **argv)
+{
+    char name[20], line[80];
+    FILE *f, *r, *log = fopen("/log.txt", "a");     /* both append to it at once */
+    int i, n = 0;
+    sprintf(name, "/w_%s.txt", argv[1]);
+    f = fopen(name, "w");
+    for (i = 0; i < 150; i++) {
+        fprintf(f, "%s line %d\n", argv[1], i);
+        fprintf(log, "%s%d\n", argv[1], i);
+        if ((r = fopen("/readme.txt", "r")) != 0) {     /* reads while the other one writes */
+            if (fgets(line, sizeof line, r))
+                n += strlen(line);
+            fclose(r);
+        }
+    }
+    printf("[%s wrote, read %d]\n", argv[1], n);
+    fclose(log);
+    return fclose(f);
+}
+""",
+    "spin": r"""
+#include <stdio.h>
+int deep(int n) { int a[50]; a[0] = n; return n ? deep(n - 1) + a[0] : 0; }
+int main(int argc, char **argv)
+{
+    FILE *f;
+    long n = 0;
+    if (argc > 1 && argv[1][0] == 'd')
+        return deep(100000);                    /* runs past its stack */
+    if (argc > 1 && argv[1][0] == 'k') {
+        int c = getchar();                      /* waits for the keyboard */
+        printf("got %c\n", c);
+        return 0;
+    }
+    f = fopen("/spin.txt", "w");                /* killed while it writes */
+    for (;;) {
+        fputc('a' + n % 26, f);
+        n++;
+    }
+}
+""",
+}
+
+TASK_KEYS = [
+    "count A 6 &\ncount B 6\n",
+    "writer A &\nwriter B\nwait\n",
+    "spin &\n",
+    "jobs\n",
+    "kill 6\n",
+    "spin d\n",
+    "spin k &\ncount C 2\n",
+    "fg 8\nx\n",
+    "spin\n",
+]
+
+
+def check_multitask():
+    """Several programs at once under the kernel, on a clock that counts
+    instructions (1 ms = 1000), so the run is the same every time: two
+    counting programs share the CPU (10 ms slices); two programs write their
+    files while reading another and appending to one shared log (nothing
+    lost); a program killed while it writes has its
+    file closed properly; one past its stack ends alone (139); one in the
+    background waits for the keyboard until fg; the NMI menu lists the
+    tasks and sends one to the background; and with one program running the
+    timer is off (the kernel is tickless). fs.py finds the disk consistent."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    sys.path.append(str(root / "cpu_sim" / "src"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+    from cpu import CPU
+    from devices import Timer
+
+    image = os.path.join(TMP.name, "tasks.img")
+    make_disk.make(image, programs=[], new=True, size_mb=1, log=lambda _: None)
+    with tempfile.TemporaryDirectory() as tmp:
+        with FileSystem(image) as disk:
+            for name, text in TASK_PROGRAMS.items():
+                (Path(tmp) / f"{name}.c").write_text(text)
+                program, _ = driver.build([str(Path(tmp) / f"{name}.c")], exe=True)
+                disk.put(f"/bin/{name}", driver.exe_bytes(program), binary=True)
+    cpu = CPU()
+    cpu.mem.load_rom(_kernel().rom)
+    cpu.bus.attach_disk(image)
+    cpu.bus.timer = Timer(clock=lambda: cpu.instructions / 1e6)
+    cpu.bus._link_timer()
+
+    def run(keys="", steps=8_000_000):
+        cpu.bus.keyboard.type(keys)
+        cpu.run_sleeping(steps)
+
+    try:
+        run()
+        assert cpu.bus.timer.period == 0                    # the shell waits: no ticks
+        for keys in TASK_KEYS:
+            run(keys)
+        assert cpu.bus.timer.period == 0                    # spin alone: no ticks either
+        cpu.nmi()
+        run()
+        run("4")
+        run("3")
+        run("jobs\nkill 10\n")
+        run("halt\n")
+        text = cpu.bus.display.text
+    finally:
+        cpu.bus.attach_disk(None)
+    assert cpu.halted, text
+    counts = " ".join(re.findall(r"\b[AB]\d\b",
+                                 text.partition("/> count A 6 &\n")[2].partition("/> writer")[0]))
+    assert sorted(counts.split()) == sorted(f"{c}{i}" for c in "AB" for i in range(6)), counts
+    assert counts.index("B0") < counts.index("A5") and counts.index("A0") < counts.index("B5"), \
+        counts                                              # interleaved, not one after the other
+    read = 150 * len(make_disk.README.partition("\n")[0] + "\n")
+    assert f"[A wrote, read {read}]" in text and f"[B wrote, read {read}]" in text, text
+    assert "[spin: stack overflow at 0x" in text and "[spin: exit status 139]" in text, text
+    assert "[6] done: spin, exit status 130" in text, text
+    assert "/> fg 8\nx\ngot x\n" in text, text
+    menu = text.partition("[spin: 1 kill, 2 continue, 3 background, 4 tasks] 4\n")[2]
+    assert menu.startswith("    1 sh           waiting (child)\n   10 spin         ready [fg]\n"), menu
+    assert "background, 4 tasks] 3\n[10] spin &\n" in menu, menu
+    assert "   10  spin          running  1024K at 0x1300000\n" in menu, menu
+    assert "[10] done: spin, exit status 130" in menu and menu.endswith("/> halt\nCPU halted\n"), menu
+    with FileSystem(image) as disk:
+        for w in "AB":
+            assert disk.get(f"/w_{w}.txt") == b"".join(b"%s line %d\n" % (w.encode(), i)
+                                                       for i in range(150))
+        log = disk.get("/log.txt")                          # nothing written over
+        assert sorted(log) == sorted(b"".join(b"%s%d\n" % (w, i) for w in (b"A", b"B")
+                                              for i in range(150))), log
+        spun = disk.get("/spin.txt")
+        assert len(spun) > 1000 and spun == bytes(97 + i % 26 for i in range(len(spun)))
         assert disk.check() == [], disk.check()
     return f"{cpu.instructions} instructions"
 
@@ -831,8 +1042,8 @@ def check_editor():
 
     image = os.path.join(TMP.name, "editor.img")
     make_disk.make(image, programs=["echo", "ed"], new=True, size_mb=1, log=lambda _: None)
-    shell, _ = driver.build([str(root / "tynix" / "shell.c")])
-    cpu, text = driver.run_in_simulator(shell.rom, EDITOR_KEYS, 80_000_000, disk=image)
+    kernel = _kernel()
+    cpu, text = driver.run_in_simulator(kernel.rom, EDITOR_KEYS, 80_000_000, disk=image)
     assert cpu.halted and text == EDITOR_OUTPUT, text
     with FileSystem(image) as disk:
         assert disk.get("/a.txt") == b"zero\none Y\nthree\n"
@@ -874,11 +1085,11 @@ def check_screen_editor():
 
     image = os.path.join(TMP.name, "screen_editor.img")
     make_disk.make(image, programs=["echo", "edit"], new=True, size_mb=1, log=lambda _: None)
-    shell, _ = driver.build([str(root / "tynix" / "shell.c")])
+    kernel = _kernel()
     # while it runs: stop inside the editor and look at the screen
-    cpu, _ = driver.run_in_simulator(shell.rom, "edit /s.txt\nabc\ndef", 12_000_000, disk=image)
+    cpu, _ = driver.run_in_simulator(kernel.rom, "edit /s.txt\nabc\ndef", 12_000_000, disk=image)
     assert not cpu.halted and any(cpu.bus.video.pixels), "nothing drawn"
-    cpu, text = driver.run_in_simulator(shell.rom, SCREEN_KEYS, 80_000_000, disk=image)
+    cpu, text = driver.run_in_simulator(kernel.rom, SCREEN_KEYS, 80_000_000, disk=image)
     assert cpu.halted, text
     assert text.count("abc\nXghi\n") == 2 and "Z" not in text, text
     assert "/bin/echo: not a text file" in text, text
@@ -1171,7 +1382,7 @@ FM_KEYS = ("visual_file_manager /fm\n"
            "Z\x13\x11"                        #   edit types Z, saves, quits; the manager is back
            "h" "p" "q"                        # up, paste the copy it still holds, quit
            "visual_file_manager /bin echo\n"
-           "\n"                               # Enter on the program echo: it runs, the manager is back
+           "\n"                               # Enter on the program echo: it runs (spawnv), the manager is back
            "q"
            "halt\n")
 
@@ -1180,7 +1391,6 @@ Tynix shell: help lists the commands
 /> visual_file_manager /fm
 /> visual_file_manager /bin echo
 /bin/echo: no arguments (argc = 1)
-[/bin/echo: exit status 1]
 /> halt
 CPU halted
 """
@@ -1190,8 +1400,8 @@ def check_tools():
     """The eight command-line tools in tynix/ (more grep find tree du diff hexdump
     calc) as programs from /bin, run by the shell on known files, with their
     exact output, exit status messages and errors; then visual_file_manager's
-    copy, cut, paste, rename, delete and new folder, and opening a file through
-    the shell (edit) and a program; all read back with fs.py."""
+    copy, cut, paste, rename, delete and new folder, and opening a file in
+    edit and a program (spawnv, the manager waits); all read back with fs.py."""
     import sys
     root = HERE.parent.parent.parent
     sys.path.append(str(root / "tynix"))
@@ -1223,8 +1433,8 @@ def check_tools():
             du_a="\n".join(f"{_kb(disk, p):<6} {p}" for p in
                            ("/docs/a.txt", "/docs/b.txt", "/docs/sub/c.txt")),
             hex=_hexdump(HEXDUMP_TEXT))
-    shell, _ = driver.build([str(root / "tynix" / "shell.c")])
-    cpu, text = driver.run_in_simulator(shell.rom, TOOLS_KEYS, 30_000_000, disk=image)
+    kernel = _kernel()
+    cpu, text = driver.run_in_simulator(kernel.rom, TOOLS_KEYS, 30_000_000, disk=image)
     assert cpu.halted, text
     assert text == expected, "\n".join(
         f"{n}: {x!r} != {y!r}" for n, (x, y) in enumerate(zip(text.split("\n"), expected.split("\n")))
@@ -1256,13 +1466,13 @@ def check_tools():
         disk.put("/r/junk/j1.txt", b"j1\n")
         disk.put("/r/junk/s/j2.txt", b"j2\n" * 400)
     tools = cpu.instructions
-    cpu, text = driver.run_in_simulator(shell.rom, FM_KEYS, 40_000_000, disk=image)
+    cpu, text = driver.run_in_simulator(kernel.rom, FM_KEYS, 40_000_000, disk=image)
     assert cpu.halted and text == FM_OUTPUT, text
     assert not any(cpu.bus.video.pixels), "screen not blank after quitting"
     with FileSystem(image) as disk:
         assert sorted(e.name for e in disk.entries(disk.lookup("/fm"))) == \
             ["dest", "newdir", "one.txt", "sub2", "zzz.txt"]
-        assert disk.get("/fm/dest/one.txt") == b"Zone\n"       # moved, then edited through the shell
+        assert disk.get("/fm/dest/one.txt") == b"Zone\n"       # moved, then edited in edit
         assert disk.get("/fm/one.txt") == b"Zone\n"            # the clipboard survived the trip
         assert disk.get("/fm/dest/two.txt") == b"dest two\n"   # a paste never overwrites
         assert disk.get("/fm/sub2/one.txt") == b"one\n"        # the first copy
@@ -1271,7 +1481,7 @@ def check_tools():
         assert disk.lookup("/fm/newdir").is_dir and disk.lookup("/.next") is None
         assert disk.check() == [], disk.check()
     fm = cpu.instructions
-    cpu, text = driver.run_in_simulator(shell.rom, FM2_KEYS, 40_000_000, disk=image)
+    cpu, text = driver.run_in_simulator(kernel.rom, FM2_KEYS, 40_000_000, disk=image)
     assert cpu.halted and text == FM2_OUTPUT, text
     with FileSystem(image) as disk:
         assert sorted(e.name for e in disk.entries(disk.lookup("/m"))) == ["dest"]
@@ -1282,7 +1492,7 @@ def check_tools():
             ["Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos"]
         assert disk.lookup("/.clipboard") is None and disk.check() == [], disk.check()
     fm2 = cpu.instructions
-    cpu, text = driver.run_in_simulator(shell.rom, FM3_KEYS, 60_000_000, disk=image)
+    cpu, text = driver.run_in_simulator(kernel.rom, FM3_KEYS, 60_000_000, disk=image)
     assert cpu.halted and text == FM3_OUTPUT, text
     with FileSystem(image) as disk:
         assert sorted(e.name for e in disk.entries(disk.lookup("/r"))) == ["dest", "tree"], \
@@ -1299,7 +1509,7 @@ def check_tools():
         disk.put("/fill", bytes(4 * 256 * (disk.free_blocks() - 4)), binary=True)
         assert 1 <= disk.free_blocks() <= 5, disk.free_blocks()
     fm3 = cpu.instructions
-    cpu, text = driver.run_in_simulator(shell.rom, FM4_KEYS, 60_000_000, disk=image)
+    cpu, text = driver.run_in_simulator(kernel.rom, FM4_KEYS, 60_000_000, disk=image)
     assert cpu.halted and text == FM4_OUTPUT, text
     with FileSystem(image) as disk:
         assert disk.entries(disk.lookup("/q/d")) == [], "a failed copy left a half folder"
@@ -1325,6 +1535,7 @@ CHECKS = [
     check_shell,
     check_reclaim,
     check_kill,
+    check_multitask,
     check_editor,
     check_screen_editor,
     check_tools,

@@ -19,10 +19,13 @@ There is no fixed stack area: ESP and EBP are set here, by the start-up
 code, so that is the only place that decides where the stack is.
 
 A program for the OS (link(..., base=PROGRAM_BASE)) goes all in RAM, to be
-loaded there from the disk: the entry jump at the base, the ROM parts after
-it, then the RAM parts. Its "ROM" words are then ordinary, writable RAM. It
-has no vectors and no start-up code (the OS that loads it owns both, and
-the program runs on the stack of the program that started it).
+loaded from the disk: the entry jump at the base, the ROM parts after it,
+then the RAM parts, then exe_stack words of stack (_stack_base, and _end
+after it). Its "ROM" words are then ordinary, writable RAM. It has no vectors
+and no start-up code (the OS that loads it owns both and sets ESP). The
+Program keeps `relocs`, the offsets of the words that hold an absolute
+address: the kernel adds (load address - base) to them, so the program can
+go anywhere in RAM (TEX2, compiler/libc/include/sys/tynix.h).
 
 Each bank has a 24-bit address (16M words); the address bus is one bit wider
 and its top bit selects RAM. The constants below are the whole memory map for
@@ -48,7 +51,7 @@ RAM_BASE = 1 << BANK_BITS                  # RAM word i is at address RAM_BASE +
 STACK_WORDS = 0x4000                       # the stack link() reserves after the data (16K words)
 RAM_DATA_START = RAM_BASE                  # no fixed stack area: the data starts at RAM word 0
 RAM_END = RAM_BASE + (1 << BANK_BITS)      # one past the last RAM word
-PROGRAM_BASE = RAM_BASE + 0x100000         # where the OS loads programs (spawn.c)
+PROGRAM_BASE = RAM_BASE + 0x100000         # where programs for the OS are linked (tynix/kernel.c moves them)
 ENTRY = "start"
 ENTRY_WORD = 0x0400        # RJMP; the next word is the offset to start
 ENTRY_SIZE = 2             # words of the entry jump of a program for the OS (base=...)
@@ -77,6 +80,9 @@ class Program:
     symbols: list      # every label's final address (for the map file)
     lines: list = None # (address, file, line) where source lines start
     base: int = 0      # the address of rom[0]
+    relocs: list = None    # a program for the OS: the offsets (from rom[0]) of the words that hold an
+                           # absolute address, which a loader adds (load address - base) to (TEX2)
+    stack_words: int = 0   # a program for the OS: the stack reserved after its data (exe_stack)
 
 
 @dataclass
@@ -203,14 +209,16 @@ def _view(obj, keep):
                  lines)
 
 
-def link(objects, libraries=(), base=None, stack_words=STACK_WORDS):
+def link(objects, libraries=(), base=None, stack_words=STACK_WORDS, exe_stack=0):
     """Join object files. Returns a Program; raises AsmErrors.
 
     libraries: the objects (from the list) to link as libraries: only the
     parts the program needs.
     base: link for that RAM address (a program the OS loads), code and data
     together; None: the usual ROM image, with vectors and start-up code.
-    stack_words: the stack reserved after the data (a ROM image only)."""
+    stack_words: the stack reserved after the data (a ROM image only).
+    exe_stack: with a base, the words of stack after the data (_stack_base
+    there, _end after it); the loader sets ESP, ram_used stays the data."""
     lib_ids = {id(o) for o in libraries}
     exported = {name for o in objects for name in o.globals}   # before anything is dropped
     keep = _choose_parts(objects, lib_ids)
@@ -230,9 +238,12 @@ def link(objects, libraries=(), base=None, stack_words=STACK_WORDS):
         bases.append({"rom": rom_next, "ram": ram_next})
         rom_next += len(obj.rom)
         ram_next += obj.ram_size
-    stack_base = ram_next                       # the stack follows the data (a ROM image)
+    stack_base = ram_next                       # the stack follows the data
+    data_end = ram_next
     if base is None:
         ram_next += stack_words
+    else:
+        ram_next += exe_stack
     if base is not None:
         if not RAM_DATA_START <= base < RAM_END:
             errors.append(AsmError(f"the base 0x{base:x} isn't in the RAM above the stack "
@@ -284,6 +295,7 @@ def link(objects, libraries=(), base=None, stack_words=STACK_WORDS):
 
     # 4. Copy each file's words, filling in the relocations.
     reported = set()
+    relocs = []
     for obj, base in zip(objects, bases):
         words = list(obj.rom)
         for r in obj.relocs:
@@ -304,6 +316,7 @@ def link(objects, libraries=(), base=None, stack_words=STACK_WORDS):
                     errors.append(AsmError(f"can't call '{r.symbol}': it is a RAM label",
                                            obj.source, r.line))
                 words[r.at] = target & MASK
+                relocs.append(base["rom"] + r.at - origin)
             elif section != "rom":
                 errors.append(AsmError(f"can't jump to '{r.symbol}': it is a RAM label",
                                        obj.source, r.line))
@@ -326,6 +339,8 @@ def link(objects, libraries=(), base=None, stack_words=STACK_WORDS):
     symbols.sort(key=lambda s: (s.address, s.name))
     lines = sorted((base["rom"] + offset, path, line)
                    for obj, base in zip(objects, bases) for offset, path, line in obj.lines)
+    if is_exe:
+        return Program(rom, data_end - ram_start, symbols, lines, origin, sorted(relocs), exe_stack)
     return Program(rom, ram_next - ram_start, symbols, lines, origin)
 
 

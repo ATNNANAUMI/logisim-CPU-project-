@@ -749,7 +749,8 @@ class SimulatorWindow(tk.Tk):
         still being served (the shell is asking 1 or 2) would come back as a
         second menu the moment the first ends. The OS answers on the text
         display, so that tab comes forward, with the keyboard field ready for
-        the answer; the RGB screen's tab returns when the program draws again."""
+        the answer; the RGB screen's tab returns when the program draws again.
+        Esc again answers 2 (continue)."""
         now = time.perf_counter()
         pressed, self._nmi_time = self._nmi_time, now
         if self.cpu.in_nmi:                 # the OS is asking (kill or continue)
@@ -769,9 +770,10 @@ class SimulatorWindow(tk.Tk):
         self.refresh()
 
     def on_nmi_answer(self, event) -> None:
-        """The OS asks "1 kill, 2 continue" after an NMI: the answer counts
-        wherever the focus is (the keyboard field gets the other keys)."""
-        if self.cpu.in_nmi and event.char in ("1", "2") and self._focused() is not self.key_entry:
+        """The OS asks "1 kill, 2 continue, 3 background, 4 tasks" after an
+        NMI: the answer counts wherever the focus is (the keyboard field gets
+        the other keys)."""
+        if self.cpu.in_nmi and event.char in ("1", "2", "3", "4") and self._focused() is not self.key_entry:
             self.cpu.bus.keyboard.type(event.char)
 
     def on_key(self, event) -> str | None:
@@ -874,7 +876,7 @@ class SimulatorWindow(tk.Tk):
                 self._moved = True
             if self.cpu.halted or self.cpu.stopped:
                 self.set_running(False)
-            elif done < count:                          # stopped at a breakpoint
+            elif done < count and not self.cpu.waiting:  # stopped at a breakpoint (not asleep in WAIT: a key or the timer wakes it)
                 self.set_running(False)
                 self._log(f"breakpoint at 0x{self.cpu.iar:07X}")
             return
@@ -884,8 +886,9 @@ class SimulatorWindow(tk.Tk):
                 self._log(f"breakpoint at 0x{self.cpu.iar:07X}")
                 break
             step = self.cpu.step()
-            if step is None:                        # halted or stopped
-                self.set_running(False)
+            if step is None:                        # halted or stopped (or asleep in WAIT: keep running)
+                if not (self.cpu.waiting and not self.cpu.halted and not self.cpu.stopped):
+                    self.set_running(False)
                 break
             self._moved = True
             operand = "" if step.operand is None else f" 0x{step.operand:08X}"
@@ -920,7 +923,7 @@ class SimulatorWindow(tk.Tk):
         elif self.cpu.halted:
             status = "HALTED - press resume (NMI wakes it)"
         elif self.cpu.in_nmi:
-            status = "NMI: 1 kill, 2 continue"
+            status = "NMI: the OS asks (keys 1-4)"
         elif self.cpu.waiting:
             status = "waiting for an interrupt (WAIT)"
         elif self.running:
