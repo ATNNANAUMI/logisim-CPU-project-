@@ -470,8 +470,14 @@ static int load_program(struct task *parent, const char *path, char **argv, int 
     char **args;
     char *p;
     int tex1;
-    struct obj *out = out_fd == 1 ? 0 : obj_of(parent, out_fd);
+    int in_fd = flags >> 8 & 0xFF;
+    /* stdout: the file out_fd, or (1) whatever the caller's stdout is; stdin:
+       the file SPAWN_IN gives, or the caller's (a file only when it has one) */
+    struct obj *out = parent ? obj_of(parent, out_fd) : 0;
+    struct obj *in = parent ? obj_of(parent, in_fd) : 0;
     if (out_fd != 1 && (out == 0 || out->file == 0))
+        return -EBADF;
+    if (in_fd && (in == 0 || in->file == 0))
         return -EBADF;
     if (_fs_lookup(path, &node))
         return -errno;
@@ -543,11 +549,16 @@ static int load_program(struct task *parent, const char *path, char **argv, int 
         out->refs++;
         t->fd[1] = out - objs + 1;
     }
+    if (in) {
+        in->refs++;
+        t->fd[0] = in - objs + 1;
+    }
     t->block[B_ARGC] = argc;
     t->block[B_ARGV] = (unsigned)args;
     t->block[B_PID] = t->pid;
     t->block[B_END] = top;
     t->block[B_OUT] = out != 0;
+    t->block[B_IN] = in != 0;
     t->block[B_FG] = (unsigned)&fg_pid;
     if (tex1) {                                 /* its old block: argc, argv, way back, cwd, put */
         t->block[2] = (unsigned)tex1_exit;

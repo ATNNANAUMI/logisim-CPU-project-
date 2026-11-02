@@ -80,6 +80,12 @@ DISK_DATA_ADDR = 0x8D
 DISK_WORDS = 1 << 24           # 64 MB
 DISK_MAX_WORDS = 1 << 30       # 4 GB, 30-bit word positions
 
+# Claude (simulator only, Phase 8): a terminal to the Claude API (claude.py).
+# OUTDATA sends a char of the prompt (0 sends it, 0x18 a new conversation,
+# 0x03 stops the reply, 0x16 a program starts using it); INDATA reads the next
+# char of the reply (0 nothing yet, 4 the turn is over, 2 a tool for the CPU).
+CLAUDE_ADDR = 0x9C
+
 # ------------------------------------------------------------------ TWEAKS
 # A flag = "RA > RB".  Signed compare (True) or unsigned magnitude (False)?
 # Confirmed: signed.

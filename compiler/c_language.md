@@ -236,6 +236,7 @@ power function is `ipow`, so it doesn't clash with C's `pow`.)
 | `wait_key()` | waits for one key and returns it, no echo |
 | `wait_ms(ms)` | does nothing for `ms` milliseconds (the timer, device `0x7C`) |
 | `device_out(d, v)` / `device_in(d)` | raw `COMM` to any device (`__builtin_out`, `__builtin_in`) |
+| `CLAUDE_DEVICE` and `CLAUDE_SEND`, `CLAUDE_NEW`, `CLAUDE_STOP`, `CLAUDE_HELLO`, `CLAUDE_END`, `CLAUDE_TOOL`, `CLAUDE_FIELD` | the Claude device (simulator only, `0x9C`; TECHNICAL §11.5, `tynix/claude.c` uses it): chars of a message out, `CLAUDE_SEND` sends it; chars of the reply in, 0 while none came, `CLAUDE_END` at the end of the turn |
 | `DISK_SEEK_DEVICE`, `DISK_DATA_DEVICE` | the disk (simulator only, `cc run --disk FILE`): `device_out(DISK_SEEK_DEVICE, n)` goes to word n, `device_in(DISK_SEEK_DEVICE)` is the size in words (0: no disk); `device_out`/`device_in` on `DISK_DATA_DEVICE` write/read a word and move on to the next |
 | `halt()` | the shutdown: stops the CPU (`__builtin_trap()`); only an NMI or a reset wakes it. It does not close files: `exit()` and the end of `main()` do (`atexit`), then halt, so nothing is lost by a reset after them |
 | `interrupts_on()`, `interrupts_off()` | the interrupt enable bit (off at reset; the start-up code leaves it alone) |
@@ -391,14 +392,19 @@ untouched. `spawnv_to(path, argv, out)` is the same with the program's
 `out` instead of the display (the shell's `>`); `stderr` and the keyboard echo
 stay on the display. `spawn(path, argv, flags)` and `spawn_to(path, argv, out,
 flags)` start it and return its pid at once (`SPAWN_FG`: it gets the
-keyboard and screen); `waitpid(pid, &status, flags)` waits for a child (`-1`:
+keyboard and screen; with `out` 0 the program writes where the caller's
+`stdout` goes, a file when it is one); `spawn_io(path, argv, in, out, flags)`
+also gives it the open `FILE` `in` as `stdin`: `getchar`, `fgets` and `scanf`
+read it without echo and get `EOF` at its end (keys read with `key_pressed()`
+and `wait_key()` still come from the keyboard; with `in` 0 it reads what the
+caller's `stdin` reads); `waitpid(pid, &status, flags)` waits for a child (`-1`:
 any; `WAIT_NOHANG`: 0 while it runs; -1 with `ECHILD` when there is none);
 `kill(pid, sig)` ends one (`sig` is not used; `ESRCH`); `getpid()`; `yield()`
 lets the others run; `set_foreground(pid)`; `tasks(buf, max)` fills
 `struct task_info` (`<sys/tynix.h>`) for each program; `halt_os()` closes every
 file and stops the CPU. `isatty(fd)` (not standard in what it covers) says whether
 `fd` 0, 1 or 2 is the console: 1 is not when the shell's `>` gave the program a
-file, so a program can leave out a prompt that would end up in the file
+file, 0 is not when it was started with a `stdin` file (`spawn_io`), so a program can leave out a prompt that would end up in the file
 (`more` does). `tynix/shell.c` (TECHNICAL §11) is the shell built on these.
 `errno.h` gained `ESRCH EIO ECHILD EAGAIN ENOMEM ENFILE ENOSYS` with Linux's
 messages.

@@ -934,6 +934,7 @@ class SimulatorWindow(tk.Tk):
             f"bank  {'RAM' if self.cpu.iar & config.RAM_BIT else 'ROM'}",
             f"out   0x{self.cpu.bus.out_addr:X}   in 0x{self.cpu.bus.in_addr:X}",
             f"disk  {self._disk_text()}",
+            f"claude {self.cpu.bus.claude.status()}",
             f"in    {self._where()}",
             f"count {self.cpu.instructions}",
             f"rate  {self._measured_rate()}",

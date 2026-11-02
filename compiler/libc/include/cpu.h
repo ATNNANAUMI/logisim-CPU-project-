@@ -43,6 +43,15 @@
  * to the next one. Past the end, reads give 0 and writes are dropped.
  * A formatted disk holds a filesystem (stdio.h's fopen, TFS1): raw writes
  * to it can break it.
+ *
+ * Claude (simulator only, Phase 8; tynix/claude.c is the program that uses
+ * it): device_out(CLAUDE_DEVICE, c) adds a char to the message, CLAUDE_SEND
+ * (0) sends it, CLAUDE_NEW starts a new conversation, CLAUDE_STOP stops the
+ * reply, CLAUDE_HELLO says a program starts using the device.
+ * device_in(CLAUDE_DEVICE) is the next char of the reply: 0 none yet,
+ * CLAUDE_END the turn is over, CLAUDE_TOOL a tool for the CPU follows (a
+ * letter, fields split by CLAUDE_FIELD, then CLAUDE_STOP; answer with the
+ * result's chars and CLAUDE_SEND). TECHNICAL 1.7 and 11.5.
  */
 #ifndef _CPU_H
 #define _CPU_H
@@ -55,6 +64,15 @@
 #define DISK_DATA_DEVICE 0x8D
 #define INT_ACK_DEVICE 0xAC
 #define INT_ENABLE_DEVICE 0xAD
+#define CLAUDE_DEVICE 0x9C
+
+#define CLAUDE_SEND 0           /* the Claude device's control chars */
+#define CLAUDE_TOOL 2
+#define CLAUDE_STOP 3
+#define CLAUDE_END 4
+#define CLAUDE_HELLO 0x16
+#define CLAUDE_NEW 0x18
+#define CLAUDE_FIELD 0x1F
 
 #define INT_NMI 0
 #define INT_IRQ 1

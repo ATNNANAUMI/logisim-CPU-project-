@@ -16,9 +16,27 @@ static int pos;
 static int at_eof;
 static int pushed = EOF;
 
+/* a program for Tynix whose stdin is a file (SPAWN_IN): the function that
+   reads its next char, EOF at its end (compiler/libc/tynix/sys.c); the
+   lines come from there, without echo */
+int (*_stdin_get)(void);
+
 static void read_line(void)
 {
     len = pos = 0;
+    if (_stdin_get) {
+        for (;;) {
+            int c = _stdin_get();
+            if (c == EOF) {
+                if (len == 0)
+                    at_eof = 1;
+                return;
+            }
+            line[len++] = c;
+            if (c == '\n' || len == LINE_MAX - 1)
+                return;
+        }
+    }
     for (;;) {
         int c = _read_key();
         if (c == CTRL_D) {

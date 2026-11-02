@@ -431,6 +431,7 @@ is used exactly as written. Load the image in the simulator like any other ROM:
 ```
 python cpu_sim/src/main.py compiler/ROM/hello.rom
 python cpu_sim/src/main.py compiler/ROM/hello.rom --disk disk.img   # with a disk at 0x8C/0x8D (TECHNICAL §1.7)
+python cpu_sim/src/main.py compiler/ROM/hello.rom --claude-model sonnet   # the Claude device's model (0x9C, TECHNICAL §11.5)
 ```
 
 Or do the two steps separately, for example to keep a library assembled:

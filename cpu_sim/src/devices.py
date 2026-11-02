@@ -12,6 +12,7 @@ import time
 from collections import deque
 
 import config as config
+from claude import ClaudeDevice
 
 
 class Display:
@@ -344,6 +345,7 @@ class DeviceBus:
         self.interrupts = InterruptController()
         self.keyboard = Keyboard(self.interrupts)
         self.timer = Timer(interrupts=self.interrupts)
+        self.claude = ClaudeDevice(screenshot=lambda: self._video.png(scale=2))
         self.hex_value = None          # None = nothing sent yet (display blank)
         self._wire()
 
@@ -357,6 +359,7 @@ class DeviceBus:
             config.TIMER_ADDR: self._timer_period,
             config.INT_ACK_ADDR: self.interrupts.acknowledge,
             config.INT_ENABLE_ADDR: self.interrupts.set_enable,
+            config.CLAUDE_ADDR: self.claude.write,
         }
         if self._disk is not None:
             self._outputs[config.DISK_DATA_ADDR] = self._disk.write
@@ -387,6 +390,8 @@ class DeviceBus:
             return self.keyboard.read()
         if self.in_addr == config.TIMER_ADDR:
             return self.timer.read()
+        if self.in_addr == config.CLAUDE_ADDR:
+            return self.claude.read()
         if self.in_addr == config.INT_ACK_ADDR:
             return self.interrupts.status()
         if self.in_addr == config.INT_ENABLE_ADDR:
@@ -430,5 +435,6 @@ class DeviceBus:
         self.video.used = False
         self.timer.reset()
         self.interrupts.reset()
+        self.claude.reset()
         if self.disk is not None:          # the disk keeps its contents
             self.disk.position = 0

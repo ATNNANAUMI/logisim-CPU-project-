@@ -5,7 +5,8 @@ Logisim-evolution 4.1.0, plus its toolchain: an assembler and linker written
 in Python, an assembly standard library, a C compiler ("tiny C") with its
 own C library, and a Python simulator that runs the same ROM images as the
 circuit. Python 3.10+, standard library only (`tkinter` for the simulator
-window). Detailed docs are in `TECHNICAL.md`. The assembly language
+window; the `anthropic` package only for the Claude device, imported when it
+is first used). Detailed docs are in `TECHNICAL.md`. The assembly language
 reference is `compiler/assembly_syntax.md`, the C one `compiler/c_language.md`.
 
 ## Pipeline
@@ -80,12 +81,12 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       21 checks (incl. abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/ed.c, tynix/edit.c, the nine tools)
+│   │   └── selftest.py       23 checks (incl. claude (tynix/claude.c + the device, fake backend), batch (sh -c, run), abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/ed.c, tynix/edit.c, the nine tools)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), memory.asm (memcpy, memset), setjmp.asm,
 │   │                         interrupt.asm (vector stubs; a kernel's stack and task switch); include/sys/tynix.h (system calls, TEX2)
 │   │   └── tynix/            the library of a program for the OS (--exe), replacing namesakes: sys.asm (TRAP), sys.c, fs.c, dir.c,
-│   │                         spawn.c (spawnv, spawn, waitpid, kill, ...), cpu.c (keys and wait_ms through the kernel, gfx hold)
+│   │                         spawn.c (spawnv, spawn, spawn_io, waitpid, kill, ...), cpu.c (keys and wait_ms through the kernel, gfx hold)
 │   ├── examples/             example programs, in folders by kind (asm/ and c/)
 │   │   ├── asm/              assembly
 │   │   │   ├── programs/     hello, print_a-z, count_0-9, sum_1-10, abs_value, stack_reverse, echo (no stdlib); guess, untested (with stdlib)
@@ -118,8 +119,8 @@ logisim-CPU-project-/
 │   │                         at 0x1100000), round robin on the timer (tickless), system calls (TRAP), the only fs.c,
 │   │                         keyboard and screen focus, NMI menu (1 kill, 2 continue, 3 background, 4 tasks), FAULT = 139
 │   ├── shell.c               /bin/sh: prompts with the current directory; built-ins help ls cd pwd cat echo rm mv cp
-│   │                         mkdir rmdir df clear halt jobs fg kill wait (> and >> to a file); any other name runs
-│   │                         /bin/NAME (or a path) and waits, or not with & at the end
+│   │                         mkdir rmdir df clear halt jobs fg kill wait run (> and >> to a file); any other name runs
+│   │                         /bin/NAME (or a path) and waits, or not with & at the end; sh -c LINE: one line
 │   ├── ed.c                  a line editor for text files (a program for /bin: a, i, c, d, p, s, /find, w, q)
 │   ├── edit.c                a full-screen editor on the RGB screen (a program for /bin: arrows, ^S save, ^Q quit)
 │   ├── more.c                show files a page at a time (-n N; space, Enter, q)
@@ -128,7 +129,12 @@ logisim-CPU-project-/
 │   ├── diff.c, hexdump.c     changed lines of two text files (LCS, Unix normal format); values in hex
 │   ├── calc.c                32-bit integer calculator (C precedence; no argument: a line at a time)
 │   ├── visual_file_manager.c a two-pane yazi-like file manager on the RGB screen (j k h l, space select, y x p, u, r d a, ~ home, q)
-│   ├── make_disk.py          tynix/disk.img (git-ignored): TFS1, /bin/sh, ed and the C examples built --exe in /bin, /readme.txt, /home/user (Documents, Downloads, ...)
+│   ├── claude.c              talk to Claude through the Claude device (0x9C): chat, `claude QUESTION`, /commands; runs
+│   │                         Claude's commands (sh -c, stdin/stdout files, timeout kill) and writes its files
+│   ├── cpu_claude.md         the Claude device's system prompt (the machine, ASCII, tools, commands, what not to run)
+│   ├── claude_access.conf    PC paths Claude may read / write (read PATH, write PATH), besides claude/
+│   ├── claude/               Claude's folder on the PC (README.md committed, the rest git-ignored)
+│   ├── make_disk.py          tynix/disk.img (git-ignored): TFS1, /bin/sh, ed, the tools, claude and the C examples built --exe in /bin, /readme.txt, /home/user (Documents, Downloads, ...)
 │   └── run_with_video.sh     builds the kernel and the disk, puts video_player in /bin (a clip.h argument picks the video), starts the simulator
 │
 └── cpu_sim/
@@ -137,16 +143,19 @@ logisim-CPU-project-/
     │   ├── isa.py            decode(), disassemble(), opcode tables
     │   ├── alu.py            int_op(), float_op() → (R0 value, flags)
     │   ├── memory.py         ROM/RAM banks, v2.0 raw loader
-    │   ├── devices.py        Display (0x5C; form feed clears it), Keyboard (0xF0, empty reads 0; `key_code()`: arrows 28–31, Ctrl+letter 1–26), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), Disk (0x8C seek/size, 0x8D data; mmap of a file), DeviceBus (+ hex display value, 0x3C; `send` = the selected output device's function)
+    │   ├── devices.py        Display (0x5C; form feed clears it), Keyboard (0xF0, empty reads 0; `key_code()`: arrows 28–31, Ctrl+letter 1–26), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), Disk (0x8C seek/size, 0x8D data; mmap of a file), DeviceBus (+ hex display value, 0x3C; `send` = the selected output device's function; `claude`)
+    │   ├── claude.py         the Claude device (0x9C): a worker thread calls the Claude API (anthropic SDK, imported on first use),
+    │   │                     the history, /commands, ASCII clean-up, tools (CPU: run_command, write_file; PC: read/list/write
+    │   │                     under tynix/claude_access.conf, screenshot), MODELS + prices; FakeBackend for the checks
     │   ├── cpu.py            CPU: step() (traced), run() (translated blocks + the _interpret() loop), reset(), forget_code(), stack ops, COMM
     │   ├── translate.py      code jumped to 50 times -> one Python function per block (registers as locals, lazy flags);
     │   │                     dispatcher(): an if-tree per bank calling blocks by name (pypy3 compiles it in); RAM code too
     │   │                     (every RAM store checks a map of translated words and drops RAM blocks it hits)
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
-    │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG --screen-fps N]`
+    │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG --screen-fps N --claude-model NAME --claude-system FILE]`
     │   ├── bench.py          speed check: nine example programs in run(), MHz first/best run + end-state digest
-    │   └── selftest.py       43 checks (incl. interrupts, translated code against step() on random code)
+    │   └── selftest.py       51 checks (incl. interrupts, translated code against step() on random code, the Claude device)
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -229,6 +238,9 @@ The design follows the "But How Do It Know?" style: a single bus,
   Disk (simulator only, `--disk FILE`, 64 MB sparse if missing): `0x8C`
   `OUTDATA` = seek to a word, `INDATA` = size in words; `0x8D` `OUTDATA`/
   `INDATA` = write/read one word and move on. No disk: the ports are empty.
+  Claude (simulator only, Phase 8): `0x9C` `OUTDATA` = a char of the message,
+  0 sends it (0x18 new conversation, 0x03 stop, 0x16 hello); `INDATA` = the
+  reply's next char (0 none yet, 4 end of turn, 2 a tool frame for the CPU).
   Filesystem on it: TFS1 (`compiler/src/disk/fs.py`), made/edited by
   `python compiler/src/disk`. Programs for the OS (`cc build --exe`, TEX2)
   run from RAM, each in its own region (from `0x1200000`) that Tynix's kernel
@@ -281,13 +293,15 @@ The design follows the "But How Do It Know?" style: a single bus,
 * Programs for the OS: `cc build --exe` links at `0x1100000` (code, data, a 16K
   stack) and writes a TEX2 `.exe` (8-word header + words + relocation offsets,
   `include/sys/tynix.h`) with `compiler/libc/tynix/`'s files in place of their
-  namesakes: files, directories, keys, `spawnv`/`spawn`/`waitpid`/`kill`,
+  namesakes: files, directories, keys, `spawnv`/`spawn`/`spawn_io`/`waitpid`/`kill`,
   `wait_ms` are system calls (`TRAP`, R1 = number, R2..R5 arguments, R0 the
   answer, negative = -errno). crt0 takes argc, argv and the heap's end
   (`_heap_end`) from the block in R1 and exits by `TRAP`. The kernel
   (`tynix/kernel.c`, a ROM program; `_loads_programs` keeps its heap below
   `0x1100000`) runs them several at once; `tynix/shell.c` is `/bin/sh`.
-  `gfx_lost()`: redraw after another program had the screen.
+  `gfx_lost()`: redraw after another program had the screen. A child gets
+  the caller's stdout and stdin (files when the caller's are); `spawn_io` /
+  `SPAWN_IN(fd)` gives it a stdin file (`B_IN`, `isatty(0)` 0).
 * Tests: `compiler/src/cc/tests/*.c` must print exactly gcc's output
   (`.expected`); `difftest.py` checks with gcc.
 
@@ -313,6 +327,7 @@ python compiler/src/img/video.py clip.mp4 [--fps 10] [--seconds 5]  # video -> c
 python compiler/src/disk format disk.img; python compiler/src/disk put disk.img notes.txt   # disk images (ls get cat rm mkdir mv df fsck)
 python tynix/make_disk.py; python compiler/src/cc build tynix/kernel.c          # the OS: tynix/disk.img with /bin/sh and /bin, the kernel's ROM
 python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img         # run it, type help (primes &, jobs, fg N, kill N)
+python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img --claude-model haiku   # then type claude (needs pip install anthropic + a key)
 tynix/run_with_video.sh [clip.h]                                                 # the same with video_player in /bin: type /bin/video_player
 pypy3 compiler/src/cc run compiler/examples/c/graphics/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
 pypy3 cpu_sim/src/bench.py [life sqrt ...]                          # simulator speed in MHz (python: --scale 0.1 by default)
@@ -349,5 +364,12 @@ pypy3 cpu_sim/src/bench.py [life sqrt ...]                          # simulator 
   kernel: `--exe` programs must not install their own. A TEX1 program runs
   alone and its heap is not bounded. Only the foreground program draws;
   programs that cache the screen must check `gfx_lost()`.
+* Claude (Phase 8): the device's history lives in the simulator (Python),
+  not the CPU; `cpu_sim/src/claude.py` imports `anthropic` only when used, so
+  never import it at module level. Its self-checks use `FakeBackend` (no
+  network). Prices and model names are one table (`MODELS`): they drift.
+  `claude` polls the device (no interrupt). A program Claude runs gets stdin
+  from a file: full-screen and key-polling programs would hang until the
+  timeout, and `tynix/cpu_claude.md` says not to run them.
 * Outdated notes: `logisim/cpu datas/` (see TECHNICAL.md §9). The old
   hand-assembled programs were removed on 2026-10-06 (still in git history).

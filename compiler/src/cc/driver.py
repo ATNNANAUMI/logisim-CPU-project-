@@ -389,14 +389,18 @@ def format_map(program, title):
 
 # ------------------------------------------------------------------ running
 
-def run_in_simulator(rom_words, keys="", max_steps=50_000_000, trace=False, disk=None):
+def run_in_simulator(rom_words, keys="", max_steps=50_000_000, trace=False, disk=None,
+                     claude_model=None, claude_system=None):
     """Run a ROM image in the Python simulator. Returns (cpu, display text).
-    disk: a disk image file for devices 0x8C/0x8D, created if missing."""
+    disk: a disk image file for devices 0x8C/0x8D, created if missing.
+    claude_model, claude_system: the Claude device's (0x9C) model and system
+    prompt file (ValueError for an unknown model)."""
     if str(SIM_DIR) not in sys.path:
         sys.path.append(str(SIM_DIR))
     from cpu import CPU                      # cpu_sim/src
 
     cpu = CPU()
+    cpu.bus.claude.configure(claude_model, claude_system)
     cpu.mem.load_rom(rom_words)
     if keys:
         cpu.bus.keyboard.type(keys)

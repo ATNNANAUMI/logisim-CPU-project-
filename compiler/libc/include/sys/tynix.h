@@ -13,7 +13,7 @@
 
 /* processes */
 #define SYS_EXIT 0          /* (status) never returns */
-#define SYS_SPAWN 1         /* (path, argv, out_fd, flags) -> pid */
+#define SYS_SPAWN 1         /* (path, argv, out_fd, flags) -> pid; flags: SPAWN_FG | SPAWN_IN(fd) */
 #define SYS_WAIT 2          /* (pid or -1, flags, int *who) -> status, or WAIT_BACKGROUND, WAIT_RUNNING */
 #define SYS_KILL 3          /* (pid) */
 #define SYS_GETPID 4
@@ -45,6 +45,7 @@
 #define SYS_WAITFG 41       /* sleep until this program is in the foreground */
 
 #define SPAWN_FG 1          /* SYS_SPAWN: the new program gets the foreground */
+#define SPAWN_IN(fd) ((fd) << 8)    /* SYS_SPAWN: its stdin (fd 0) is that open file (0: the caller's) */
 #define WAIT_NOHANG 1       /* SYS_WAIT: don't sleep, return WAIT_RUNNING if it still runs */
 #define WAIT_BACKGROUND (-1000) /* SYS_WAIT's result: the NMI menu sent it to the background */
 #define WAIT_RUNNING (-1001)
@@ -58,7 +59,8 @@
 #define B_OUT 4             /* 1: stdout (fd 1) is a file, from the shell's > */
 #define B_FG 5              /* the address of the kernel's word holding the foreground pid */
 #define B_LOST 6            /* 1: the RGB screen was taken away and given back (redraw) */
-#define B_WORDS 7
+#define B_IN 7              /* 1: stdin (fd 0) is a file, not the keyboard (SPAWN_IN, or the parent's) */
+#define B_WORDS 8
 
 /* SYS_TASKS fills these */
 struct task_info {
