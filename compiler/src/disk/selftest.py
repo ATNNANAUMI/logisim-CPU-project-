@@ -592,6 +592,18 @@ SHELL_KEYS = ("help\n"
               "/bin/echo r3 >> /p.txt\n"
               "/bin/echo > /q.txt\n"
               "cat /p.txt /q.txt\n"
+              "cat < /b.txt\n"
+              "cat </b.txt >/c.txt\n"
+              "cat /c.txt\n"
+              "cat < /nope\n"
+              "cat < /docs\n"
+              "ls < /b.txt\n"
+              "cat <\n"
+              "echo \"echo from a file\" > /s.txt\n"
+              "echo \"/bin/echo and a program\" >> /s.txt\n"
+              "/bin/sh < /s.txt > /t.txt\n"
+              "cat /t.txt\n"
+              "/bin/echo x < /nope\n"
               "cd ..\n"
               "cat > typed.txt\n"
               "line 1\n"
@@ -600,6 +612,14 @@ SHELL_KEYS = ("help\n"
               "rmdir docs\n"
               "ls\n"
               "df\n"
+              "ec\thi\n"                 # Tab: echo is a built-in and in /bin, one name
+              "\x1c\n"                     # Up: the last line again
+              "cat /b.t\t\n"             # Tab on a path
+              "c\t"                         # several names, nothing to add: listed
+              "d /bi\t\n"                 # cd /bin/
+              "/\t\x08\x08\x08\x08\x08pwd\n"     # no name to add at /, then backspaces
+              "\x1c\x1c\x1c\x1d\n"      # Up 3, Down 1: two lines back
+              "\x1c\x1c\x1d\x1d xyz\x1e\x1f\x08\x08\x08\x08\n"   # back to the empty line
               "halt\n")
 
 SHELL_OUTPUT = """\
@@ -653,6 +673,29 @@ nope: no such command (help lists them)
 r1 r2
 r3
 /bin/echo: no arguments (argc = 1)
+/docs> cat < /b.txt
+two  spaces
+more
+/docs> cat </b.txt >/c.txt
+/docs> cat /c.txt
+two  spaces
+more
+/docs> cat < /nope
+cat: /nope: No such file or directory
+/docs> cat < /docs
+cat: /docs: Is a directory
+/docs> ls < /b.txt
+ls: < works for programs and a bare cat only
+/docs> cat <
+< needs a file name
+/docs> echo "echo from a file" > /s.txt
+/docs> echo "/bin/echo and a program" >> /s.txt
+/docs> /bin/sh < /s.txt > /t.txt
+/docs> cat /t.txt
+from a file
+and a program
+/docs> /bin/echo x < /nope
+/bin/echo: /nope: No such file or directory
 /docs> cd ..
 /> cat > typed.txt
 line 1
@@ -660,18 +703,38 @@ line 1
 line 1
 /> rmdir docs
 /> ls
-bin/  readme.txt  a.txt  b.txt  e2  p.txt  q.txt  typed.txt
+bin/  readme.txt  a.txt  b.txt  e2  p.txt  q.txt  c.txt  s.txt
+t.txt  typed.txt
 /> df
 {df}
-/> halt
+/> echo hi
+hi
+/> echo hi
+hi
+/> cat /b.txt 
+two  spaces
+more
+/> c
+cd  cat  cp  clear
+/> cd /bin/
+/bin> /
+bin/  readme.txt  a.txt  b.txt  e2  p.txt  q.txt  c.txt  s.txt
+t.txt  typed.txt
+/bin> pwd
+/bin
+/bin> cd /bin/
+/bin> 
+/bin> halt
 CPU halted
 """
 
 
 def check_shell():
     """tynix/shell.c on a disk made by tynix/make_disk.py: built-in commands, >
-    and >>, quotes, a program from /bin with its arguments and exit status,
-    the errors, cat from the keyboard up to Ctrl-D, df against fs.py."""
+    and >>, <, quotes, a program from /bin with its arguments and exit status,
+    the errors, cat from the keyboard up to Ctrl-D, df against fs.py, and at
+    the prompt Tab (a command, a path, several names listed) and Up/Down
+    through the last lines."""
     import sys
     root = HERE.parent.parent.parent
     sys.path.append(str(root / "tynix"))
@@ -697,6 +760,8 @@ def check_shell():
         assert disk.get("/a.txt") == b"two  spaces\nmore\n" == disk.get("/b.txt")
         echo = disk.lookup("/bin/echo").length
         assert disk.lookup("/e2").length == echo and not disk.lookup("/e2").packed
+        assert disk.get("/c.txt") == disk.get("/b.txt")              # cat < f > g
+        assert disk.get("/t.txt") == b"from a file\nand a program\n"   # sh < script
         assert disk.get("/typed.txt") == b"line 1\n" and disk.get("/e2") == disk.get("/bin/echo")
         assert echo > sizes["echo"] + 8           # TEX2: the header, the words, the relocations
         assert disk.check() == [], disk.check()
@@ -1787,6 +1852,221 @@ def check_batch():
     return f"{cpu.instructions} instructions"
 
 
+SHOWENV = r"""
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+/* showenv NAME...: each one's value from getenv(); showenv -s: set
+   CHILD=yes in its own environment, then run showenv CHILD X */
+int main(int argc, char **argv)
+{
+    int i;
+    if (argc == 2 && argv[1][0] == '-') {
+        char *child[] = {"showenv", "CHILD", "X", 0};
+        setenv("CHILD", "yes", 1);
+        unsetenv("X");
+        return spawnv("/bin/showenv", child);
+    }
+    for (i = 1; i < argc; i++) {
+        char *v = getenv(argv[i]);
+        printf("%s=%s\n", argv[i], v ? v : "(not set)");
+    }
+    return 0;
+}
+"""
+
+
+def check_environment():
+    """Environment variables: export passes them to programs (getenv), set
+    keeps them in the shell, $NAME ${NAME} and $? expand except inside
+    '...', unset, env, PATH searched in order, /etc/profile run at start, a
+    program's own setenv/unsetenv inherited by the programs it starts."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+
+    image = os.path.join(TMP.name, "env.img")
+    make_disk.make(image, programs=["echo"], new=True, size_mb=1, log=lambda _: None)
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "showenv.c").write_text(SHOWENV)
+        program, _ = driver.build([str(Path(tmp) / "showenv.c")], exe=True)
+        exe = driver.exe_bytes(program)
+    with FileSystem(image) as disk:
+        disk.put("/bin/showenv", exe, binary=True)
+        disk.mkdir("/mine")
+        disk.put("/mine/other", exe, binary=True)
+        disk.mkdir("/etc")
+        disk.put("/etc/profile", b"# kept on the disk\nexport FROM=profile\nset GREETING=hi\n")
+    keys = ("showenv FROM GREETING PATH HOME PWD\n"
+            "export X=1\n"
+            "sh -c 'echo $X'\n"
+            "showenv X\n"
+            "set Y=two words\n"
+            "set 'Y=two  words'\n"
+            'echo $Y "[$Y]" \'$Y\' ${Y}! $ ${bad $NOPE.\n'
+            "showenv Y\n"
+            "export Y\n"
+            "showenv Y\n"
+            "set\n"
+            "nope\n"
+            "echo $?\n"
+            "echo $?\n"
+            "showenv -s\n"
+            "showenv CHILD X\n"
+            "other X\n"
+            "export PATH=/bin:/mine\n"
+            "other X\n"
+            "unset X 1x\n"
+            "showenv X\n"
+            "cd /mine\n"
+            "env\n"
+            "halt\n")
+    cpu, text = driver.run_in_simulator(_kernel().rom, keys, 80_000_000, disk=image)
+    assert cpu.halted, text
+    expect = """Tynix shell: help lists the commands
+/> showenv FROM GREETING PATH HOME PWD
+FROM=profile
+GREETING=(not set)
+PATH=/bin
+HOME=/
+PWD=/
+/> export X=1
+/> sh -c 'echo $X'
+1
+/> showenv X
+X=1
+/> set Y=two words
+set: words: give it as NAME=value
+/> set 'Y=two  words'
+/> echo $Y "[$Y]" '$Y' ${Y}! $ ${bad $NOPE.
+two  words [two  words] $Y two  words! $ ${bad .
+/> showenv Y
+Y=(not set)
+/> export Y
+/> showenv Y
+Y=two  words
+/> set
+GREETING=hi
+/> nope
+nope: no such command (help lists them)
+/> echo $?
+127
+/> echo $?
+0
+/> showenv -s
+CHILD=yes
+X=(not set)
+/> showenv CHILD X
+CHILD=(not set)
+X=1
+/> other X
+other: no such command (help lists them)
+/> export PATH=/bin:/mine
+/> other X
+X=1
+/> unset X 1x
+unset: 1x: not a name (letters, digits, _)
+/> showenv X
+X=(not set)
+/> cd /mine
+/mine> env
+PATH=/bin:/mine
+HOME=/
+PWD=/mine
+FROM=profile
+Y=two  words
+/mine> halt
+CPU halted
+"""
+    assert text == expect, "\n".join(
+        f"{i}: {a!r} != {b!r}" for i, (a, b) in enumerate(zip(text.splitlines(), expect.splitlines()))
+        if a != b) or text
+    return f"{cpu.instructions} instructions"
+
+
+def check_snapshot():
+    """cpu_sim/src/snapshot.py: a C program (ROM) and the kernel with a disk
+    running /bin programs, each saved after N instructions, loaded into a
+    fresh CPU (the kernel's with a copy of the disk) and run on: the same
+    end as the first CPU going on from the same point (both without
+    translated code then: it is a cache, and where run() takes an interrupt
+    can depend on it). Also --save-state / --load-state on the command line."""
+    import shutil
+    import subprocess
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    sys.path.append(str(root / "cpu_sim" / "src"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+    import snapshot                     # cpu_sim/src
+    from cpu import CPU
+    from devices import Timer
+
+    def machine(rom, disk=None, keys=""):
+        cpu = CPU()
+        cpu.bus.timer = Timer(clock=lambda: 0.0)        # the same run every time
+        cpu.mem.load_rom(rom)
+        if disk:
+            cpu.bus.attach_disk(disk)
+        cpu.bus.keyboard.type(keys)
+        return cpu
+
+    tmp = Path(TMP.name)
+    primes, _ = driver.build([str(root / "compiler" / "examples" / "c" / "basics" / "primes.c")])
+    image = str(tmp / "snap.img")
+    make_disk.make(image, programs=["echo", "primes"], new=True, size_mb=1, log=lambda _: None)
+    kernel = _kernel()
+    notes = []
+    for name, rom, disk, keys, first, rest in (
+            ("primes", primes.rom, None, "", 60_000, 3_000_000),
+            ("kernel", kernel.rom, image, "primes\necho one two > /x.txt\ncat /x.txt\nls /bin\nhalt\n", 1_000_000, 60_000_000)):
+        a = machine(rom, disk, keys)
+        a.run(first)
+        assert not a.halted, f"{name}: ended before the snapshot"
+        state = str(tmp / f"{name}.state")
+        snapshot.save(a, state, f"{name}.rom")
+        copy = None
+        if disk:
+            copy = str(tmp / "snap-copy.img")
+            shutil.copy2(disk, copy)                    # the same file, its time kept
+        b = CPU()
+        b.bus.timer = Timer(clock=lambda: 0.0)
+        _, warnings = snapshot.load(b, state, disk=copy)
+        assert warnings == [] and snapshot.digest(a) == snapshot.digest(b), (name, warnings)
+        a.forget_code()
+        for cpu in (a, b):
+            cpu.run(rest)
+        assert a.halted and b.halted, (name, a.bus.display.text[-300:])
+        assert snapshot.digest(a) == snapshot.digest(b), f"{name}: the loaded CPU ended elsewhere"
+        if disk:
+            a.bus.attach_disk(None)
+            b.bus.attach_disk(None)
+            assert open(disk, "rb").read() == open(copy, "rb").read(), "the two disks differ"
+            assert "303 primes" in b.bus.display.text and "\none two\n" in b.bus.display.text
+            # loading with the first disk, which /x.txt changed meanwhile: a warning
+            c = CPU()
+            _, warnings = snapshot.load(c, state)
+            assert len(warnings) == 1 and "changed" in warnings[0], warnings
+            c.bus.attach_disk(None)
+        notes.append(f"{name} {os.path.getsize(state) // 1024} KB")
+    # the command line: save at the end of a headless run, go on from it
+    rom_file = tmp / "primes.rom"
+    rom_file.write_text(driver.linker.format_raw(primes.rom))
+    main = str(root / "cpu_sim" / "src" / "main.py")
+    out = subprocess.run([sys.executable, main, str(rom_file), "--headless", "--steps", "100000",
+                          "--save-state", str(tmp / "cli.state")], capture_output=True, text=True)
+    assert out.returncode == 0 and "snapshot saved" in out.stdout, out.stdout + out.stderr
+    out = subprocess.run([sys.executable, main, "--load-state", str(tmp / "cli.state"), "--headless",
+                          "--steps", "5000000"], capture_output=True, text=True)
+    assert out.returncode == 0 and "303 primes" in out.stdout and "HALTED" in out.stdout, out.stdout + out.stderr
+    return ", ".join(notes)
+
+
 CHECKS = [
     check_format,
     check_text_round_trip,
@@ -1810,6 +2090,8 @@ CHECKS = [
     check_screen_editor,
     check_tools,
     check_batch,
+    check_environment,
+    check_snapshot,
     check_claude,
 ]
 

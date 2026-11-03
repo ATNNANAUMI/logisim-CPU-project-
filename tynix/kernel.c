@@ -12,7 +12,8 @@
  *
  *   programs   TEX2 files (cc build --exe) are loaded anywhere: a region of
  *              RAM above 0x1200000 (first fit, 1M words unless the file asks
- *              for more), [code + data][stack][heap ... argv], relocated.
+ *              for more), [code + data][stack][heap ... environment, argv],
+ *              relocated; the environment is a copy of the parent's.
  *              TEX1 files (the old fixed-address format) go to 0x1100000,
  *              the megaword kept for them, and run alone: the others wait
  *              until it ends (it uses the disk with its own fs.c).
@@ -465,9 +466,10 @@ static int load_program(struct task *parent, const char *path, char **argv, int 
 {
     _Node node;
     unsigned head[TEX2_HEADER], load, n, entry, zero, stack, want, nrel, words, argc = 0, chars = 0;
-    unsigned base, delta, at, i, top;
+    unsigned base, delta, at, i, top, envc = 0, env_chars = 0;
     struct task *t;
-    char **args;
+    char **args, **env;
+    char **penv = parent && !parent->exclusive ? (char **)parent->block[B_ENV] : 0;
     char *p;
     int tex1;
     int in_fd = flags >> 8 & 0xFF;
@@ -503,7 +505,12 @@ static int load_program(struct task *parent, const char *path, char **argv, int 
         chars += strlen(argv[argc]) + 1;
         argc++;
     }
-    words = n + zero + stack + MIN_HEAP + argc + 1 + chars;
+    while (penv && penv[envc] && envc < ENV_MAX                 /* the parent's environment */
+           && env_chars + strlen(penv[envc]) + 1 <= ENV_CHARS) {
+        env_chars += strlen(penv[envc]) + 1;
+        envc++;
+    }
+    words = n + zero + stack + MIN_HEAP + argc + 1 + chars + envc + 1 + env_chars;
     if (want > HIGH - LOW)
         return -ENOMEM;
     if (want > words)
@@ -535,7 +542,8 @@ static int load_program(struct task *parent, const char *path, char **argv, int 
     strcpy(t->cwd, parent ? parent->cwd : "/");
     p = argv && argv[0] ? strrchr(argv[0], '/') : 0;
     strncpy(t->name, p ? p + 1 : argv && argv[0] ? argv[0] : path, sizeof t->name - 1);
-    /* argv at the top of the region: the pointers, then the strings */
+    /* argv at the top of the region: the pointers, then the strings; the
+       environment below it, the same way */
     top = base + words - (argc + 1 + chars);
     args = (char **)top;
     p = (char *)(top + argc + 1);
@@ -545,6 +553,15 @@ static int load_program(struct task *parent, const char *path, char **argv, int 
         p += strlen(p) + 1;
     }
     args[argc] = 0;
+    top -= envc + 1 + env_chars;
+    env = (char **)top;
+    p = (char *)(top + envc + 1);
+    for (i = 0; i < envc; i++) {
+        env[i] = p;
+        strcpy(p, penv[i]);
+        p += strlen(p) + 1;
+    }
+    env[envc] = 0;
     if (out) {
         out->refs++;
         t->fd[1] = out - objs + 1;
@@ -560,6 +577,7 @@ static int load_program(struct task *parent, const char *path, char **argv, int 
     t->block[B_OUT] = out != 0;
     t->block[B_IN] = in != 0;
     t->block[B_FG] = (unsigned)&fg_pid;
+    t->block[B_ENV] = (unsigned)env;
     if (tex1) {                                 /* its old block: argc, argv, way back, cwd, put */
         t->block[2] = (unsigned)tex1_exit;
         t->block[3] = (unsigned)t->cwd;

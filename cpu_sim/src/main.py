@@ -6,9 +6,12 @@
         (--screen out.png saves the RGB screen at the end)
     python cpu_sim/src/main.py prog.rom --disk disk.img        with a disk (created if missing)
     python cpu_sim/src/main.py prog.rom --claude-model sonnet  the model of the Claude device (0x9C)
+    python cpu_sim/src/main.py prog.rom --headless --save-state run.state   the whole machine at the end
+    python cpu_sim/src/main.py --load-state run.state [--disk d.img]        go on from there (snapshot.py)
 """
 
 import argparse
+import zipfile
 
 from cpu import CPU
 from memory import load_image
@@ -82,19 +85,36 @@ def main() -> None:
                              "fable, or a model id; /model changes it later")
     parser.add_argument("--claude-system", metavar="FILE",
                         help="the Claude device's system prompt (default tynix/cpu_claude.md)")
+    parser.add_argument("--load-state", metavar="FILE",
+                        help="start from a snapshot (ROM, RAM, registers, devices) instead of a reset; "
+                             "--disk attaches another disk than the one it names")
+    parser.add_argument("--save-state", metavar="FILE",
+                        help="headless: save a snapshot of the whole machine at the end")
     args = parser.parse_args()
 
+    rom_path = args.rom
     try:
-        cpu = build_cpu(args.rom, args.ram, args.disk, args.claude_model, args.claude_system)
-    except (ValueError, OSError) as error:
+        cpu = build_cpu(args.rom, args.ram, None if args.load_state else args.disk,
+                        args.claude_model, args.claude_system)
+        if args.load_state:
+            import snapshot
+            saved_rom, warnings = snapshot.load(cpu, args.load_state, disk=args.disk)
+            rom_path = rom_path or saved_rom
+            for warning in warnings:
+                print(f"warning: {warning}")
+    except (ValueError, OSError, KeyError, zipfile.BadZipFile) as error:
         parser.error(str(error))
     try:
         if args.headless:
             run_headless(cpu, args.steps, args.trace, args.keys, args.screen)
+            if args.save_state:
+                import snapshot
+                snapshot.save(cpu, args.save_state, rom_path)
+                print(f"(snapshot saved to {args.save_state})")
             return
 
         from gui import SimulatorWindow
-        SimulatorWindow(cpu, rom_path=args.rom, screen_fps=args.screen_fps).mainloop()
+        SimulatorWindow(cpu, rom_path=rom_path, screen_fps=args.screen_fps).mainloop()
     finally:
         cpu.bus.attach_disk(None)
 

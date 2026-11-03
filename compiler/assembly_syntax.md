@@ -462,6 +462,20 @@ main.asm:12: unknown name 'prnt_newline' (a typo, or a missing .extern?)
 Object files (`.obj`) are JSON, so you can open one to see the words, labels
 and the relocations the linker will fill in.
 
+Turn a ROM image (or a program for the OS, `.exe`) back into assembly with
+`disasm`. What it writes builds exactly the same words again:
+
+```
+python compiler/src/asm disasm compiler/ROM/hello.rom                 # -> compiler/ROM/hello.dis.asm
+python compiler/src/asm disasm compiler/ROM/prog.rom --map compiler/ROM/prog.map   # the map's label names
+python compiler/src/asm build compiler/ROM/hello.dis.asm -o again.rom # the same words as hello.rom
+```
+
+Labels come from the `.map` when you give it, otherwise they are made up
+(`L_1e` for code at `0x1e`, `R_1000004` for RAM); a value that only looks
+like an address is marked `; guess`. `CALL` and `RET` are written as the
+pseudo-ops (`--raw`: as their instructions), chars ending in 0 as `.string`.
+
 Check the tools themselves with:
 
 ```

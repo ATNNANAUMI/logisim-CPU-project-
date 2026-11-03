@@ -3,12 +3,16 @@
     python compiler/src/asm assemble prog.asm         -> compiler/ROM/prog.obj
     python compiler/src/asm link prog.obj lib.obj     -> compiler/ROM/prog.rom
     python compiler/src/asm build prog.asm lib.asm    -> compiler/ROM/prog.rom
+    python compiler/src/asm disasm prog.rom [--map prog.map] [--raw]   -> compiler/ROM/prog.dis.asm
 
 Everything is written to compiler/ROM/ (found from this file's location, so
 it works from any folder). -o picks the output: a bare name (-o demo.rom)
 still goes into compiler/ROM/, a path with a folder (-o out/demo.rom,
 -o ./demo.rom) is used as written. --map (link and build) also writes a .map
 file next to the .rom, listing every label's final address.
+
+disasm reads a .rom image or a .exe program for the OS (TEX2) and writes
+assembly that builds the same words (disasm.py says how).
 
 --lib FILE (link and build, repeatable) links FILE as a library: only the
 functions the program uses (and what they use) go in, after the other files:
@@ -104,6 +108,14 @@ def run_link(args):
         print(f"{map_path}: label addresses")
 
 
+def run_disasm(args):
+    import disasm
+    text = disasm.disassemble_file(args.input, args.map, args.raw)
+    out = output_path(args.output, args.input, ".dis.asm")
+    out.write_text(text, encoding="utf-8")
+    print(f"{out}: {text.count(chr(10))} lines")
+
+
 def main(argv=None):
     cli = argparse.ArgumentParser(
         prog="python compiler/src/asm",
@@ -125,10 +137,18 @@ def main(argv=None):
         p.add_argument("--lib", action="append", metavar="FILE",
                        help="link FILE as a library: only the parts the program needs")
 
+    p = commands.add_parser("disasm", help="a .rom or .exe back to assembly that builds the same words")
+    p.add_argument("input")
+    p.add_argument("-o", "--output", help="output file (default: compiler/ROM/<input>.dis.asm)")
+    p.add_argument("--map", metavar="MAP", help="the .map written with it: label names, code entries")
+    p.add_argument("--raw", action="store_true", help="CALL and RET as their instructions")
+
     args = cli.parse_args(argv)
     try:
         if args.command == "assemble":
             run_assemble(args)
+        elif args.command == "disasm":
+            run_disasm(args)
         else:
             run_link(args)
     except AsmErrors as e:

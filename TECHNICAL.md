@@ -223,7 +223,7 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 | --- | --- | --- |
 | `0x5C` | text display (TTY) | prints the low 7 bits as ASCII; `0x0A` newline, `0x08` backspace, `0x0C` (form feed) clears it (Logisim's `TTY` does this; read in its code, not run on the circuit) |
 | `0x3C` | number display | latches the 32-bit word and shows it on 8 hex digits (the simulator shows it in the window, and as `HEX DISPLAY:` in headless output) |
-| `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08`, printable ASCII as itself; simulator only so far: arrows up/down/left/right = 28/29/30/31, Ctrl-A … Ctrl-Z = 1 … 26 (Ctrl-D = 4; Ctrl-H, Ctrl-J, Ctrl-M are Backspace and Enter; Ctrl-C and Ctrl-V stay with the window) |
+| `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08`, printable ASCII as itself; simulator only so far: Tab = 9, arrows up/down/left/right = 28/29/30/31, Ctrl-A … Ctrl-Z = 1 … 26 (Ctrl-D = 4; Ctrl-H, Ctrl-I, Ctrl-J, Ctrl-M are Backspace, Tab and Enter; Ctrl-C and Ctrl-V stay with the window) |
 | `0x6C` | RGB screen | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; a 256×256 RGB Video uses all 32 bits (a smaller one would wire only the low bits of x and y). Write-only |
 | `0x6D` | RGB screen clear (*simulator only*) | any word pulses the RGB Video's reset: all black. Not built on the circuit yet, where it does nothing |
 | `0x7C` | timer (*planned*) | `INDATA` reads the milliseconds since reset, wrapping at 32 bits; C's `clock()` |
@@ -693,7 +693,8 @@ modules import each other by plain name, so run them as scripts
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 51 checks on the core and the Claude device |
+| `snapshot.py` | `save(cpu, path)` / `load(cpu, path, disk=None)`: the whole machine in a file (3.3, "Snapshots"); `digest(cpu)` for the checks |
+| `selftest.py` | 52 checks on the core and the Claude device |
 | `bench.py` | the simulator's speed on nine example programs (3.3) |
 
 ### 3.2 Execution model
@@ -774,7 +775,7 @@ never translated), and `os` stayed about the same (12.8–15.8 against 15.3–16
 ### 3.3 Running it
 
 ```
-python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--trace] [--keys TEXT] [--screen FILE.png] [--disk FILE] [--screen-fps N] [--claude-model NAME] [--claude-system FILE]
+python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--trace] [--keys TEXT] [--screen FILE.png] [--disk FILE] [--screen-fps N] [--claude-model NAME] [--claude-system FILE] [--load-state FILE] [--save-state FILE]
 ```
 
 * without `--headless`: opens the window with the ROM loaded
@@ -793,10 +794,14 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
   (the default, `claude-haiku-5-5`), `sonnet`, `opus`, `fable` or one of
   their ids; anything else is refused. `/model` changes it later
 * `--claude-system FILE`: its system prompt instead of `tynix/cpu_claude.md`
+* `--save-state FILE` (headless): save a snapshot of the whole machine at the
+  end of the run; `--load-state FILE`: start from one instead of a reset (the
+  ROM comes from it, so no ROM argument is needed; `--disk` attaches another
+  disk than the one it names). See "Snapshots" below
 
 **The window:**
 
-* left: load ROM/RAM, attach a disk (a file dialog; a new name creates one), reset, step, run/pause, resume (after `HALT`), a speed
+* left: load ROM/RAM, attach a disk (a file dialog; a new name creates one), reset, save state / load state (snapshots, below), step, run/pause, resume (after `HALT`), a speed
   dropdown (1 Hz … 1 MHz, or `max`), and a trace toggle. Below them: the 16
   registers, IAR, ESP, EBP, the flags as checkboxes, and a status block (bank,
   selected devices, the disk and its position, the Claude device's state
@@ -810,6 +815,28 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
   a second while a program runs), the hex
   display, the keyboard field
   (`0xF0`), and the last executed instructions
+
+**Snapshots** (`snapshot.py`, 2026-11-03). The window's **save state** and
+**load state** buttons (and `--save-state` / `--load-state`) keep the whole
+machine in one file, a zip: `state.json` (format 1: the registers, IAR,
+flags, ESP, EBP, the stack limit, the interrupt bits, halted/stopped, the
+instruction count; the selected device addresses, the text display, the hex
+display, the keyboard buffer, the timer's milliseconds and period, the
+interrupt controller, the disk's path, position, size and modification time;
+the ROM's path and SHA-1), `rom` and `ram` (each bank in chunks of 64K words,
+only the chunks that are not all 0, zlib-compressed: a C program is about 10
+KB, the kernel with two programs loaded 65 KB) and `video` (the RGB screen's
+pixels). Not kept: the disk's contents (loading warns when its file changed
+since, and `--disk` or `load(cpu, path, disk=...)` attaches another, a copy
+made at the time for instance), the Claude device's conversation (it starts
+afresh) and the translated code (a cache, made again as the program runs).
+The timer goes on from its saved milliseconds. The checks: a program with
+timer interrupts (a clock that counts instructions) saved after 1,500 steps,
+loaded into a fresh CPU, and both run 3,000 more steps to the same digest
+(simulator suite); `primes.c` and the kernel with a disk running `/bin`
+programs saved mid-run and both run to `HALT` the same way, the kernel's on
+a copy of the disk (disk suite: the first CPU goes on without its translated
+code too, since where `run()` takes an interrupt can depend on it).
 
 **How the window paces itself** (2026-11-01; `gui.py`). The simulator and the
 window share one thread, and the program's clock (the timer, 1.7) goes on
@@ -862,7 +889,7 @@ the end (lines in a deeper frame, EBP above the current one, don't count),
 `debuginfo.py`.
 
 The keyboard field is read-only: every key goes straight into the buffer
-(Enter as `0x0A`, Backspace as `0x08`, printable ASCII as itself, the arrows as 28–31, Ctrl+letter as 1–26; `key_code()` in `devices.py`).
+(Enter as `0x0A`, Backspace as `0x08`, Tab as `0x09`, printable ASCII as itself, the arrows as 28–31, Ctrl+letter as 1–26; `key_code()` in `devices.py`; Shift-Tab stays with the window).
 Pasting types the clipboard one key at a time. The field shows the keys still
 waiting to be read.
 
@@ -904,7 +931,57 @@ explains how the tools work.
 python compiler/src/asm assemble prog.asm            [-o prog.obj]
 python compiler/src/asm link     prog.obj lib.obj    [-o prog.rom] [--map] [--lib lib.obj]
 python compiler/src/asm build    prog.asm lib.asm    [-o prog.rom] [--map] [--lib lib.asm]
+python compiler/src/asm disasm   prog.rom|prog.exe   [-o prog.dis.asm] [--map prog.map] [--raw]
+python compiler/src/asm/isa_page.py                  [-o isa.html]
 ```
+
+`isa_page.py` (2026-11-03) writes the instruction set as one self-contained
+HTML page (default `compiler/ROM/isa.html`): a row for each row of
+`assembly_syntax.md` section 4 (parsed, so the page follows the doc), and for
+the one clicked its encoding as a 16-bit field drawn from the word the
+assembler writes for an example, the flags it changes (the measured carry
+facts of 8), and its micro-steps from `logisim/microcode/microcode.py` (a
+conditional jump's last step both ways; group `0x2` is marked "simulator
+only": the microcode has no steps for it). A decoder turns a hex word into
+the instruction by `isa.py`'s rules (a word no mnemonic writes still runs as
+something: `0x2A00` is `JMRB R0`), with tables built from `encoding.py`; an
+encoder builds the words from a form, RA, RB, the flags and a value (where
+each field goes was found by assembling the form with different registers,
+so `NOT` puts RB in both fields). The assembler suite runs the page's
+decoding in Python on all 65,536 words against `isa.py`; `check_docs.py`
+checks that section 4 and `encoding.py` name the same instructions.
+
+`disasm` (`disasm.py`, 2026-11-03) writes a ROM image or a program for the
+OS (TEX2) back as assembly that builds **the same words** (default output
+`compiler/ROM/<name>.dis.asm`). Each instruction word is assembled once to
+check that the assembler writes that text as exactly that word; one it
+writes otherwise (`NOT` with RA ≠ RB, an `STK PUSH` with RB set) stays a
+`.word`. The linker's part is rebuilt rather than written: from a ROM image
+the vectors and start-up code give `start`, the interrupt handlers that are
+not the defaults (`_nmi` ... `_fault`, made `.global`), the RAM the files
+reserve (one `.space` in `.ram`, with labels where code points) and the
+stack's size (a comment when it isn't 16K words); from a `.exe` the entry
+jump gives `start`, and the header the data, stack and region sizes. Code is
+followed from `start`, the handlers, the map's ROM labels (not the C
+compiler's data labels `_S`, `_F`, `_C`, `_G`, `_V`) and the targets of `DATA
+R0, x` + `STK PUSH` (a return address) and `DATA Rn, x` + `JMRB Rn`; what is
+not reached is data: `.word`, or `.string "..."` for printable chars ending
+in a 0. Labels: the map's names (made unique with `__2` ...), else
+`L_<address>` (code) and `R_<address>` (RAM); a reference inside an
+instruction is `label + k`. In a `.exe` the relocation list says exactly
+which words are addresses; in a ROM image a `DATA` operand or `.word` that
+lands on a map label or in the reserved RAM, or a `DATA` operand that lands
+on code found or on a string, becomes a label marked `; guess` (the words
+are the same either way). `CALL target[, n]` and `RET` come back as the
+pseudo-ops when their words are exactly the expansion and nothing else
+points inside them (`--raw`: never). The C compiler's own calls (`DATA R0,
+ret; STK PUSH; STK CALL; RJMP f`) are not a pseudo-op and stay as they are.
+A ROM image rebuilds with `asm build`; a `.exe` with `linker.link([obj],
+base=0x1100000, exe_stack=N)` and `driver.exe_bytes(program, region)` (the
+numbers are in its first lines). Checked by the assembler suite (every
+assembly example, with and without its map, folded and `--raw`) and the C
+compiler suite (every C example as a ROM and every program of `tynix/` as a
+`.exe`, with and without the map).
 
 `--lib FILE` (repeatable) links FILE as a library: only the parts the
 program needs (4.6). Libraries are placed after the other inputs.
@@ -940,7 +1017,9 @@ problems of all files (bad source, unreadable file, broken `.obj`), as
 | `objfile.py` | `ObjectFile` and `Reloc`, saved as readable JSON |
 | `linker.py` | object files → one ROM image, plus `format_raw` and `format_map` |
 | `errors.py` | `AsmError` (one message with file and line) and `AsmErrors` (a batch) |
-| `selftest.py` | 22 checks for the assembler and linker |
+| `disasm.py` | `disasm`: a `.rom` or TEX2 `.exe` back to assembly that builds the same words; `round_trip()` for the self-checks |
+| `isa_page.py` | writes the instruction set as one HTML page (`compiler/ROM/isa.html` unless `-o`): section 4 of `assembly_syntax.md` parsed, bit fields from words the assembler writes, flags, micro-steps from `logisim/microcode/microcode.py`, a decoder (`isa.py`'s rules, tables from `encoding.py`) and an encoder |
+| `selftest.py` | 24 checks for the assembler and linker |
 | `asm_grammar.py` | writes railroad diagrams of the grammar to `asm_grammar.html` (needs `pip install railroad-diagrams`) |
 
 ### 4.3 Assembling (two passes)
@@ -1211,6 +1290,7 @@ Assembly is under `asm/` (`programs/`, `stdlib/`, `two_files/`, `tests/` for cir
 | `c/games/game_of_life.c` | C: Conway's Game of Life on the RGB screen, a 64×64 world that wraps around (2×2-pixel cells, only changed cells redrawn). First checks itself on well-known patterns (24 checks: still lifes, oscillators' periods, spaceships' moves, the diehard dying at 130, the glider gun), then shows seven scenes in turn: Gosper glider gun + eater, oscillators and still lifes, spaceships, R-pentomino, diehard, acorn, random soup. Keys `1`–`7` pick a scene, `n` next, `r` restart, space pause, `s` one step, `q` quit; the hex display shows the generation. `-D SCENE=n` starts at scene n, `-D FULL_TEST` also checks that the first three scenes repeat. 100 000–330 000 instructions a generation |
 | `c/graphics/grapher.c` | C: a graphing calculator on the RGB screen. Type a function of x on the bottom line (`+ - * / ^`, implied products like `2x`, `\|x\|`, `sin cos tan sqrt ln log exp ...`, `pi`, `e`) and Enter: it is parsed into a small stack program and drawn, up to six functions in different colours, two pixels thick, over a grid with numbers on the axes; gaps where the value is not a number, jumps like tan's left unjoined. Commands `clear`, `reset`, `zoom f`, `in`, `out`, `move dx dy`, `view x0 x1 y0 y1`, `demo`, `help` (the list of what can be typed, also on the screen at the start). 100–200 ms a function in the simulator |
 | `c/graphics/qr.c` | C: a QR code encoder written from the standard, drawn on the RGB screen as big as it fits. Starts with this project's GitHub link; type any text and Enter for a new code (an empty line goes back to the link). Byte mode, versions 1–10, levels L/M/Q/H (`-D LEVEL=n`, M by default), Reed-Solomon over GF(256) with the blocks interleaved, and all eight masks scored by the standard's penalty rules (`-D MASK=n` forces one). `-D TEXT="..."` the first text, `-D DARK=c` the module colour. Every version and level decodes with `zbarimg` and matches `qrencode` module for module with the same mask. About 2.6 million instructions for the link (0.9 s in the simulator) |
+| `c/games/stackfall.c` | C: Stackfall, a falling-block puzzle of our own on the RGB screen: a 10×20 well, pieces falling on `clock()` (faster every 10 rows), `A`/`D` move, `W` turns, `S` drops a row, space to the bottom, `P` pauses, `Q` quits, `R` again; the twist is gravity chains (after a clear every block with nothing under it falls, and the rows that fills clear as the next step of a chain, which multiplies the score); only changed cells are drawn, `gfx_lost()` redraws; prints the score at the end |
 | `c/games/snake.c` | C: Snake on the RGB screen, a 16×14 grid of 8×8 cells under a score panel; `W`/`A`/`S`/`D` steer, `R` restarts after a game over, `Q` quits (`key_pressed()`, `wait_ms()`) |
 | `c/os/loader.c` | C: runs programs from the disk: type a name and arguments, it runs `/bin/<name>` with `spawnv()` and shows the exit status; an empty line lists `/bin`. The first step towards the OS's shell, `tynix/shell.c` (11); since Phase 7 a program for the OS itself (`--exe`, run from Tynix's shell) |
 | `c/os/echo.c` | C: a program for the OS (`cc build --exe`, then `disk put` into `/bin`): prints its arguments, like Unix `echo` |
@@ -1309,13 +1389,16 @@ repo.
 ### 7.3 Self-checks
 
 ```
-python compiler/src/asm/selftest.py   # 22 checks: encodings, the interrupt group, vectors and start-up code, values, strings, jumps,
+python compiler/src/asm/selftest.py   # 24 checks: encodings, the interrupt group, vectors and start-up code, values, strings, jumps,
                                       # CALL/RET, SAVE/RESTORE, linking, a program past
                                       # 64K words and the size limits, link errors
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
-                                      # round trip, CLI, examples
-python cpu_sim/src/selftest.py        # 51 checks: the Claude device with a fake backend (ASCII, the request's
+                                      # round trip, CLI, examples, disasm (every example
+                                      # back to the same words, map or not, --raw),
+                                      # isa_page (its decoder against isa.py on all
+                                      # 65,536 words, a row for every mnemonic)
+python cpu_sim/src/selftest.py        # 52 checks: snapshot (save, load, both run on the same), the Claude device with a fake backend (ASCII, the request's
                                       # model/effort/max_tokens/caching/tools, errors and no SDK,
                                       # refusal, every slash command, tool frames, bad tool
                                       # input, /approve, Ctrl-X, a new program (SYN) during a
@@ -1336,7 +1419,8 @@ python cpu_sim/src/selftest.py        # 51 checks: the Claude device with a fake
                                       # the LD trace note when RA == RB, the window's pacing (settle(), screen_due()), step_line (C line
                                       # stepping: line, breakpoint, halt, limit), isa.py against the assembler's
                                       # encoding.py tables (names, groups, one/two-word shapes)
-python compiler/src/cc/selftest.py    # 18 checks: interrupts from C (WAIT, timer and key IRQ, TRAP, the stack limit fault), preprocessor, error messages (several per run), warnings,
+python compiler/src/cc/selftest.py    # 20 checks: stackfall (a player reading RAM plays 40 pieces: rows, score,
+                                      # the screen's pixels; a chain of 2 set up in RAM), disasm on every C example (ROM) and tynix/ program (.exe), interrupts from C (WAIT, timer and key IRQ, TRAP, the stack limit fault), preprocessor, error messages (several per run), warnings,
                                       # type sizes, exit/atexit, strtoul overflow limits, the 256 x 256 screen's edges (clipped, not
                                       # wrapped), keyboard input, globals
                                       # after a reset, library override, reserved names,
@@ -1352,7 +1436,11 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 23 checks: `claude` (tynix/bin/claude.c and the device with a fake
+python compiler/src/disk/selftest.py  # 25 checks: `snapshot` (primes.c and the kernel with a disk saved
+                                      # mid-run, loaded, both to HALT alike; the changed-disk warning;
+                                      # --save-state/--load-state), `environment` (export/set/unset/env, $NAME ${NAME} $?, quotes,
+                                      # PATH order, /etc/profile, getenv/setenv/unsetenv in a
+                                      # program and its child), `claude` (tynix/bin/claude.c and the device with a fake
                                       # backend under the kernel: commands with output, stdin,
                                       # cd, write_file, the timeout killing a program and its
                                       # child, /approve n, Ctrl-X, wrapping at 64 columns,
@@ -1378,7 +1466,7 @@ python compiler/src/disk/selftest.py  # 23 checks: `claude` (tynix/bin/claude.c 
                                       # the timer off with one program (a clock that counts
                                       # instructions), and
                                       # tynix/shell.c as /bin/sh on a disk from tynix/make_disk.py: a session
-                                      # of every built-in, > and >>, quotes, a /bin program's
+                                      # of every built-in, > and >>, < (cat < f, sh < script > f, errors), Tab and Up/Down at the prompt, quotes, a /bin program's
                                       # arguments and exit status, the error messages;
                                       # `tools`: more grep find tree du diff hexdump calc run by
                                       # the shell on known files (exact output, errors, exit
@@ -1386,14 +1474,36 @@ python compiler/src/disk/selftest.py  # 23 checks: `claude` (tynix/bin/claude.c 
                                       # then visual_file_manager's copy, cut, paste, rename,
                                       # delete, new folder, opening a file in `edit` and a program
                                       # (spawnv), read back with fs.py (11.3, 11.4)
-python check_docs.py                  # 3 checks on the docs: every repo path they name
+python check_docs.py                  # 4 checks on the docs: every repo path they name
                                       # exists, every example (.asm, .c) and tynix/*.c is
-                                      # listed (5.3, 11), every TWEAKS switch is in 3.4
+                                      # listed (5.3, 11), every TWEAKS switch is in 3.4,
+                                      # every mnemonic of encoding.py has a row in
+                                      # assembly_syntax.md 4 (and every row a mnemonic)
 ```
 
 `check_docs.py` checks only mechanical facts. It skips build output under
 `compiler/ROM/`, `diagNN`-style placeholders, and paragraphs that mention
 files as removed.
+
+**CI.** `.github/workflows/test.yml` runs on every push to `main` and `os`
+and on every pull request (and by hand, `workflow_dispatch`), on GitHub's
+Ubuntu runners:
+
+* `test`: `python run.py test` on Python 3.10 (the oldest supported) and
+  3.13. It needs no tkinter (the window's check skips itself), no network
+  (the Claude device's checks use `FakeBackend`), no Logisim and no javac;
+  without ffmpeg the image suite notes that it read no video file.
+* `gcc`: `difftest.py` (every test program against gcc's build) and
+  `fuzz.py --count 200 --seed 1` (the same 200 random programs every time;
+  a longer or random-seed run stays a local job).
+
+`compiler/ROM/libc/` is cached between runs; `driver.py` keys each cached file
+on a hash of its source and of the compiler, so an out-of-date cache is
+rebuilt, never used. A failed run uploads `compiler/ROM/` (or
+`compiler/ROM/fuzz/`, the programs that differed) as an artifact. Measured
+locally on 2026-11-03: `run.py test` 1 min 41 s (CPython 3.13), `difftest.py`
+16 s, `fuzz.py --count 200 --seed 1` 2 min 15 s (195 programs agree, 5
+skipped as not well defined).
 
 ### 7.4 Pictures for the RGB screen (`compiler/src/img/`)
 
@@ -1775,15 +1885,18 @@ leads to after an unconditional jump.
   binary file (it spots the magic). The kernel (`tynix/kernel.c`, 11) picks a
   region, copies the words with `_fs_read` (about 14 instructions a word),
   adds `region - base` to the r words, zeroes the data, copies argv to the
-  top of the region, and starts it with R1 = a block (`B_ARGC`, `B_ARGV`,
+  top of the region and the parent's environment below it (at most
+  `ENV_MAX` = 64 strings and `ENV_CHARS` = 4096 chars; the rest are left
+  out), and starts it with R1 = a block (`B_ARGC`, `B_ARGV`,
   `B_PID`, `B_END` the end of its heap, `B_OUT` whether stdout is a file,
   `B_FG` the address of the kernel's foreground pid, `B_LOST`, `B_IN`
-  whether stdin is a file). That crt0
+  whether stdin is a file, `B_ENV` its environment: `NAME=value` strings
+  ended by 0). That crt0
   keeps the block, stores `B_END` into `_heap_end`, calls the `_init_`
   routines and `_tx_start(block)` (`compiler/libc/tynix/sys.c`: `_set_stdout()` with a
   function that sends stdout to fd 1 64 words at a time when `B_OUT`; when
   `B_IN`, getchar's `_stdin_get` reads fd 0 64 words at a time, without
-  echo), then
+  echo; `environ = B_ENV`), then
   `main(argc, argv)`; its `_Exit` is the system call exit (`TRAP` with R1 = 0,
   R2 = the status). `isatty(1)` in `file.c` is false exactly when stdout is a
   file, `isatty(0)` when stdin is. The old format, TEX1 (5-word header, fixed at `0x1100000`, no
@@ -1812,14 +1925,15 @@ task-switch words). `_Exit` is in the generated crt0.
 | file | what changes |
 | --- | --- |
 | `sys.asm` | `_syscall(n, a, b, c, d)`: `TRAP` with R1 = n, R2..R5 = a..d, the answer in R0 |
-| `sys.c` | `_tx_start` (crt0 calls it), `_tx_call` (a negative answer -> -1 and `errno`), stdout to fd 1, stdin from fd 0 when it is a file |
+| `sys.c` | `_tx_start` (crt0 calls it), `_tx_call` (a negative answer -> -1 and `errno`), stdout to fd 1 (`fflush(stdout)` sends what it kept back), stdin from fd 0 when it is a file, `environ` (the block's `B_ENV`) |
+| `env.c` | `getenv`, `setenv`, `unsetenv` as in `compiler/libc/env.c`, and every change points the block's `B_ENV` at the program's own list, so the programs it starts inherit it |
 | `fs.c` | `fopen` & co., `remove`, `rename`, `stat`, `statvfs`, `fs_reclaim` as system calls; a `FILE` is the kernel's file number with a 64-word buffer (`fd`, `buf` in `local.h`) |
 | `dir.c` | `mkdir`, `rmdir`, `chdir`, `getcwd`, `opendir`/`readdir`/`closedir` as system calls (4 directories open per program) |
 | `spawn.c` | `spawnv`, `spawnv_to`, `spawn`, `spawn_to`, `spawn_io` (stdin from a file too, `SPAWN_IN(fd)`), `waitpid`, `kill`, `getpid`, `yield`, `set_foreground`, `tasks`, `halt_os` (`<unistd.h>`) |
 | `cpu.c` | the keyboard through the kernel (`key_pressed`, `wait_key`, getchar's `_read_key`: only the foreground program gets keys, and the waiting ones sleep), `wait_ms` sleeps, `_gfx_hold` (each `gfx_` call waits for the foreground), `gfx_lost()` |
 
 A ROM program keeps the plain files: `cpu.c`'s `_gfx_hold` is 0 and
-`gfx_lost()` is always 0. The C library itself has no `spawnv` any more
+`gfx_lost()` is always 0, and `env.c` starts from an empty environment. The C library itself has no `spawnv` any more
 outside Tynix (the old `spawn.c`/`spawn.asm` loaded one program over
 `0x1100000` and came back by `longjmp`).
 
@@ -1901,7 +2015,7 @@ With no disk, or no `/bin/sh`, the kernel says so and halts.
 | `tynix/bin/claude.c` | `claude`: talk to Claude through the Claude device, which runs commands on the CPU for it (section 11.5; 13.5K words) |
 | `tynix/cpu_claude.md` | the Claude device's system prompt: the machine, the characters allowed, the tools, the Tynix commands, what not to run, the limits (11.5) |
 | `tynix/claude_access.conf` | the PC paths Claude may read (`read PATH`) or write (`write PATH`) besides its own folder `tynix/claude/` (what Claude writes there is git-ignored); all commented out, so nothing else is allowed (11.5) |
-| `tynix/make_disk.py` | makes `tynix/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds `shell.c` as `/bin/sh` and every program in its `PROGRAMS` list (from `tynix/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; from the command line it also makes a Linux-like `/home/user` (`Desktop`, `Documents` with `welcome.txt`, `Downloads`, `Music`, `Pictures`, `Videos`) and `/tmp` when missing (`make(..., home=True)`; the self-checks leave them out); other files on the disk are kept. Twelve C examples, `ed`, `edit`, the nine tools of 11.3 and 11.4 and `claude` (11.5), 2.8K–22.8K words each; `REGIONS` gives `diff` 1.25M words of RAM (`--region`) |
+| `tynix/make_disk.py` | makes `tynix/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds `shell.c` as `/bin/sh` and every program in its `PROGRAMS` list (from `tynix/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; from the command line it also makes a Linux-like `/home/user` (`Desktop`, `Documents` with `welcome.txt`, `Downloads`, `Music`, `Pictures`, `Videos`) and `/tmp` when missing (`make(..., home=True)`; the self-checks leave them out); other files on the disk are kept. Thirteen C examples (with `stackfall`), `ed`, `edit`, the nine tools of 11.3 and 11.4 and `claude` (11.5), 2.8K–22.8K words each; `REGIONS` gives `diff` 1.25M words of RAM (`--region`) |
 | `tynix/run_with_video.sh` | builds the kernel and the disk (`make_disk.py`), builds `video_player.c` with `--exe` (a `clip.h` argument is passed as `-D VIDEO=...`), puts it in `/bin/video_player` and starts the simulator on it, all under pypy3 when it is installed (`PY` picks another interpreter, `SIM_ARGS` adds simulator options, `DISK` picks another image). `video_player` is not in `PROGRAMS`: its video is part of the program (17K words for the 4 s demo clip, millions for a long one) |
 
 ```
@@ -1983,7 +2097,7 @@ A background program that reads the keyboard waits until it is brought
 forward. The text display is shared (lines interleave). Only the foreground
 program draws on the RGB screen: every `gfx_` call of a background one waits
 (a video pauses); when one gets the foreground back, `gfx_lost()` returns 1
-once and `edit`, `visual_file_manager`, `snake` and `game_of_life` draw
+once and `edit`, `visual_file_manager`, `snake`, `stackfall` and `game_of_life` draw
 everything again (the screen can't be read back). The others (`grapher`,
 `qr`, `gfx_demo`, `image_demo`) don't, and show what is left until they draw
 again.
@@ -2006,10 +2120,15 @@ disk (`_fs_forget()`). Its heap is not bounded by the kernel (its crt0 says the
 end of RAM): rebuild it.
 
 At start the shell prints its banner, then prompts with the current
-directory (`/docs> `), reads a line with `fgets` (the C library echoes it and
-handles backspace), splits it into words at spaces (`"..."` and `'...'` keep
-spaces in one word; the quotes go), takes out `> FILE` or `>> FILE`, and a
-last word `&`. The first word picks the command.
+directory (`/docs> `), reads a line (below), splits it into words at spaces (`"..."` and `'...'` keep
+spaces in one word; the quotes go), takes out `> FILE` or `>> FILE`, `<
+FILE`, and a last word `&`. The first word picks the command. Each of `>`,
+`>>` and `<` must start a word (`cat </a.txt` works, `cat</a.txt` is one
+word; `<<` is an ordinary word, so `calc 1 << 2` needs no quotes, while
+`calc "256 >> 4"` does). When its stdin is a file and not the keyboard (`sh < script.txt`,
+`isatty(0)` is 0) the shell prints no banner and no prompt, runs the lines
+it reads and, at the end of the file, ends with the last one's status
+instead of halting the CPU.
 
 Built-in commands (the `commands[]` table, which `help` also prints):
 
@@ -2031,6 +2150,10 @@ Built-in commands (the `commands[]` table, which `help` also prints):
 | `fg pid` | `set_foreground(pid)`, then wait for it as for a program typed at the prompt |
 | `kill pid...` | end those programs (status 130); their files are closed by the kernel |
 | `wait [pid]` | wait for that program to end (its status is the command's); none: for every job |
+| `set [NAME=value...]` | the shell's own variables (not passed to programs): sets them, or lists them. A name that is already exported changes in the environment instead. `set Y=two words` sets `Y=two` and complains about `words`: quote it (`set 'Y=two words'`) |
+| `export [NAME[=value]...]` | puts variables in the environment (`setenv`), which every program started from then on inherits; `export NAME` moves a `set` variable there. Alone, lists the environment |
+| `env` | lists the environment (`NAME=value` a line) |
+| `unset NAME...` | forgets shell variables and environment variables |
 | `run file` | the lines of a text file as if typed (a batch file): blank lines and lines starting with `#` are left out, the status is the last line's. `run file > out` sends their output to `out` (a program among them too); a `>` inside a line still wins. 8 deep at most (a file that runs itself). A line over 255 chars stops the run (status 1) instead of being cut into two commands |
 
 A built-in writes to `out`: the display, or the file after `>` (`fopen`
@@ -2053,16 +2176,66 @@ program too: the shell opens the file and passes it as the program's stdout
 keys it reads stay on the display. If the program can't be
 loaded the file has been made (empty) anyway, as in a Unix shell.
 
+`< FILE` (2026-11-03) gives the program that file as its stdin: the shell
+opens it (`"r"`, or `"rb"` when `stat()` says it is binary, as `cp` does),
+starts the program with `spawn_io()` (`SPAWN_IN`) and closes its own `FILE`
+at once; `getchar`, `fgets` and `scanf` read the file without echo and get
+`EOF` at its end. Keys read with `key_pressed()`/`wait_key()` still come
+from the keyboard. A missing file or a directory is an error before
+anything starts (`NAME: FILE: No such file or directory`, status 1); `<` and
+`>` combine (`prog < in.txt > out.txt`). Of the built-ins only a bare `cat`
+reads stdin, so `cat < FILE` is `cat FILE`; any other built-in with `<`
+says `NAME: < works for programs and a bare cat only` (status 2). Before
+starting a program the shell flushes its own stdout (`fflush`), since the
+program writes to the same file: `sh < script > out` keeps the lines in
+order.
+
 With `&` at the end of the line the shell doesn't wait: it prints `[pid] NAME
 &` and prompts again. Before each prompt it collects the background jobs
 that ended (`waitpid(-1, ..., WAIT_NOHANG)`) and prints `[pid] done: NAME, exit
 status N`. A program that never ends no longer keeps the CPU: the NMI menu or
 `kill` ends it, and the others run meanwhile.
 
+**Typing at the prompt** (2026-11-03). The shell reads the keys itself
+(`wait_key()`, no echo) and shows them: printable chars are added,
+Backspace removes the last one, Enter runs the line, Ctrl-D on an empty
+line halts. **Up** and **Down** go through the last 32 lines (a blank line,
+or the same as the one before, is not kept; Down past the newest gives back
+what was being typed). **Tab** completes the last word: the first word from
+the built-ins and the programs in the folders of `PATH`, any other word (or
+one with a `/`) from the entries of its folder. One name: the rest of it and
+a space (a `/` for a folder). Several: as far as they agree; when that adds
+nothing they are listed under the line (two spaces apart, wrapped at 64
+columns) and the prompt and line are shown again. The display has no cursor
+addressing, so the cursor stays at the end and Left/Right do nothing;
+showing another line is a backspace for each char, then the new text. In the
+simulator's display a backspace at column 0 does nothing and a line never
+wraps, so that always reaches the prompt; on the circuit's TTY (64 columns,
+wrapping) it is not measured. The history is not kept on the disk. When stdin
+is a file (`sh < f`, `sh -c`), the lines come from `fgets` as before. The
+window sends Tab as 9 (Shift-Tab stays with Tk).
+
+**Variables** (2026-11-03). In a word, `$NAME` and `${NAME}` become the
+value of the shell variable (`set`) or else of the environment variable
+(`export`), or nothing; `$?` is the status of the last command line (a
+blank line leaves it); a `$` that names nothing stays a `$`. Inside `"..."`
+they expand too, inside `'...'` not. A value stays inside its word (it is
+never split at its spaces). The line with its values may be at most 512
+chars (`the line is too long with its $ values`). Names are letters, digits
+and `_`, not a digit first. At start the shell sets `PATH=/bin` and
+`HOME` (`/home/user` if it exists, else `/`) unless its environment already
+has them, and `PWD` (kept up to date by `cd`); an interactive shell then runs
+`/etc/profile` if there is one, as `run /etc/profile` (`make_disk.py` writes
+one: `export PATH=/bin:/home/user/bin`). A plain command name is looked for
+in each folder of `PATH` (`:` between them) in order; if none has it, the
+error is the first folder's (`NAME: no such command`). A program gets a copy
+of its parent's environment (10.4): `getenv` reads it, `setenv`/`unsetenv`
+change the program's own copy and what its children get.
+
 `sh -c LINE` (Phase 8) runs that one line, with no banner and no prompt, and
 ends with its status (`usage: sh -c 'command line'`, status 2, without a
 line); a line is 255 chars at most, one command (there are no pipes or
-`;`). Run with stdout or stdin files, it passes them on to the program it
+`;`; `<` works). Run with stdout or stdin files, it passes them on to the program it
 starts. That is how `claude` (11.5) runs Claude's commands.
 
 Any program can start another now (`spawnv()`, `spawn()`): the child gets its

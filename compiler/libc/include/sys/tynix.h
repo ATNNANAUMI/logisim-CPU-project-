@@ -60,7 +60,12 @@
 #define B_FG 5              /* the address of the kernel's word holding the foreground pid */
 #define B_LOST 6            /* 1: the RGB screen was taken away and given back (redraw) */
 #define B_IN 7              /* 1: stdin (fd 0) is a file, not the keyboard (SPAWN_IN, or the parent's) */
-#define B_WORDS 8
+#define B_ENV 8             /* the environment: "NAME=value" strings, 0-ended, copied from the
+                               parent's B_ENV into the program's region; setenv() points it at
+                               the program's own list (the next spawn copies that) */
+#define B_WORDS 9
+#define ENV_MAX 64          /* at most this many strings are copied to a child, */
+#define ENV_CHARS 4096      /* and this many chars (with their 0s); the rest are left out */
 
 /* SYS_TASKS fills these */
 struct task_info {

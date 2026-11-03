@@ -8,8 +8,9 @@ program in PROGRAMS with `cc build --exe` and puts it in /bin under its
 own name, replacing the old copy, and writes /readme.txt. Other files on
 the disk are kept, so what was written from the OS survives a rebuild. From the
 command line it also makes a Linux-like /home/user (Desktop, Documents,
-Downloads, Music, Pictures, Videos, and Documents/welcome.txt) and /tmp,
-where visual_file_manager starts; make(..., home=False) leaves them out.
+Downloads, Music, Pictures, Videos, and Documents/welcome.txt), /tmp,
+where visual_file_manager starts, and /etc/profile (the shell runs it at
+start: PATH=/bin:/home/user/bin); make(..., home=False) leaves them out.
 
     python tynix/make_disk.py
     python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img
@@ -32,7 +33,7 @@ DEFAULT_IMAGE = ROOT / "tynix" / "disk.img"
 # compiler/examples/c/*/NAME.c -> /bin/NAME. Each one ends by itself, on
 # Ctrl-D or on q, so the shell gets the CPU back.
 PROGRAMS = ["echo", "hello", "primes", "structs", "guess", "gfx_demo", "image_demo",
-            "snake", "game_of_life", "grapher", "qr", "disk_notes", "ed", "edit",
+            "snake", "stackfall", "game_of_life", "grapher", "qr", "disk_notes", "ed", "edit",
             "more", "grep", "find", "tree", "du", "diff", "hexdump", "calc",
             "visual_file_manager", "claude"]
 SOURCES = {"sh": "shell"}               # /bin/sh is tynix/shell.c
@@ -44,6 +45,7 @@ This disk was made by tynix/make_disk.py for Tynix (tynix/kernel.c, which
 starts the shell, /bin/sh from tynix/shell.c).
 
   help             the commands, and the programs in /bin
+  Up, Down, Tab    the last lines again; complete a command or a path
   ls -l /bin       the programs (cc build --exe), sizes in words
   primes           runs /bin/primes; its exit status comes back
   cat > todo.txt   type lines, then Ctrl-D: a new text file
@@ -60,6 +62,10 @@ starts the shell, /bin/sh from tynix/shell.c).
   diff a.txt b.txt   what changed between two text files
   hexdump /readme.txt   the values in hex
   calc 0x1100000 + 256   integer calculator (calc alone: a line at a time)
+  ed notes.txt < edits.txt   a file as a program's input (cat < f too)
+  export X=1       a variable for the programs (echo $X; set: the shell's
+                   own; env lists them); /etc/profile runs at start, PATH
+                   lists the folders searched for a command
   primes > p.txt &   runs in the background; jobs lists what runs,
                    fg N brings one forward, kill N ends it
   Esc              (the NMI) on the program in front: kill, continue,
@@ -68,8 +74,8 @@ starts the shell, /bin/sh from tynix/shell.c).
   claude           talk to Claude (on the PC, through device 0x9C: needs
                    an API key there); claude QUESTION asks once
 
-On the RGB screen (the simulator window's tab): snake and
-game_of_life (q quits), gfx_demo, image_demo, grapher and qr
+On the RGB screen (the simulator window's tab): snake, stackfall
+(falling blocks with gravity chains) and game_of_life (q quits), gfx_demo, image_demo, grapher and qr
 (Ctrl-D quits these two), and visual_file_manager (j k h l move, space
 select, y x p copy cut paste, u clear, r d a rename delete new folder,
 ~ home, q quits).
@@ -87,6 +93,16 @@ This is your home folder, /home/user. visual_file_manager starts here
 """
 
 
+# run by the shell at start (`run /etc/profile`): settings kept on the disk
+PROFILE = """\
+# /etc/profile: the shell runs these lines when it starts (not sh -c).
+# export NAME=value passes a variable to every program; set NAME=value
+# keeps it in the shell. PATH: the folders searched for a command (make
+# /home/user/bin for programs of your own).
+export PATH=/bin:/home/user/bin
+"""
+
+
 def make_home(disk):
     for folder in ("/home", "/home/user", "/tmp", *(f"/home/user/{n}" for n in HOME_FOLDERS)):
         if disk.lookup(folder) is None:
@@ -95,9 +111,18 @@ def make_home(disk):
         disk.put("/home/user/Documents/welcome.txt", WELCOME.encode())
 
 
+def make_profile(disk):
+    """/etc/profile, unless one is there (it is the user's to change)."""
+    if disk.lookup("/etc") is None:
+        disk.mkdir("/etc")
+    if disk.lookup("/etc/profile") is None:
+        disk.put("/etc/profile", PROFILE.encode())
+
+
 def make(image=DEFAULT_IMAGE, programs=PROGRAMS, new=False, size_mb=64, log=print, home=False):
     """Make or update the disk image; returns {name: words} of the programs.
-    home: also make /home/user (Desktop, Documents, ... Videos) and /tmp."""
+    home: also make /home/user (Desktop, Documents, ... Videos), /tmp and
+    /etc/profile (each kept when it is there)."""
     image = Path(image)
     if new or not image.exists():
         fs.FileSystem.format(str(image), size_mb * 1024 * 1024 // 4).close()
@@ -120,6 +145,7 @@ def make(image=DEFAULT_IMAGE, programs=PROGRAMS, new=False, size_mb=64, log=prin
         disk.put("/readme.txt", README.encode())
         if home:
             make_home(disk)
+            make_profile(disk)
         log(f"{disk.free_blocks()} of {disk.blocks} blocks free")
     return sizes
 

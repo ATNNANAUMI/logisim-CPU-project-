@@ -240,6 +240,12 @@ The language itself is described in [`c_language.md`](c_language.md).
     `hello`: 4698/4811/4569 words before, 4905/4994/4776 after (+207 words),
     RAM 33 → 358 (the three `FILE`s of `file.c`). The program's `stderr`
     and the echo of keys it reads (`getchar.c`) stay on the display.
+    Since Phase 7 the program sends its stdout words to the kernel in groups
+    (`compiler/libc/tynix/sys.c`), so `_set_stdout(put, flush)` also gives
+    `stdout` a `flush` (2026-11-03): `fflush(stdout)` sends the group at once.
+    The shell calls it before it starts a program, because the program writes
+    to the same file itself; without it, `sh < script > out` put a script's
+    `echo` lines after the output of the programs that followed them.
 
 ### The full-screen editor (2026-10-29, OS roadmap Phase 5 B)
 
@@ -445,6 +451,26 @@ Phase 8, Claude from the CPU's keyboard (2026-11-02):
     each with them; a `y`/`n` typed ahead answers `/approve`'s question.
     `claude QUESTION` does not look at the keyboard, so what is typed meanwhile
     stays for the shell.
+
+75. **The environment travels in the block, and the kernel copies it**
+    (2026-11-03, plan question 2a): `B_ENV` points at the program's list;
+    at a spawn the kernel copies the parent's strings into the child's
+    region below argv, as it copies argv, so the child owns its copy and the
+    parent may change or end meanwhile. `setenv`/`unsetenv` (`compiler/libc/tynix/env.c`)
+    point `B_ENV` at the program's new list, so the next spawn copies what
+    the program changed. Chosen over a file on the disk (`/etc/env`, option
+    b), which every program would read and two programs would race on. A
+    plain `environ = list` assignment is not seen by the kernel: the
+    program's children get what `setenv` last made. Two copies of `env.c`
+    (the ROM one and the Tynix one, the same lines but the `B_ENV` store)
+    because a shared file would have to reference `_tx_block`, which a ROM
+    program doesn't have, and `sys.c` can't reference `env.c` without
+    linking `malloc` into every program.
+76. **`fflush(stdout)` works when stdout is a file** (2026-11-03): the
+    shell's `sh < script > out` put a script's `echo` lines after the output
+    of the programs that followed, because the shell's own stdout kept its
+    64 words back until it ended. The shell now flushes before it starts a
+    program; see 49.
 
 ## Measured on the circuit while doing this
 

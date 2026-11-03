@@ -21,13 +21,32 @@
  * Words are split at spaces; "..." or '...' keep spaces inside one word.
  * Output can go to a file: `echo hi > a.txt`, `ls >> list.txt`, and a
  * program's too: `primes > p.txt` (what it prints with printf, putchar and
- * puts; its input is still the keyboard, and its own errors the display). `cat` with no
+ * puts; its input is the keyboard unless `<` gives a file, below, and its own errors the display). `cat` with no
  * file copies the keyboard up to Ctrl-D, so `cat > notes.txt` writes a
  * file. Ctrl-D at the prompt, or `halt`, stops the CPU.
+ *
+ * Input can come from a file: `ed notes.txt < edits.txt` gives the program
+ * that file as its stdin (getchar, fgets and scanf read it, EOF at its end;
+ * key_pressed() and wait_key() still read the keyboard); `cat < f` is
+ * `cat f`, and other built-ins refuse `<`. `sh < script.txt` (stdin not the
+ * keyboard) runs the file's lines with no banner or prompt and ends at its
+ * end instead of halting.
  *
  * The NMI (Esc) belongs to the kernel: on the program in front it asks
  * kill / continue / background / tasks; "background" gives the keyboard
  * back to this shell, which prints the job's number.
+ *
+ * At the prompt, Up and Down bring back the last 32 lines and Tab completes
+ * the word being typed (a command from the built-ins and $PATH, else a path;
+ * several names are listed). The cursor stays at the end of the line.
+ *
+ * Variables: `set NAME=value` (the shell's own), `export NAME=value`
+ * (the environment, which every program started afterwards gets: getenv),
+ * `unset`, `env`. $NAME, ${NAME} and $? (the last line's status) expand in
+ * words and "...", not in '...'. A plain command name is looked for in the
+ * folders of $PATH (default /bin) in order. At start the shell sets PATH,
+ * HOME and PWD if they are missing, and an interactive one runs
+ * /etc/profile when the disk has one.
  *
  * `sh -c LINE` runs that one line and ends with its status, without the
  * banner or a prompt (Claude's `claude` program runs its commands so, with
@@ -57,10 +76,19 @@ static char path[2 * LINE_MAX];
 static char cwd[512];
 static FILE *out;               /* where a built-in writes: stdout, or a file after > */
 static char *redirect;          /* the file after > or >>, or 0 */
+static char *input;             /* the file after <, or 0 */
 static int append;              /* >> */
 static int background;          /* the line ended with & */
 static FILE *base_out;          /* where a line writes without >: stdout, or run's file */
 static int depth;               /* run inside run */
+static int last_status;         /* $?: the status of the last line */
+static char *var_entry(const char *name, int len, int *at);
+static int good_name(const char *s, int len);
+static char words[2 * LINE_MAX];    /* the line's words, after quotes and $NAME */
+static int words_len;
+#define MAX_VARS 32
+static char *vars[MAX_VARS];    /* the shell's own variables, "NAME=value" (set);
+                                   exported ones are in environ instead (export) */
 static struct job {             /* the programs this shell left running */
     int pid;
     char name[32];
@@ -153,7 +181,127 @@ static int cmd_cd(int argc, char **argv)
     const char *to = argc > 1 ? argv[1] : "/";
     if (argc > 2)
         return -1;
-    return chdir(to) ? fail("cd", to) : 0;
+    if (chdir(to))
+        return fail("cd", to);
+    setenv("PWD", getcwd(cwd, sizeof cwd), 1);
+    return 0;
+}
+
+/* ------------------------------------------------------------- variables */
+
+/* NAME=value: the length of NAME, or -1 (with a message) */
+static int assignment(const char *cmd, const char *a)
+{
+    const char *eq = strchr(a, '=');
+    int len = eq ? eq - a : (int)strlen(a);
+    if (!good_name(a, len)) {
+        printf("%s: %.*s: not a name (letters, digits, _)\n", cmd, len, a);
+        return -1;
+    }
+    return len;
+}
+
+static void forget_var(const char *name, int len)
+{
+    int i;
+    if (var_entry(name, len, &i)) {
+        free(vars[i]);
+        vars[i] = 0;
+    }
+}
+
+/* set: the shell's own variables; set NAME=value...: set them (a name that
+   is exported changes in the environment instead) */
+static int cmd_set(int argc, char **argv)
+{
+    int i, len, status = 0, at;
+    char name[64];
+    if (argc == 1) {
+        for (i = 0; i < MAX_VARS; i++)
+            if (vars[i])
+                fprintf(out, "%s\n", vars[i]);
+        return 0;
+    }
+    for (i = 1; i < argc; i++) {
+        char *eq = strchr(argv[i], '=');
+        if ((len = assignment("set", argv[i])) < 0 || len >= (int)sizeof name || !eq) {
+            if (len >= 0)
+                printf("set: %s: give it as NAME=value\n", argv[i]);
+            status = 1;
+            continue;
+        }
+        strncpy(name, argv[i], len);
+        name[len] = 0;
+        if (getenv(name)) {             /* exported: stays in the environment */
+            setenv(name, eq + 1, 1);
+            continue;
+        }
+        forget_var(name, len);
+        for (at = 0; at < MAX_VARS && vars[at]; at++)
+            ;
+        if (at == MAX_VARS || (vars[at] = strdup(argv[i])) == 0) {
+            printf("set: no room for %s\n", name);
+            status = 1;
+        }
+    }
+    return status;
+}
+
+/* export: the environment; export NAME[=value]...: into it, so programs
+   started from here on get them */
+static int cmd_export(int argc, char **argv)
+{
+    int i, len, status = 0;
+    char name[64], *v;
+    if (argc == 1) {
+        for (i = 0; environ[i]; i++)
+            fprintf(out, "%s\n", environ[i]);
+        return 0;
+    }
+    for (i = 1; i < argc; i++) {
+        char *eq = strchr(argv[i], '=');
+        if ((len = assignment("export", argv[i])) < 0 || len >= (int)sizeof name) {
+            status = 1;
+            continue;
+        }
+        strncpy(name, argv[i], len);
+        name[len] = 0;
+        if (eq)
+            v = eq + 1;
+        else if ((v = var_entry(name, len, 0)) != 0)
+            v += len + 1;               /* a set variable moves to the environment */
+        else
+            continue;                   /* nothing by that name: nothing to export */
+        if (setenv(name, v, 1)) {
+            printf("export: no room for %s\n", name);
+            status = 1;
+        }
+        forget_var(name, len);
+    }
+    return status;
+}
+
+static int cmd_env(int argc, char **argv)
+{
+    return argc == 1 ? cmd_export(argc, argv) : -1;
+}
+
+static int cmd_unset(int argc, char **argv)
+{
+    int i, len, status = 0;
+    char name[64];
+    if (argc == 1)
+        return -1;
+    for (i = 1; i < argc; i++) {
+        if ((len = assignment("unset", argv[i])) < 0 || len >= (int)sizeof name || argv[i][len]) {
+            status = 1;
+            continue;
+        }
+        strcpy(name, argv[i]);
+        forget_var(name, len);
+        unsetenv(name);
+    }
+    return status;
 }
 
 static int cmd_pwd(int argc, char **argv)
@@ -471,6 +619,10 @@ static const struct command {
     {"kill", "kill pid...", "end programs (status 130)", cmd_kill},
     {"wait", "wait [pid]", "wait for a program (none: all)", cmd_wait},
     {"run", "run file", "run the lines of a file as commands", cmd_run},
+    {"set", "set [NAME=value...]", "shell variables ($NAME), or list", cmd_set},
+    {"export", "export [NAME[=v]...]", "into the environment, or list", cmd_export},
+    {"env", "env", "list the environment", cmd_env},
+    {"unset", "unset NAME...", "forget variables", cmd_unset},
 };
 
 #define N_COMMANDS (int)(sizeof commands / sizeof commands[0])
@@ -483,6 +635,7 @@ static int cmd_help(int argc, char **argv)
     for (i = 0; i < N_COMMANDS; i++)
         fprintf(out, "  %-18s %s\n", commands[i].usage, commands[i].help);
     fprintf(out, "  %-18s %s\n", "command >[>] file", "its output to a file (>> adds)");
+    fprintf(out, "  %-18s %s\n", "program < file", "its input from a file (cat < file too)");
     if ((d = opendir("/bin")) == 0) {
         fprintf(out, "no /bin: no programs\n");
         return 0;
@@ -499,20 +652,83 @@ static int cmd_help(int argc, char **argv)
 
 /* ---------------------------------------------------------------- programs */
 
+/* the file after <, opened as what it is (a text file "r", a binary one
+   "rb", as cp does), or 0 after an error message */
+static FILE *open_input(const char *cmd)
+{
+    struct stat st;
+    int known = stat(input, &st) == 0;
+    FILE *f;
+    if (known && S_ISDIR(st.st_mode)) {
+        printf("%s: %s: Is a directory\n", cmd, input);
+        return 0;
+    }
+    f = fopen(input, known && !S_ISTEXT(st.st_mode) ? "rb" : "r");
+    if (f == 0)
+        fail(cmd, input);
+    return f;
+}
+
+/* a plain name: the first DIR/name, for the folders of $PATH in order
+   (none set: /bin), that is a file, in path[]; when none is, the first
+   folder's (whose load error the shell reports) */
+static void find_program(const char *name)
+{
+    static char first[2 * LINE_MAX];
+    const char *p = getenv("PATH"), *end;
+    struct stat st;
+    first[0] = 0;
+    if (p == 0 || *p == 0)
+        p = "/bin";
+    for (;;) {
+        int len;
+        end = strchr(p, ':');
+        if (end == 0)
+            end = p + strlen(p);
+        len = end - p;
+        if (len > 0 && len + strlen(name) + 2 <= sizeof path) {
+            strncpy(path, p, len);
+            path[len] = '/';
+            strcpy(path + len + 1, name);
+            if (first[0] == 0)
+                strcpy(first, path);
+            if (stat(path, &st) == 0 && !S_ISDIR(st.st_mode))
+                return;
+        }
+        if (*end == 0)
+            break;
+        p = end + 1;
+    }
+    if (first[0])
+        strcpy(path, first);
+    else
+        sprintf(path, "/bin/%s", name);
+}
+
 static int run_program(int argc, char **argv)
 {
     int pid;
-    FILE *to = 0;
+    FILE *to = 0, *in = 0;
     if (strchr(argv[0], '/'))
         strcpy(path, argv[0]);
     else
-        sprintf(path, "/bin/%s", argv[0]);
-    if (redirect && (to = fopen(redirect, append ? "a" : "w")) == 0)
+        find_program(argv[0]);
+    if (input && (in = open_input(argv[0])) == 0)
+        return 1;
+    fflush(stdout);                     /* what the shell wrote goes first: the */
+    if (base_out != stdout)             /* program writes to the same file itself */
+        fflush(base_out);
+    if (redirect && (to = fopen(redirect, append ? "a" : "w")) == 0) {
+        if (in)
+            fclose(in);
         return fail(argv[0], redirect);
-    pid = spawn_to(path, argv, to ? to : base_out != stdout ? base_out : 0,
+    }
+    pid = spawn_io(path, argv, in, to ? to : base_out != stdout ? base_out : 0,
                    background ? 0 : SPAWN_FG);
     if (to)
         fclose(to);                     /* the program has its own hold on the file */
+    if (in)
+        fclose(in);                     /* and on its stdin */
     if (pid < 0) {
         if (errno == ENOENT && !strchr(argv[0], '/'))
             printf("%s: no such command (help lists them)\n", argv[0]);
@@ -529,42 +745,140 @@ static int run_program(int argc, char **argv)
 
 /* ---------------------------------------------------------------- one line */
 
-/* the next word at *s, its quotes taken out, ended by a 0 written in the
-   line; 0 when the line has no more, -1 (as a pointer) for a missing quote */
+/* $NAME and ${NAME}: a shell variable (set), else one of the environment
+   (export), else nothing */
+static char *var_entry(const char *name, int len, int *at)
+{
+    int i;
+    for (i = 0; i < MAX_VARS; i++)
+        if (vars[i] && strncmp(vars[i], name, len) == 0 && vars[i][len] == '=') {
+            if (at)
+                *at = i;
+            return vars[i];
+        }
+    return 0;
+}
+
+static const char *value_of(const char *name, int len)
+{
+    char *v = var_entry(name, len, 0), *e;
+    int i;
+    if (v)
+        return v + len + 1;
+    for (i = 0; environ && (e = environ[i]); i++)
+        if (strncmp(e, name, len) == 0 && e[len] == '=')
+            return e + len + 1;
+    return "";
+}
+
+static int name_char(int c, int first)
+{
+    return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+           || (!first && c >= '0' && c <= '9');
+}
+
+/* a variable's name: letters, digits, _, not a digit first */
+static int good_name(const char *s, int len)
+{
+    int i;
+    if (len <= 0)
+        return 0;
+    for (i = 0; i < len; i++)
+        if (!name_char(s[i], i == 0))
+            return 0;
+    return 1;
+}
+
+/* put c in the word being made; 0 when the words are full */
+static int put_char(int c)
+{
+    if (words_len == sizeof words - 1)
+        return 0;
+    words[words_len++] = c;
+    return 1;
+}
+
+/* $ at *p (a variable, ${...}, $?): its value into the word; p moved past
+   it. A $ that names nothing stays a $. 0 when the words are full */
+static int expand(char **pp)
+{
+    char *p = *pp + 1, *name = p, num[12];
+    const char *v;
+    int len;
+    if (*p == '?') {
+        sprintf(num, "%d", last_status);
+        v = num;
+        p++;
+    } else if (*p == '{') {
+        name = ++p;
+        while (*p && *p != '}')
+            p++;
+        len = p - name;
+        if (*p != '}' || !good_name(name, len)) {
+            *pp += 1;
+            return put_char('$');       /* not a ${NAME}: as typed */
+        }
+        v = value_of(name, len);
+        p++;
+    } else if (name_char(*p, 1)) {
+        while (name_char(*p, 0))
+            p++;
+        v = value_of(name, p - name);
+    } else {
+        *pp += 1;
+        return put_char('$');
+    }
+    *pp = p;
+    while (*v)
+        if (!put_char(*v++))
+            return 0;
+    return 1;
+}
+
+/* the next word at *s, its quotes taken out and $NAME replaced by its value
+   (not inside '...'), copied into words[]; 0 when the line has no more, -1
+   (as a pointer) for a missing quote or a line too long with its values */
 static char *word(char **s)
 {
-    char *p = *s, *start, *w, end;
+    char *p = *s, *start;
     while (*p == ' ' || *p == '\t' || *p == '\n')
         p++;
     if (!*p)
         return 0;
-    start = w = p;
+    start = words + words_len;
     while (*p && *p != ' ' && *p != '\t' && *p != '\n') {
+        int ok = 1;
         if (*p == '"' || *p == '\'') {
             char q = *p++;
-            while (*p && *p != q)
-                *w++ = *p++;
-            if (!*p) {
+            while (*p && *p != q && ok)
+                ok = q == '"' && *p == '$' ? expand(&p) : put_char(*p++);
+            if (ok && !*p) {
                 printf("missing %c\n", q);
                 return (char *)-1;
             }
             p++;
         } else
-            *w++ = *p++;
+            ok = *p == '$' ? expand(&p) : put_char(*p++);
+        if (!ok) {
+            printf("the line is too long with its $ values\n");
+            return (char *)-1;
+        }
     }
-    end = *p;
-    *w = 0;                             /* may be where end was */
-    *s = end ? p + 1 : p;
+    words[words_len++] = 0;             /* put_char kept room for it */
+    *s = *p ? p + 1 : p;
     return start;
 }
 
-/* the words of the line into args[], > and >> into redirect; argc, or -1 */
+/* the words of the line (into words[], $NAME replaced) into args[], > and
+   >> into redirect, < into input; argc, or -1 */
 static int split(char *s)
 {
     int n = 0;
     char *w;
     redirect = 0;
+    input = 0;
     background = 0;
+    words_len = 0;
     for (;;) {
         while (*s == ' ' || *s == '\t')
             s++;
@@ -575,6 +889,16 @@ static int split(char *s)
             if (redirect == 0 || redirect == (char *)-1) {
                 if (redirect == 0)
                     printf("> needs a file name\n");
+                return -1;
+            }
+            continue;
+        }
+        if (*s == '<' && s[1] != '<') { /* < file, <file; << stays a word (calc 1 << 2) */
+            s++;
+            input = word(&s);
+            if (input == 0 || input == (char *)-1) {
+                if (input == 0)
+                    printf("< needs a file name\n");
                 return -1;
             }
             continue;
@@ -600,7 +924,7 @@ static int split(char *s)
 }
 
 /* one command line; its status */
-static int run_line(char *s)
+static int run_words(char *s)
 {
     int argc = split(s), i, status;
     FILE *to;
@@ -613,6 +937,14 @@ static int run_line(char *s)
         return run_program(argc, args);
     if (background)
         printf("%s: a built-in command can't run in the background\n", args[0]);
+    if (input) {
+        if (strcmp(args[0], "cat") != 0 || argc != 1) {
+            printf("%s: < works for programs and a bare cat only\n", args[0]);
+            return 2;
+        }
+        args[1] = input;                /* cat < f: as cat f */
+        args[argc = 2] = 0;
+    }
     to = base_out;
     if (redirect && (to = fopen(redirect, append ? "a" : "w")) == 0)
         return fail(args[0], redirect);
@@ -625,6 +957,18 @@ static int run_line(char *s)
         status = 2;
     }
     return status;
+}
+
+/* one command line; its status, which is $? from then on (a blank line
+   leaves $? as it was) */
+static int run_line(char *s)
+{
+    char *p = s;
+    while (*p == ' ' || *p == '\t' || *p == '\n')
+        p++;
+    if (!*p)
+        return 0;
+    return last_status = run_words(s);
 }
 
 /* run FILE: its lines, as if typed; the output of each goes where run's goes */
@@ -667,9 +1011,222 @@ static int cmd_run(int argc, char **argv)
     return status;
 }
 
+/* ------------------------------------------------------- typing a line */
+
+/* At the prompt the shell reads the keys itself (wait_key, no echo) and
+   shows them, so it can offer the last lines (Up, Down) and complete names
+   (Tab). The text display has no cursor addressing, only backspace: the
+   cursor stays at the end of the line, and showing another line means a
+   backspace for each char shown, then the new text. Measured in the
+   simulator's display (devices.py, 2026-11-03): a backspace at column 0
+   does nothing (it never goes back to the line above), and a line never
+   wraps, however long, so the backspaces always reach the prompt. The
+   circuit's TTY wraps at 64 columns, and what its backspace does at the
+   start of a wrapped row is not measured; Tynix runs only in the simulator.
+   Left and Right are ignored: there is no moving inside the line. */
+
+#define HISTORY 32
+static char history[HISTORY][LINE_MAX];
+static int history_n;           /* lines kept (at most HISTORY), the newest last */
+
+static void remember(const char *s)
+{
+    int len = strlen(s);
+    if (len && s[len - 1] == '\n')
+        len--;
+    if (len == 0 || (history_n && strncmp(history[history_n - 1], s, len) == 0
+                     && history[history_n - 1][len] == 0))
+        return;                         /* blank, or the same as the last one */
+    if (history_n == HISTORY) {
+        memmove(history[0], history[1], (HISTORY - 1) * LINE_MAX);
+        history_n--;
+    }
+    strncpy(history[history_n], s, len);
+    history[history_n++][len] = 0;
+}
+
+static void erase(int n)
+{
+    while (n-- > 0)
+        putchar('\b');
+}
+
+/* show s in place of the n chars shown; its length */
+static int replace(char *buf, int n, const char *s)
+{
+    erase(n);
+    strcpy(buf, s);
+    fputs(buf, stdout);
+    return strlen(buf);
+}
+
+/* the names a word could become: matches[] (NUL-separated in names[]) */
+#define MAX_MATCHES 64
+static char names[4096];
+static char *matches[MAX_MATCHES];
+static int n_matches, names_len, match_dir[MAX_MATCHES];
+
+static void add_match(const char *name, int is_dir)
+{
+    int i, len = strlen(name) + 1;
+    for (i = 0; i < n_matches; i++)
+        if (strcmp(matches[i], name) == 0)
+            return;                     /* a built-in also in /bin */
+    if (n_matches == MAX_MATCHES || names_len + len > (int)sizeof names)
+        return;
+    matches[n_matches] = names + names_len;
+    match_dir[n_matches++] = is_dir;
+    strcpy(names + names_len, name);
+    names_len += len;
+}
+
+/* the entries of dir starting with prefix (only programs: not folders) */
+static void match_dir_entries(const char *dir, const char *prefix, int programs)
+{
+    DIR *d = opendir(*dir ? dir : ".");
+    struct dirent *e;
+    int len = strlen(prefix);
+    if (d == 0)
+        return;
+    while ((e = readdir(d)))
+        if (strncmp(e->d_name, prefix, len) == 0 && !(programs && e->d_type == DT_DIR)
+                && strcmp(e->d_name, ".") && strcmp(e->d_name, ".."))
+            add_match(e->d_name, e->d_type == DT_DIR);
+    closedir(d);
+}
+
+/* Tab: the last word of buf[0..n) completed as far as it is sure; when it
+   can't add anything and there are several names, they are listed and the
+   prompt and line shown again. The new length. */
+static int complete(char *buf, int n, const char *prompt)
+{
+    static char dir[LINE_MAX];
+    char *word = buf + n, *slash;
+    const char *prefix, *p, *end;
+    int first, i, common, len;
+    while (word > buf && word[-1] != ' ')
+        word--;
+    first = word == buf || strspn(buf, " ") == (unsigned)(word - buf);
+    n_matches = names_len = 0;
+    slash = memchr(word, '/', buf + n - word) ? strrchr(word, '/') : 0;
+    if (first && slash == 0) {          /* a command: built-ins, then $PATH's programs */
+        buf[n] = 0;
+        for (i = 0; i < N_COMMANDS; i++)
+            if (strncmp(commands[i].name, word, strlen(word)) == 0)
+                add_match(commands[i].name, 0);
+        p = getenv("PATH");
+        for (p = p && *p ? p : "/bin"; ; p = end + 1) {
+            end = strchr(p, ':');
+            if (end == 0)
+                end = p + strlen(p);
+            if (end > p && end - p < (int)sizeof dir) {
+                strncpy(dir, p, end - p);
+                dir[end - p] = 0;
+                match_dir_entries(dir, word, 1);
+            }
+            if (*end == 0)
+                break;
+        }
+        prefix = word;
+    } else {                            /* a path: the entries of its folder */
+        buf[n] = 0;
+        if (slash) {
+            len = slash - word;
+            strncpy(dir, word, len);
+            dir[len] = 0;
+            if (len == 0)
+                strcpy(dir, "/");
+            prefix = slash + 1;
+        } else {
+            dir[0] = 0;
+            prefix = word;
+        }
+        match_dir_entries(dir, prefix, 0);
+    }
+    if (n_matches == 0)
+        return n;
+    len = strlen(prefix);
+    common = strlen(matches[0]);
+    for (i = 1; i < n_matches; i++) {
+        int k = 0;
+        while (k < common && matches[i][k] == matches[0][k])
+            k++;
+        common = k;
+    }
+    if (common > len || n_matches == 1) {
+        int add = common - len;
+        if (n + add + 1 >= LINE_MAX - 1)
+            return n;
+        memcpy(buf + n, matches[0] + len, add);
+        n += add;
+        if (n_matches == 1)
+            buf[n++] = match_dir[0] ? '/' : ' ';
+        buf[n] = 0;
+        fputs(buf + n - add - (n_matches == 1), stdout);
+        return n;
+    }
+    putchar('\n');                      /* several, and nothing to add: list them */
+    out = stdout;
+    col = 0;
+    for (i = 0; i < n_matches; i++)
+        item(matches[i], match_dir[i] ? "/" : "", 0);
+    if (col > 0)
+        putchar('\n');
+    printf("%s%s", prompt, buf);
+    return n;
+}
+
+/* a line typed at the prompt, in line[] with its '\n'; 0 at Ctrl-D on an
+   empty line */
+static int type_line(const char *prompt)
+{
+    static char typed[LINE_MAX];    /* what was being typed before Up */
+    int n = 0, at = history_n, c;
+    line[0] = 0;
+    for (;;) {
+        c = wait_key();
+        if (c == KEY_CTRL('d') && n == 0)
+            return 0;
+        if (c == '\n' || c == '\r') {
+            putchar('\n');
+            line[n++] = '\n';
+            line[n] = 0;
+            remember(line);
+            return 1;
+        }
+        if (c == '\b' || c == 127) {
+            if (n > 0) {
+                line[--n] = 0;
+                erase(1);
+            }
+        } else if (c == KEY_UP) {
+            if (at > 0) {
+                if (at == history_n)
+                    strcpy(typed, line);
+                n = replace(line, n, history[--at]);
+            }
+        } else if (c == KEY_DOWN) {
+            if (at < history_n)
+                n = replace(line, n, ++at == history_n ? typed : history[at]);
+        } else if (c == '\t') {
+            n = complete(line, n, prompt);
+        } else if (c >= ' ' && c < 127 && n < LINE_MAX - 2) {
+            line[n++] = c;
+            line[n] = 0;
+            putchar(c);
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
+    struct stat st;
     base_out = stdout;
+    /* the environment this shell and its programs start with, unless the
+       parent's already says (sh -c from claude, sh from sh) */
+    setenv("PATH", "/bin", 0);
+    setenv("HOME", is_dir("/home/user") ? "/home/user" : "/", 0);
+    setenv("PWD", getcwd(cwd, sizeof cwd), 1);
     if (argc >= 2 && strcmp(argv[1], "-c") == 0) {     /* sh -c LINE: that line, then the end */
         if (argc != 3) {
             printf("usage: sh -c 'command line'\n");
@@ -682,11 +1239,25 @@ int main(int argc, char **argv)
         strcpy(line, argv[2]);
         return run_line(line);
     }
-    printf("Tynix shell: help lists the commands\n");
-    for (;;) {
+    if (!isatty(0)) {                   /* sh < FILE: its lines, then the end */
+        int status = 0;
+        while (fgets(line, sizeof line, stdin))
+            status = run_line(line);
         reap();
-        printf("%s> ", getcwd(cwd, sizeof cwd));
-        if (fgets(line, sizeof line, stdin) == 0)
+        return status;
+    }
+    printf("Tynix shell: help lists the commands\n");
+    if (stat("/etc/profile", &st) == 0 && !S_ISDIR(st.st_mode)) {
+        char *profile[] = {"run", "/etc/profile", 0};
+        out = stdout;
+        last_status = cmd_run(2, profile);  /* the settings kept on the disk */
+    }
+    for (;;) {
+        static char prompt[sizeof cwd + 2];
+        reap();
+        sprintf(prompt, "%s> ", getcwd(cwd, sizeof cwd));
+        fputs(prompt, stdout);
+        if (!type_line(prompt))
             break;                      /* Ctrl-D */
         run_line(line);
     }

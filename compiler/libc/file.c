@@ -15,10 +15,12 @@ FILE *stdout = &out_file;
 FILE *stderr = &err_file;
 
 /* a program for Tynix whose stdout is a file (the shell's >): put is the
-   function that sends it there (compiler/libc/tynix/sys.c) */
-void _set_stdout(int (*put)(int, FILE *))
+   function that sends it there, flush sends what put kept back (so
+   fflush(stdout) works; compiler/libc/tynix/sys.c) */
+void _set_stdout(int (*put)(int, FILE *), int (*flush)(FILE *))
 {
     out_file.put = put;
+    out_file.flush = flush;
 }
 
 extern int (*_stdin_get)(void);         /* getchar.c */

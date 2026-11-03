@@ -292,7 +292,8 @@ def test_key_codes():
     assert [key_code(k, "") for k in ("Up", "Down", "Left", "Right")] == [28, 29, 30, 31]
     assert key_code("d", "\x04") == 4 and key_code("s", "\x13") == 19 and key_code("z", "\x1a") == 26
     assert key_code("h", "\x08") == 8 and key_code("j", "\n") == 10 and key_code("m", "\r") == 10
-    for keysym, char in (("c", "\x03"), ("v", "\x16"), ("Tab", "\t"), ("Escape", "\x1b"),
+    assert key_code("Tab", "\t") == 9 and key_code("i", "\t") == 9
+    for keysym, char in (("c", "\x03"), ("v", "\x16"), ("ISO_Left_Tab", ""), ("Escape", "\x1b"),
                          ("Delete", "\x7f"), ("F1", ""), ("Home", ""), ("e", "\xe9")):
         assert key_code(keysym, char) is None, (keysym, char)
     # a program sees the arrow as 30, then 0 (empty buffer)
@@ -780,6 +781,48 @@ def test_timer_interrupt_and_acknowledge():
                     cpu.step()
         assert cpu.regs[4] == 4 and cpu.regs[3] > 100, (cpu.regs[3], cpu.regs[4])
         assert cpu.bus.interrupts.pending == 0 and cpu.ie == 1
+
+
+def test_snapshot():
+    # snapshot.py: a program with timer interrupts, a key still in the buffer,
+    # text, a pixel, the hex display and RAM writes; saved after N steps, the
+    # snapshot loaded into a fresh CPU and both run M more steps: the same
+    # state (the clock counts instructions, so both see the same ticks)
+    import os
+    import tempfile
+    import snapshot
+    from devices import Timer
+    rom = build(("L", "start"), OUT(0xAD, 1), OUT(0x7C, 2), EI, OUT(0x5C, ord("h")),
+                OUT(0x6C, 0x05060000 | 0xF800), OUT(0x3C, 0xC0FFEE),
+                ("L", "loop"), ADDI(3, 1), [0x0E03],
+                DATA(5, RAM + 7), [0x0253], ("RJMP", "loop"),       # ST R5, R3
+                ("L", "irq"), ADDI(4, 1), [0x0E04], OUT(0xAC, 1), [RTI])
+
+    def fresh():
+        cpu = CPU()
+        cpu.bus.timer = Timer(clock=lambda: cpu.instructions / 10_000)    # 10 instructions a ms
+        cpu.bus.timer.reset()
+        return cpu
+
+    a = fresh()
+    a.mem.load_rom(rom)
+    a.bus.keyboard.type("zz")
+    for _ in range(1500):
+        a.step()
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "s.state")
+        snapshot.save(a, path, "made.rom")
+        b = fresh()
+        rom_path, warnings = snapshot.load(b, path)
+        assert rom_path.endswith("made.rom") and warnings == [], warnings
+        assert snapshot.digest(a) == snapshot.digest(b)
+        assert os.path.getsize(path) < 8000, os.path.getsize(path)     # two 16M-word banks, a few chunks
+    for cpu in (a, b):
+        for _ in range(3000):
+            cpu.step()
+    assert a.regs[4] > 20 and a.mem.ram[7] > 20, (a.regs[4], a.mem.ram[7])   # ticks taken, RAM written
+    assert snapshot.digest(a) == snapshot.digest(b), "the loaded CPU went another way"
+    assert b.bus.display.text == "h" and b.bus.hex_value == 0xC0FFEE and list(b.bus.keyboard.buffer) == [122, 122]
 
 
 def test_a_request_nobody_acknowledges_does_not_starve_the_program():

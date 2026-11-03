@@ -565,6 +565,117 @@ def check_examples_build():
     return f"{len(built)} built"
 
 
+def check_disasm():
+    """disasm.py: every assembly example (linked with stdlib.asm as a library
+    when it needs it), disassembled and assembled again, gives the same words,
+    with and without its .map, with CALL/RET folded and --raw; strings come
+    back as .string, a word the assembler writes otherwise (NOT R1 with RA 2)
+    as .word, and the CLI writes the file."""
+    import tempfile
+    import disasm
+    root = Path(__file__).resolve().parent.parent.parent / "examples" / "asm"
+    if not root.is_dir():
+        return "skipped, no examples folder"
+
+    def obj(path):
+        return assemble(path.read_text(encoding="utf-8-sig"), str(path))[0]
+
+    stdlib = root / "stdlib" / "stdlib.asm"
+    runs = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        for path in sorted(root.rglob("*.asm")):
+            if path.name in ("stdlib.asm", "lib.asm"):
+                continue
+            files = [obj(path)] + ([obj(root / "two_files" / "lib.asm")] if path.parent.name == "two_files" else [])
+            try:
+                program = linker.link(files)
+            except AsmErrors:
+                lib = obj(stdlib)
+                program = linker.link(files + [lib], [lib])
+            rom, map_ = tmp / (path.stem + ".rom"), tmp / (path.stem + ".map")
+            rom.write_text(linker.format_raw(program.rom))
+            map_.write_text(linker.format_map(program, rom.name))
+            for m in (None, map_):
+                for raw in (False, True):
+                    problem = disasm.round_trip(rom, m, raw)
+                    assert problem is None, problem
+                    runs += 1
+        # a hand-made image: a string, a call, NOT with RA != RB, a jump into an operand word
+        source = """.global start
+start:  DATA R1, msg
+        CALL f
+        RJF Z, start + 1
+        HALT
+f:      RET
+msg:    .string "hi\\n"
+"""
+        program = linker.link([assemble(source, "t.asm")[0]])
+        words = program.rom + [0x1612]                  # NOT with RA 1, RB 2: not what NOT R2 is
+        rom = tmp / "t.rom"
+        rom.write_text(linker.format_raw(words))
+        assert disasm.round_trip(rom) is None
+        text = disasm.disassemble_file(rom)
+        for want in ('.string "hi\\n"', "CALL L_", "        RET", ".word 0x1612", "DATA R1, L_",
+                     "RJF Z, start + 1"):
+            assert want in text, (want, text)
+        assert "        CALL " not in disasm.disassemble_file(rom, raw=True)
+        out = tmp / "t.dis.asm"
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert cli.main(["disasm", str(rom), "-o", str(out)]) == 0
+        assert out.read_text() == text
+    return f"{runs} round trips"
+
+
+def check_isa_page():
+    """isa_page.py: the page builds, has a row for every mnemonic of
+    encoding.py (and section 4 has no row the assembler doesn't know), and
+    its decoder's tables, run the way the page runs them, give isa.py's
+    decode() on all 65,536 words (name, groups, RA, RB)."""
+    import sys
+    import isa_page
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent / "cpu_sim" / "src"))
+    import isa                          # cpu_sim/src
+    import encoding as enc
+    assert isa_page.documented() == isa_page.encoded(), \
+        (isa_page.encoded() - isa_page.documented(), isa_page.documented() - isa_page.encoded())
+    tables = isa_page.decoder_tables()
+    for w in range(0x10000):
+        d = isa.decode(w)
+        name = d.name
+        if d.is_alu:
+            if d.is_float:
+                name = name if name in ("FLOAT", "INT") else "F" + name
+            else:
+                name = {"INC": "++", "DEC": "--"}.get(name, name)
+            if name not in enc.MNEMONICS:
+                name = None             # a word no mnemonic writes (float opcode 4, ...)
+        want = (name, d.is_alu, d.is_float, d.is_imm, d.ra, d.rb)
+        assert isa_page.page_decode(tables, w) == want, (hex(w), isa_page.page_decode(tables, w), want)
+    ins = isa_page.instructions()
+    groups = {i["group"] for i in ins}
+    assert len(ins) == len(isa_page.doc_rows()) and len(groups) == 3, groups
+    assert all(i["steps"] for i in ins if i["circuit"]) and not any(i["steps"] for i in ins if not i["circuit"])
+    rti = next(i for i in ins if i["name"] == "RTI")
+    assert not rti["circuit"] and rti["forms"][0]["example_words"] == [0x2000]
+    add = next(i for i in ins if i["name"] == "ADD")
+    assert [f["example_words"] for f in add["forms"]] == [[0x1012], [0x5010, 5]]
+    assert add["forms"][0]["ra"] == 0x10 and add["forms"][0]["rb"] == 0x1
+    not_ = next(i for i in ins if i["name"] == "NOT")
+    assert not_["forms"][0]["rb"] == 0x11      # NOT puts RB in both fields
+    rjf = next(i for i in ins if i["name"] == "RJF")
+    assert [c for c, _ in rjf["steps"]].count("taken") == 1
+    text = isa_page.page()
+    assert text.startswith("<!doctype html>") and "<title>ISA Reference</title>" in text
+    for name in enc.MNEMONICS - enc.PSEUDO_OPS - {"INC", "DEC"}:
+        assert json_name(name) in text, name
+    return f"{len(ins)} instructions, 65536 words decoded"
+
+
+def json_name(name):
+    return '"name": "' + name
+
+
 CHECKS = [
     check_isa_doc_words,
     check_abs_value_example,
@@ -588,6 +699,8 @@ CHECKS = [
     check_object_file_round_trip,
     check_command_line,
     check_examples_build,
+    check_disasm,
+    check_isa_page,
 ]
 
 

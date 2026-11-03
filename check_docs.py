@@ -89,7 +89,20 @@ def check_tweaks_documented():
     assert not undocumented, "TWEAKS missing from TECHNICAL.md 3.4: " + ", ".join(undocumented)
 
 
-CHECKS = [check_paths_exist, check_examples_listed, check_tweaks_documented]
+def check_instructions_documented():
+    """Every mnemonic of compiler/src/asm/encoding.py (COMM and STK by
+    sub-operation, the aliases) has a row in compiler/assembly_syntax.md
+    section 4, and every row there names one (the tables isa_page.py reads)."""
+    sys.path.insert(0, str(ROOT / "compiler" / "src" / "asm"))
+    import isa_page
+    missing = isa_page.encoded() - isa_page.documented()
+    extra = isa_page.documented() - isa_page.encoded()
+    assert not missing, "instructions with no row in assembly_syntax.md 4: " + ", ".join(sorted(missing))
+    assert not extra, "rows in assembly_syntax.md 4 the assembler doesn't know: " + ", ".join(sorted(extra))
+
+
+CHECKS = [check_paths_exist, check_examples_listed, check_tweaks_documented,
+          check_instructions_documented]
 
 
 def main():

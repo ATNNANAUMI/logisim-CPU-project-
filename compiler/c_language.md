@@ -413,8 +413,11 @@ messages.
 `_end` to the end of RAM, or of the program's region under Tynix); `exit`, `atexit`, `_Exit`, `abort`; `abs`,
 `labs`, `div`, `ldiv`; `atoi`, `atol`, `atof`, `strtol`, `strtoul`, `strtod`,
 `strtof`; `rand` (0..32767, the generator from the C standard's example, so
-not the same numbers as glibc), `srand`; `qsort`, `bsearch`; `getenv`
-(always `NULL`), `system` (fails).
+not the same numbers as glibc), `srand`; `qsort`, `bsearch`; `getenv`, `setenv`,
+`unsetenv` (POSIX; `env.c`: a ROM program starts with no variables, a
+program for Tynix with a copy of its parent's, and `<unistd.h>`'s `environ`
+is the list; change it only through `setenv`/`unsetenv`, which also tell the
+kernel what the program's children get), `system` (fails).
 
 **string.h:** `memcpy`, `memmove`, `memset`, `memcmp`, `memchr`, `strlen`,
 `strnlen`, `strcpy`, `strncpy`, `strcat`, `strncat`, `strcmp`, `strncmp`,

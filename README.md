@@ -1,5 +1,7 @@
 # logisim-CPU-project
 
+[![test](https://github.com/ATNNANAUMI/logisim-CPU-project-/actions/workflows/test.yml/badge.svg)](https://github.com/ATNNANAUMI/logisim-CPU-project-/actions/workflows/test.yml)
+
 A 32-bit CPU built from logic gates in Logisim-evolution, with the tools to
 program it: an assembler and linker, a small standard library, a C compiler
 with a C library, and a Python simulator that runs the same ROM images as the
@@ -50,6 +52,7 @@ Everything can be driven from `run.py` at the project root:
 ```
 python run.py                     # interactive menu
 python run.py test                # assembler, simulator, C compiler, image and disk tool self-checks, docs check
+                                  # (GitHub Actions runs it on every push and pull request: .github/workflows/test.yml)
 python run.py asm   prog.asm lib.asm            # -> compiler/ROM/prog.rom
 python run.py sim   compiler/ROM/prog.rom
 python run.py build prog.asm lib.asm            # assemble, then open the simulator
@@ -70,6 +73,8 @@ python compiler/src/asm build compiler/examples/asm/stdlib/stdlib_demo.asm \
 python cpu_sim/src/main.py compiler/ROM/demo.rom
 python cpu_sim/src/main.py compiler/ROM/demo.rom --headless --steps 2000000
 python cpu_sim/src/main.py compiler/ROM/demo.rom --disk disk.img     # with a disk (a file, created if missing)
+python cpu_sim/src/main.py compiler/ROM/demo.rom --headless --save-state run.state   # keep the whole machine
+python cpu_sim/src/main.py --load-state run.state                    # go on from it later (the window: save/load state)
 
 # run it on the real circuit, headless (finds an installed Logisim-evolution; --jar or $LOGISIM_JAR otherwise)
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/demo.rom
@@ -160,6 +165,7 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 | `compiler/c_decisions.md` | the C compiler's design decisions, guesses and open questions |
 | `cpu_sim/src/` | Python simulator (core, a translator of hot code into Python, GUI, the Claude device `claude.py`, self-checks, `bench.py` speed check) |
 | `run.py` | one entry point for all of the above |
+| `.github/workflows/test.yml` | CI: `run.py test` on Python 3.10 and 3.13, and the C compiler against gcc |
 | `PLAN.md` | action plan for the next features (not built yet) |
 
 ## Documentation
@@ -170,7 +176,9 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 * [STRUCTURE.md](STRUCTURE.md) — a compact map of the project, written to be
   pasted into a chat with an AI assistant.
 * [compiler/assembly_syntax.md](compiler/assembly_syntax.md) — the assembly
-  language reference.
+  language reference; `python compiler/src/asm/isa_page.py` turns its
+  instruction tables into one HTML page with each word's bits, the circuit's
+  micro-steps, a decoder and an encoder (`compiler/ROM/isa.html`).
 * [compiler/c_language.md](compiler/c_language.md) — the C language (tiny C)
   and its library; [compiler/c_decisions.md](compiler/c_decisions.md) — why
   the C compiler works the way it does.
