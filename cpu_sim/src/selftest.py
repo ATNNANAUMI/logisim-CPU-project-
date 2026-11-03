@@ -292,7 +292,8 @@ def test_key_codes():
     assert [key_code(k, "") for k in ("Up", "Down", "Left", "Right")] == [28, 29, 30, 31]
     assert key_code("d", "\x04") == 4 and key_code("s", "\x13") == 19 and key_code("z", "\x1a") == 26
     assert key_code("h", "\x08") == 8 and key_code("j", "\n") == 10 and key_code("m", "\r") == 10
-    for keysym, char in (("c", "\x03"), ("v", "\x16"), ("Tab", "\t"), ("Escape", "\x1b"),
+    assert key_code("Tab", "\t") == 9 and key_code("i", "\t") == 9
+    for keysym, char in (("c", "\x03"), ("v", "\x16"), ("ISO_Left_Tab", ""), ("Escape", "\x1b"),
                          ("Delete", "\x7f"), ("F1", ""), ("Home", ""), ("e", "\xe9")):
         assert key_code(keysym, char) is None, (keysym, char)
     # a program sees the arrow as 30, then 0 (empty buffer)

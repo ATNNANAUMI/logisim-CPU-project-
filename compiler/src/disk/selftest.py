@@ -612,6 +612,14 @@ SHELL_KEYS = ("help\n"
               "rmdir docs\n"
               "ls\n"
               "df\n"
+              "ec\thi\n"                 # Tab: echo is a built-in and in /bin, one name
+              "\x1c\n"                     # Up: the last line again
+              "cat /b.t\t\n"             # Tab on a path
+              "c\t"                         # several names, nothing to add: listed
+              "d /bi\t\n"                 # cd /bin/
+              "/\t\x08\x08\x08\x08\x08pwd\n"     # no name to add at /, then backspaces
+              "\x1c\x1c\x1c\x1d\n"      # Up 3, Down 1: two lines back
+              "\x1c\x1c\x1d\x1d xyz\x1e\x1f\x08\x08\x08\x08\n"   # back to the empty line
               "halt\n")
 
 SHELL_OUTPUT = """\
@@ -699,15 +707,34 @@ bin/  readme.txt  a.txt  b.txt  e2  p.txt  q.txt  c.txt  s.txt
 t.txt  typed.txt
 /> df
 {df}
-/> halt
+/> echo hi
+hi
+/> echo hi
+hi
+/> cat /b.txt 
+two  spaces
+more
+/> c
+cd  cat  cp  clear
+/> cd /bin/
+/bin> /
+bin/  readme.txt  a.txt  b.txt  e2  p.txt  q.txt  c.txt  s.txt
+t.txt  typed.txt
+/bin> pwd
+/bin
+/bin> cd /bin/
+/bin> 
+/bin> halt
 CPU halted
 """
 
 
 def check_shell():
     """tynix/shell.c on a disk made by tynix/make_disk.py: built-in commands, >
-    and >>, quotes, a program from /bin with its arguments and exit status,
-    the errors, cat from the keyboard up to Ctrl-D, df against fs.py."""
+    and >>, <, quotes, a program from /bin with its arguments and exit status,
+    the errors, cat from the keyboard up to Ctrl-D, df against fs.py, and at
+    the prompt Tab (a command, a path, several names listed) and Up/Down
+    through the last lines."""
     import sys
     root = HERE.parent.parent.parent
     sys.path.append(str(root / "tynix"))

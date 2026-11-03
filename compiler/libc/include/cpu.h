@@ -82,8 +82,9 @@
 #define IRQ_KEYBOARD 2
 
 /* what key_pressed() and wait_key() return besides printable ASCII, '\n'
-   (Enter) and '\b' (Backspace): the arrows, and Ctrl-A ... Ctrl-Z as 1 ... 26
-   (Ctrl-D is 4). Simulator only so far; getchar and scanf ignore them. */
+   (Enter), '\b' (Backspace) and '\t' (Tab): the arrows, and Ctrl-A ...
+   Ctrl-Z as 1 ... 26 (Ctrl-D is 4). Simulator only so far; getchar and scanf
+   ignore them (and Tab). */
 #define KEY_UP 28
 #define KEY_DOWN 29
 #define KEY_LEFT 30

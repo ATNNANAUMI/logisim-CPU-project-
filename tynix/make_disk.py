@@ -45,6 +45,7 @@ This disk was made by tynix/make_disk.py for Tynix (tynix/kernel.c, which
 starts the shell, /bin/sh from tynix/shell.c).
 
   help             the commands, and the programs in /bin
+  Up, Down, Tab    the last lines again; complete a command or a path
   ls -l /bin       the programs (cc build --exe), sizes in words
   primes           runs /bin/primes; its exit status comes back
   cat > todo.txt   type lines, then Ctrl-D: a new text file

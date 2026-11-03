@@ -124,7 +124,7 @@ logisim-CPU-project-/
 │   ├── shell.c               /bin/sh: prompts with the current directory; built-ins help ls cd pwd cat echo rm mv cp
 │   │                         mkdir rmdir df clear halt jobs fg kill wait run set export env unset (> and >> to a file, < from
 │   │                         one, $NAME ${NAME} $?); any other name runs NAME from $PATH's folders (or a path) and waits, or not
-│   │                         with & at the end; sh -c LINE: one line; runs /etc/profile at start
+│   │                         with & at the end; sh -c LINE: one line; runs /etc/profile at start; Up/Down history, Tab completion
 │   ├── bin/                  sources of the OS's own programs for /bin (built --exe by make_disk.py; see bin/README.md)
 │   │   ├── ed.c              a line editor for text files (a, i, c, d, p, s, /find, w, q)
 │   │   ├── edit.c            a full-screen editor on the RGB screen (arrows, ^S save, ^Q quit)

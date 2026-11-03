@@ -36,6 +36,10 @@
  * kill / continue / background / tasks; "background" gives the keyboard
  * back to this shell, which prints the job's number.
  *
+ * At the prompt, Up and Down bring back the last 32 lines and Tab completes
+ * the word being typed (a command from the built-ins and $PATH, else a path;
+ * several names are listed). The cursor stays at the end of the line.
+ *
  * Variables: `set NAME=value` (the shell's own), `export NAME=value`
  * (the environment, which every program started afterwards gets: getenv),
  * `unset`, `env`. $NAME, ${NAME} and $? (the last line's status) expand in
@@ -1007,6 +1011,213 @@ static int cmd_run(int argc, char **argv)
     return status;
 }
 
+/* ------------------------------------------------------- typing a line */
+
+/* At the prompt the shell reads the keys itself (wait_key, no echo) and
+   shows them, so it can offer the last lines (Up, Down) and complete names
+   (Tab). The text display has no cursor addressing, only backspace: the
+   cursor stays at the end of the line, and showing another line means a
+   backspace for each char shown, then the new text. Measured in the
+   simulator's display (devices.py, 2026-11-03): a backspace at column 0
+   does nothing (it never goes back to the line above), and a line never
+   wraps, however long, so the backspaces always reach the prompt. The
+   circuit's TTY wraps at 64 columns, and what its backspace does at the
+   start of a wrapped row is not measured; Tynix runs only in the simulator.
+   Left and Right are ignored: there is no moving inside the line. */
+
+#define HISTORY 32
+static char history[HISTORY][LINE_MAX];
+static int history_n;           /* lines kept (at most HISTORY), the newest last */
+
+static void remember(const char *s)
+{
+    int len = strlen(s);
+    if (len && s[len - 1] == '\n')
+        len--;
+    if (len == 0 || (history_n && strncmp(history[history_n - 1], s, len) == 0
+                     && history[history_n - 1][len] == 0))
+        return;                         /* blank, or the same as the last one */
+    if (history_n == HISTORY) {
+        memmove(history[0], history[1], (HISTORY - 1) * LINE_MAX);
+        history_n--;
+    }
+    strncpy(history[history_n], s, len);
+    history[history_n++][len] = 0;
+}
+
+static void erase(int n)
+{
+    while (n-- > 0)
+        putchar('\b');
+}
+
+/* show s in place of the n chars shown; its length */
+static int replace(char *buf, int n, const char *s)
+{
+    erase(n);
+    strcpy(buf, s);
+    fputs(buf, stdout);
+    return strlen(buf);
+}
+
+/* the names a word could become: matches[] (NUL-separated in names[]) */
+#define MAX_MATCHES 64
+static char names[4096];
+static char *matches[MAX_MATCHES];
+static int n_matches, names_len, match_dir[MAX_MATCHES];
+
+static void add_match(const char *name, int is_dir)
+{
+    int i, len = strlen(name) + 1;
+    for (i = 0; i < n_matches; i++)
+        if (strcmp(matches[i], name) == 0)
+            return;                     /* a built-in also in /bin */
+    if (n_matches == MAX_MATCHES || names_len + len > (int)sizeof names)
+        return;
+    matches[n_matches] = names + names_len;
+    match_dir[n_matches++] = is_dir;
+    strcpy(names + names_len, name);
+    names_len += len;
+}
+
+/* the entries of dir starting with prefix (only programs: not folders) */
+static void match_dir_entries(const char *dir, const char *prefix, int programs)
+{
+    DIR *d = opendir(*dir ? dir : ".");
+    struct dirent *e;
+    int len = strlen(prefix);
+    if (d == 0)
+        return;
+    while ((e = readdir(d)))
+        if (strncmp(e->d_name, prefix, len) == 0 && !(programs && e->d_type == DT_DIR)
+                && strcmp(e->d_name, ".") && strcmp(e->d_name, ".."))
+            add_match(e->d_name, e->d_type == DT_DIR);
+    closedir(d);
+}
+
+/* Tab: the last word of buf[0..n) completed as far as it is sure; when it
+   can't add anything and there are several names, they are listed and the
+   prompt and line shown again. The new length. */
+static int complete(char *buf, int n, const char *prompt)
+{
+    static char dir[LINE_MAX];
+    char *word = buf + n, *slash;
+    const char *prefix, *p, *end;
+    int first, i, common, len;
+    while (word > buf && word[-1] != ' ')
+        word--;
+    first = word == buf || strspn(buf, " ") == (unsigned)(word - buf);
+    n_matches = names_len = 0;
+    slash = memchr(word, '/', buf + n - word) ? strrchr(word, '/') : 0;
+    if (first && slash == 0) {          /* a command: built-ins, then $PATH's programs */
+        buf[n] = 0;
+        for (i = 0; i < N_COMMANDS; i++)
+            if (strncmp(commands[i].name, word, strlen(word)) == 0)
+                add_match(commands[i].name, 0);
+        p = getenv("PATH");
+        for (p = p && *p ? p : "/bin"; ; p = end + 1) {
+            end = strchr(p, ':');
+            if (end == 0)
+                end = p + strlen(p);
+            if (end > p && end - p < (int)sizeof dir) {
+                strncpy(dir, p, end - p);
+                dir[end - p] = 0;
+                match_dir_entries(dir, word, 1);
+            }
+            if (*end == 0)
+                break;
+        }
+        prefix = word;
+    } else {                            /* a path: the entries of its folder */
+        buf[n] = 0;
+        if (slash) {
+            len = slash - word;
+            strncpy(dir, word, len);
+            dir[len] = 0;
+            if (len == 0)
+                strcpy(dir, "/");
+            prefix = slash + 1;
+        } else {
+            dir[0] = 0;
+            prefix = word;
+        }
+        match_dir_entries(dir, prefix, 0);
+    }
+    if (n_matches == 0)
+        return n;
+    len = strlen(prefix);
+    common = strlen(matches[0]);
+    for (i = 1; i < n_matches; i++) {
+        int k = 0;
+        while (k < common && matches[i][k] == matches[0][k])
+            k++;
+        common = k;
+    }
+    if (common > len || n_matches == 1) {
+        int add = common - len;
+        if (n + add + 1 >= LINE_MAX - 1)
+            return n;
+        memcpy(buf + n, matches[0] + len, add);
+        n += add;
+        if (n_matches == 1)
+            buf[n++] = match_dir[0] ? '/' : ' ';
+        buf[n] = 0;
+        fputs(buf + n - add - (n_matches == 1), stdout);
+        return n;
+    }
+    putchar('\n');                      /* several, and nothing to add: list them */
+    out = stdout;
+    col = 0;
+    for (i = 0; i < n_matches; i++)
+        item(matches[i], match_dir[i] ? "/" : "", 0);
+    if (col > 0)
+        putchar('\n');
+    printf("%s%s", prompt, buf);
+    return n;
+}
+
+/* a line typed at the prompt, in line[] with its '\n'; 0 at Ctrl-D on an
+   empty line */
+static int type_line(const char *prompt)
+{
+    static char typed[LINE_MAX];    /* what was being typed before Up */
+    int n = 0, at = history_n, c;
+    line[0] = 0;
+    for (;;) {
+        c = wait_key();
+        if (c == KEY_CTRL('d') && n == 0)
+            return 0;
+        if (c == '\n' || c == '\r') {
+            putchar('\n');
+            line[n++] = '\n';
+            line[n] = 0;
+            remember(line);
+            return 1;
+        }
+        if (c == '\b' || c == 127) {
+            if (n > 0) {
+                line[--n] = 0;
+                erase(1);
+            }
+        } else if (c == KEY_UP) {
+            if (at > 0) {
+                if (at == history_n)
+                    strcpy(typed, line);
+                n = replace(line, n, history[--at]);
+            }
+        } else if (c == KEY_DOWN) {
+            if (at < history_n)
+                n = replace(line, n, ++at == history_n ? typed : history[at]);
+        } else if (c == '\t') {
+            n = complete(line, n, prompt);
+        } else if (c >= ' ' && c < 127 && n < LINE_MAX - 2) {
+            line[n++] = c;
+            line[n] = 0;
+            putchar(c);
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     struct stat st;
@@ -1042,9 +1253,11 @@ int main(int argc, char **argv)
         last_status = cmd_run(2, profile);  /* the settings kept on the disk */
     }
     for (;;) {
+        static char prompt[sizeof cwd + 2];
         reap();
-        printf("%s> ", getcwd(cwd, sizeof cwd));
-        if (fgets(line, sizeof line, stdin) == 0)
+        sprintf(prompt, "%s> ", getcwd(cwd, sizeof cwd));
+        fputs(prompt, stdout);
+        if (!type_line(prompt))
             break;                      /* Ctrl-D */
         run_line(line);
     }

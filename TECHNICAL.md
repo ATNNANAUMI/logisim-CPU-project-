@@ -223,7 +223,7 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 | --- | --- | --- |
 | `0x5C` | text display (TTY) | prints the low 7 bits as ASCII; `0x0A` newline, `0x08` backspace, `0x0C` (form feed) clears it (Logisim's `TTY` does this; read in its code, not run on the circuit) |
 | `0x3C` | number display | latches the 32-bit word and shows it on 8 hex digits (the simulator shows it in the window, and as `HEX DISPLAY:` in headless output) |
-| `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08`, printable ASCII as itself; simulator only so far: arrows up/down/left/right = 28/29/30/31, Ctrl-A … Ctrl-Z = 1 … 26 (Ctrl-D = 4; Ctrl-H, Ctrl-J, Ctrl-M are Backspace and Enter; Ctrl-C and Ctrl-V stay with the window) |
+| `0xF0` | keyboard | `INDATA` pops one key from the buffer; an empty buffer reads `0`; Enter = `0x0A`, Backspace = `0x08`, printable ASCII as itself; simulator only so far: Tab = 9, arrows up/down/left/right = 28/29/30/31, Ctrl-A … Ctrl-Z = 1 … 26 (Ctrl-D = 4; Ctrl-H, Ctrl-I, Ctrl-J, Ctrl-M are Backspace, Tab and Enter; Ctrl-C and Ctrl-V stay with the window) |
 | `0x6C` | RGB screen | one pixel per word: x in bits 31–24, y in bits 23–16, RGB565 colour in bits 15–0; a 256×256 RGB Video uses all 32 bits (a smaller one would wire only the low bits of x and y). Write-only |
 | `0x6D` | RGB screen clear (*simulator only*) | any word pulses the RGB Video's reset: all black. Not built on the circuit yet, where it does nothing |
 | `0x7C` | timer (*planned*) | `INDATA` reads the milliseconds since reset, wrapping at 32 bits; C's `clock()` |
@@ -862,7 +862,7 @@ the end (lines in a deeper frame, EBP above the current one, don't count),
 `debuginfo.py`.
 
 The keyboard field is read-only: every key goes straight into the buffer
-(Enter as `0x0A`, Backspace as `0x08`, printable ASCII as itself, the arrows as 28–31, Ctrl+letter as 1–26; `key_code()` in `devices.py`).
+(Enter as `0x0A`, Backspace as `0x08`, Tab as `0x09`, printable ASCII as itself, the arrows as 28–31, Ctrl+letter as 1–26; `key_code()` in `devices.py`; Shift-Tab stays with the window).
 Pasting types the clipboard one key at a time. The field shows the keys still
 waiting to be read.
 
@@ -1380,7 +1380,7 @@ python compiler/src/disk/selftest.py  # 24 checks: `environment` (export/set/uns
                                       # the timer off with one program (a clock that counts
                                       # instructions), and
                                       # tynix/shell.c as /bin/sh on a disk from tynix/make_disk.py: a session
-                                      # of every built-in, > and >>, < (cat < f, sh < script > f, errors), quotes, a /bin program's
+                                      # of every built-in, > and >>, < (cat < f, sh < script > f, errors), Tab and Up/Down at the prompt, quotes, a /bin program's
                                       # arguments and exit status, the error messages;
                                       # `tools`: more grep find tree du diff hexdump calc run by
                                       # the shell on known files (exact output, errors, exit
@@ -2032,8 +2032,7 @@ disk (`_fs_forget()`). Its heap is not bounded by the kernel (its crt0 says the
 end of RAM): rebuild it.
 
 At start the shell prints its banner, then prompts with the current
-directory (`/docs> `), reads a line with `fgets` (the C library echoes it and
-handles backspace), splits it into words at spaces (`"..."` and `'...'` keep
+directory (`/docs> `), reads a line (below), splits it into words at spaces (`"..."` and `'...'` keep
 spaces in one word; the quotes go), takes out `> FILE` or `>> FILE`, `<
 FILE`, and a last word `&`. The first word picks the command. Each of `>`,
 `>>` and `<` must start a word (`cat </a.txt` works, `cat</a.txt` is one
@@ -2108,6 +2107,25 @@ With `&` at the end of the line the shell doesn't wait: it prints `[pid] NAME
 that ended (`waitpid(-1, ..., WAIT_NOHANG)`) and prints `[pid] done: NAME, exit
 status N`. A program that never ends no longer keeps the CPU: the NMI menu or
 `kill` ends it, and the others run meanwhile.
+
+**Typing at the prompt** (2026-11-03). The shell reads the keys itself
+(`wait_key()`, no echo) and shows them: printable chars are added,
+Backspace removes the last one, Enter runs the line, Ctrl-D on an empty
+line halts. **Up** and **Down** go through the last 32 lines (a blank line,
+or the same as the one before, is not kept; Down past the newest gives back
+what was being typed). **Tab** completes the last word: the first word from
+the built-ins and the programs in the folders of `PATH`, any other word (or
+one with a `/`) from the entries of its folder. One name: the rest of it and
+a space (a `/` for a folder). Several: as far as they agree; when that adds
+nothing they are listed under the line (two spaces apart, wrapped at 64
+columns) and the prompt and line are shown again. The display has no cursor
+addressing, so the cursor stays at the end and Left/Right do nothing;
+showing another line is a backspace for each char, then the new text. In the
+simulator's display a backspace at column 0 does nothing and a line never
+wraps, so that always reaches the prompt; on the circuit's TTY (64 columns,
+wrapping) it is not measured. The history is not kept on the disk. When stdin
+is a file (`sh < f`, `sh -c`), the lines come from `fgets` as before. The
+window sends Tab as 9 (Shift-Tab stays with Tk).
 
 **Variables** (2026-11-03). In a word, `$NAME` and `${NAME}` become the
 value of the shell variable (`set`) or else of the environment variable

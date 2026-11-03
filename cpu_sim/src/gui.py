@@ -783,7 +783,7 @@ class SimulatorWindow(tk.Tk):
             return "break"
         code = key_code(event.keysym, event.char)
         if code is None:
-            return None                     # let Tk handle Tab, Ctrl+V, ...
+            return None                     # let Tk handle Shift-Tab, Ctrl+V, ...
         self.cpu.bus.keyboard.type(chr(code))
         self.refresh(memory=False)
         return "break"
