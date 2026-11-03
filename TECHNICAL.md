@@ -1378,7 +1378,7 @@ python compiler/src/disk/selftest.py  # 23 checks: `claude` (tynix/bin/claude.c 
                                       # the timer off with one program (a clock that counts
                                       # instructions), and
                                       # tynix/shell.c as /bin/sh on a disk from tynix/make_disk.py: a session
-                                      # of every built-in, > and >>, quotes, a /bin program's
+                                      # of every built-in, > and >>, < (cat < f, sh < script > f, errors), quotes, a /bin program's
                                       # arguments and exit status, the error messages;
                                       # `tools`: more grep find tree du diff hexdump calc run by
                                       # the shell on known files (exact output, errors, exit
@@ -2028,8 +2028,14 @@ end of RAM): rebuild it.
 At start the shell prints its banner, then prompts with the current
 directory (`/docs> `), reads a line with `fgets` (the C library echoes it and
 handles backspace), splits it into words at spaces (`"..."` and `'...'` keep
-spaces in one word; the quotes go), takes out `> FILE` or `>> FILE`, and a
-last word `&`. The first word picks the command.
+spaces in one word; the quotes go), takes out `> FILE` or `>> FILE`, `<
+FILE`, and a last word `&`. The first word picks the command. Each of `>`,
+`>>` and `<` must start a word (`cat </a.txt` works, `cat</a.txt` is one
+word; `<<` is an ordinary word, so `calc 1 << 2` needs no quotes, while
+`calc "256 >> 4"` does). When its stdin is a file and not the keyboard (`sh < script.txt`,
+`isatty(0)` is 0) the shell prints no banner and no prompt, runs the lines
+it reads and, at the end of the file, ends with the last one's status
+instead of halting the CPU.
 
 Built-in commands (the `commands[]` table, which `help` also prints):
 
@@ -2073,6 +2079,20 @@ program too: the shell opens the file and passes it as the program's stdout
 keys it reads stay on the display. If the program can't be
 loaded the file has been made (empty) anyway, as in a Unix shell.
 
+`< FILE` (2026-11-03) gives the program that file as its stdin: the shell
+opens it (`"r"`, or `"rb"` when `stat()` says it is binary, as `cp` does),
+starts the program with `spawn_io()` (`SPAWN_IN`) and closes its own `FILE`
+at once; `getchar`, `fgets` and `scanf` read the file without echo and get
+`EOF` at its end. Keys read with `key_pressed()`/`wait_key()` still come
+from the keyboard. A missing file or a directory is an error before
+anything starts (`NAME: FILE: No such file or directory`, status 1); `<` and
+`>` combine (`prog < in.txt > out.txt`). Of the built-ins only a bare `cat`
+reads stdin, so `cat < FILE` is `cat FILE`; any other built-in with `<`
+says `NAME: < works for programs and a bare cat only` (status 2). Before
+starting a program the shell flushes its own stdout (`fflush`), since the
+program writes to the same file: `sh < script > out` keeps the lines in
+order.
+
 With `&` at the end of the line the shell doesn't wait: it prints `[pid] NAME
 &` and prompts again. Before each prompt it collects the background jobs
 that ended (`waitpid(-1, ..., WAIT_NOHANG)`) and prints `[pid] done: NAME, exit
@@ -2082,7 +2102,7 @@ status N`. A program that never ends no longer keeps the CPU: the NMI menu or
 `sh -c LINE` (Phase 8) runs that one line, with no banner and no prompt, and
 ends with its status (`usage: sh -c 'command line'`, status 2, without a
 line); a line is 255 chars at most, one command (there are no pipes or
-`;`). Run with stdout or stdin files, it passes them on to the program it
+`;`; `<` works). Run with stdout or stdin files, it passes them on to the program it
 starts. That is how `claude` (11.5) runs Claude's commands.
 
 Any program can start another now (`spawnv()`, `spawn()`): the child gets its

@@ -43,7 +43,8 @@ You can use the CPU, and a few files of the PC.
   file; without it, stdin is empty. The person sees each command and the
   first lines of its output.
   - One command per call: there are no pipes (|), no ; and no &&.
-    `>` and `>>` work (`ls -l /bin > /tmp/list.txt`).
+    `>` and `>>` work (`ls -l /bin > /tmp/list.txt`), and so does `<`
+    (`ed notes.txt < /tmp/edits.txt`).
   - Each call is a fresh shell. `cd DIR` alone is the exception: it changes
     the directory the next commands run in.
   - A command that runs longer than the timeout (30 s unless the person
@@ -154,8 +155,8 @@ path; list_host_dir with an empty path shows what is):
 - The disk: /bin (programs), /home/user (Desktop, Documents, Downloads,
   Music, Pictures, Videos), /tmp, /readme.txt. Files you make for your
   own use go in /tmp.
-- The shell has no pipes, no `<`, no `;` or `&&`. `>`
-  and `>>` work, `&` runs a program in the background (jobs, fg N, kill
+- The shell has no pipes, no `;` or `&&`. `>`, `>>` and
+  `<` (a file as a program's input) work, `&` runs a program in the background (jobs, fg N, kill
   N), and run FILE runs a file of commands (lines starting with # are
   comments; a line may be at most 255 chars).
 - Exit status: 0 is success, 1 and 2 usually errors or usage, 127 no such

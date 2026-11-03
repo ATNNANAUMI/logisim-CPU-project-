@@ -121,7 +121,7 @@ logisim-CPU-project-/
 │   │                         at 0x1100000), round robin on the timer (tickless), system calls (TRAP), the only fs.c,
 │   │                         keyboard and screen focus, NMI menu (1 kill, 2 continue, 3 background, 4 tasks), FAULT = 139
 │   ├── shell.c               /bin/sh: prompts with the current directory; built-ins help ls cd pwd cat echo rm mv cp
-│   │                         mkdir rmdir df clear halt jobs fg kill wait run (> and >> to a file); any other name runs
+│   │                         mkdir rmdir df clear halt jobs fg kill wait run (> and >> to a file, < from one); any other name runs
 │   │                         /bin/NAME (or a path) and waits, or not with & at the end; sh -c LINE: one line
 │   ├── bin/                  sources of the OS's own programs for /bin (built --exe by make_disk.py; see bin/README.md)
 │   │   ├── ed.c              a line editor for text files (a, i, c, d, p, s, /find, w, q)

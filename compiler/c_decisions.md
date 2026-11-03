@@ -240,6 +240,12 @@ The language itself is described in [`c_language.md`](c_language.md).
     `hello`: 4698/4811/4569 words before, 4905/4994/4776 after (+207 words),
     RAM 33 → 358 (the three `FILE`s of `file.c`). The program's `stderr`
     and the echo of keys it reads (`getchar.c`) stay on the display.
+    Since Phase 7 the program sends its stdout words to the kernel in groups
+    (`compiler/libc/tynix/sys.c`), so `_set_stdout(put, flush)` also gives
+    `stdout` a `flush` (2026-11-03): `fflush(stdout)` sends the group at once.
+    The shell calls it before it starts a program, because the program writes
+    to the same file itself; without it, `sh < script > out` put a script's
+    `echo` lines after the output of the programs that followed them.
 
 ### The full-screen editor (2026-10-29, OS roadmap Phase 5 B)
 

@@ -21,9 +21,16 @@
  * Words are split at spaces; "..." or '...' keep spaces inside one word.
  * Output can go to a file: `echo hi > a.txt`, `ls >> list.txt`, and a
  * program's too: `primes > p.txt` (what it prints with printf, putchar and
- * puts; its input is still the keyboard, and its own errors the display). `cat` with no
+ * puts; its input is the keyboard unless `<` gives a file, below, and its own errors the display). `cat` with no
  * file copies the keyboard up to Ctrl-D, so `cat > notes.txt` writes a
  * file. Ctrl-D at the prompt, or `halt`, stops the CPU.
+ *
+ * Input can come from a file: `ed notes.txt < edits.txt` gives the program
+ * that file as its stdin (getchar, fgets and scanf read it, EOF at its end;
+ * key_pressed() and wait_key() still read the keyboard); `cat < f` is
+ * `cat f`, and other built-ins refuse `<`. `sh < script.txt` (stdin not the
+ * keyboard) runs the file's lines with no banner or prompt and ends at its
+ * end instead of halting.
  *
  * The NMI (Esc) belongs to the kernel: on the program in front it asks
  * kill / continue / background / tasks; "background" gives the keyboard
@@ -57,6 +64,7 @@ static char path[2 * LINE_MAX];
 static char cwd[512];
 static FILE *out;               /* where a built-in writes: stdout, or a file after > */
 static char *redirect;          /* the file after > or >>, or 0 */
+static char *input;             /* the file after <, or 0 */
 static int append;              /* >> */
 static int background;          /* the line ended with & */
 static FILE *base_out;          /* where a line writes without >: stdout, or run's file */
@@ -483,6 +491,7 @@ static int cmd_help(int argc, char **argv)
     for (i = 0; i < N_COMMANDS; i++)
         fprintf(out, "  %-18s %s\n", commands[i].usage, commands[i].help);
     fprintf(out, "  %-18s %s\n", "command >[>] file", "its output to a file (>> adds)");
+    fprintf(out, "  %-18s %s\n", "program < file", "its input from a file (cat < file too)");
     if ((d = opendir("/bin")) == 0) {
         fprintf(out, "no /bin: no programs\n");
         return 0;
@@ -499,20 +508,47 @@ static int cmd_help(int argc, char **argv)
 
 /* ---------------------------------------------------------------- programs */
 
+/* the file after <, opened as what it is (a text file "r", a binary one
+   "rb", as cp does), or 0 after an error message */
+static FILE *open_input(const char *cmd)
+{
+    struct stat st;
+    int known = stat(input, &st) == 0;
+    FILE *f;
+    if (known && S_ISDIR(st.st_mode)) {
+        printf("%s: %s: Is a directory\n", cmd, input);
+        return 0;
+    }
+    f = fopen(input, known && !S_ISTEXT(st.st_mode) ? "rb" : "r");
+    if (f == 0)
+        fail(cmd, input);
+    return f;
+}
+
 static int run_program(int argc, char **argv)
 {
     int pid;
-    FILE *to = 0;
+    FILE *to = 0, *in = 0;
     if (strchr(argv[0], '/'))
         strcpy(path, argv[0]);
     else
         sprintf(path, "/bin/%s", argv[0]);
-    if (redirect && (to = fopen(redirect, append ? "a" : "w")) == 0)
+    if (input && (in = open_input(argv[0])) == 0)
+        return 1;
+    fflush(stdout);                     /* what the shell wrote goes first: the */
+    if (base_out != stdout)             /* program writes to the same file itself */
+        fflush(base_out);
+    if (redirect && (to = fopen(redirect, append ? "a" : "w")) == 0) {
+        if (in)
+            fclose(in);
         return fail(argv[0], redirect);
-    pid = spawn_to(path, argv, to ? to : base_out != stdout ? base_out : 0,
+    }
+    pid = spawn_io(path, argv, in, to ? to : base_out != stdout ? base_out : 0,
                    background ? 0 : SPAWN_FG);
     if (to)
         fclose(to);                     /* the program has its own hold on the file */
+    if (in)
+        fclose(in);                     /* and on its stdin */
     if (pid < 0) {
         if (errno == ENOENT && !strchr(argv[0], '/'))
             printf("%s: no such command (help lists them)\n", argv[0]);
@@ -558,12 +594,14 @@ static char *word(char **s)
     return start;
 }
 
-/* the words of the line into args[], > and >> into redirect; argc, or -1 */
+/* the words of the line into args[], > and >> into redirect, < into
+   input; argc, or -1 */
 static int split(char *s)
 {
     int n = 0;
     char *w;
     redirect = 0;
+    input = 0;
     background = 0;
     for (;;) {
         while (*s == ' ' || *s == '\t')
@@ -575,6 +613,16 @@ static int split(char *s)
             if (redirect == 0 || redirect == (char *)-1) {
                 if (redirect == 0)
                     printf("> needs a file name\n");
+                return -1;
+            }
+            continue;
+        }
+        if (*s == '<' && s[1] != '<') { /* < file, <file; << stays a word (calc 1 << 2) */
+            s++;
+            input = word(&s);
+            if (input == 0 || input == (char *)-1) {
+                if (input == 0)
+                    printf("< needs a file name\n");
                 return -1;
             }
             continue;
@@ -613,6 +661,14 @@ static int run_line(char *s)
         return run_program(argc, args);
     if (background)
         printf("%s: a built-in command can't run in the background\n", args[0]);
+    if (input) {
+        if (strcmp(args[0], "cat") != 0 || argc != 1) {
+            printf("%s: < works for programs and a bare cat only\n", args[0]);
+            return 2;
+        }
+        args[1] = input;                /* cat < f: as cat f */
+        args[argc = 2] = 0;
+    }
     to = base_out;
     if (redirect && (to = fopen(redirect, append ? "a" : "w")) == 0)
         return fail(args[0], redirect);
@@ -681,6 +737,13 @@ int main(int argc, char **argv)
         }
         strcpy(line, argv[2]);
         return run_line(line);
+    }
+    if (!isatty(0)) {                   /* sh < FILE: its lines, then the end */
+        int status = 0;
+        while (fgets(line, sizeof line, stdin))
+            status = run_line(line);
+        reap();
+        return status;
     }
     printf("Tynix shell: help lists the commands\n");
     for (;;) {

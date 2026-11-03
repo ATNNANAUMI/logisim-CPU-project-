@@ -60,6 +60,7 @@ starts the shell, /bin/sh from tynix/shell.c).
   diff a.txt b.txt   what changed between two text files
   hexdump /readme.txt   the values in hex
   calc 0x1100000 + 256   integer calculator (calc alone: a line at a time)
+  ed notes.txt < edits.txt   a file as a program's input (cat < f too)
   primes > p.txt &   runs in the background; jobs lists what runs,
                    fg N brings one forward, kill N ends it
   Esc              (the NMI) on the program in front: kill, continue,

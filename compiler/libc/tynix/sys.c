@@ -13,7 +13,7 @@
 unsigned *_tx_block;            /* the block (sys/tynix.h: B_ARGC ...) */
 
 int _syscall(int n, int a, int b, int c, int d);       /* sys.asm */
-void _set_stdout(int (*put)(int, FILE *));            /* file.c */
+void _set_stdout(int (*put)(int, FILE *), int (*flush)(FILE *));   /* file.c */
 
 /* a call whose negative answer is -errno: -1 and errno */
 int _tx_call(int n, int a, int b, int c, int d)
@@ -35,6 +35,14 @@ static void out_flush(void)
     if (out_len)
         _syscall(SYS_WRITE, 1, (int)out_buf, out_len, 0);
     out_len = 0;
+}
+
+/* fflush(stdout): a program that writes to the same file another way (a
+   child it starts gets the same file) sends its own words first */
+static int out_fflush(FILE *unused)
+{
+    out_flush();
+    return 0;
 }
 
 static int out_put(int c, FILE *unused)
@@ -70,7 +78,7 @@ void _tx_start(unsigned *block)
 {
     _tx_block = block;
     if (block[B_OUT]) {
-        _set_stdout(out_put);
+        _set_stdout(out_put, out_fflush);
         atexit(out_flush);
     }
     if (block[B_IN])

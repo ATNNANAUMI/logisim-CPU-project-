@@ -592,6 +592,18 @@ SHELL_KEYS = ("help\n"
               "/bin/echo r3 >> /p.txt\n"
               "/bin/echo > /q.txt\n"
               "cat /p.txt /q.txt\n"
+              "cat < /b.txt\n"
+              "cat </b.txt >/c.txt\n"
+              "cat /c.txt\n"
+              "cat < /nope\n"
+              "cat < /docs\n"
+              "ls < /b.txt\n"
+              "cat <\n"
+              "echo \"echo from a file\" > /s.txt\n"
+              "echo \"/bin/echo and a program\" >> /s.txt\n"
+              "/bin/sh < /s.txt > /t.txt\n"
+              "cat /t.txt\n"
+              "/bin/echo x < /nope\n"
               "cd ..\n"
               "cat > typed.txt\n"
               "line 1\n"
@@ -653,6 +665,29 @@ nope: no such command (help lists them)
 r1 r2
 r3
 /bin/echo: no arguments (argc = 1)
+/docs> cat < /b.txt
+two  spaces
+more
+/docs> cat </b.txt >/c.txt
+/docs> cat /c.txt
+two  spaces
+more
+/docs> cat < /nope
+cat: /nope: No such file or directory
+/docs> cat < /docs
+cat: /docs: Is a directory
+/docs> ls < /b.txt
+ls: < works for programs and a bare cat only
+/docs> cat <
+< needs a file name
+/docs> echo "echo from a file" > /s.txt
+/docs> echo "/bin/echo and a program" >> /s.txt
+/docs> /bin/sh < /s.txt > /t.txt
+/docs> cat /t.txt
+from a file
+and a program
+/docs> /bin/echo x < /nope
+/bin/echo: /nope: No such file or directory
 /docs> cd ..
 /> cat > typed.txt
 line 1
@@ -660,7 +695,8 @@ line 1
 line 1
 /> rmdir docs
 /> ls
-bin/  readme.txt  a.txt  b.txt  e2  p.txt  q.txt  typed.txt
+bin/  readme.txt  a.txt  b.txt  e2  p.txt  q.txt  c.txt  s.txt
+t.txt  typed.txt
 /> df
 {df}
 /> halt
@@ -697,6 +733,8 @@ def check_shell():
         assert disk.get("/a.txt") == b"two  spaces\nmore\n" == disk.get("/b.txt")
         echo = disk.lookup("/bin/echo").length
         assert disk.lookup("/e2").length == echo and not disk.lookup("/e2").packed
+        assert disk.get("/c.txt") == disk.get("/b.txt")              # cat < f > g
+        assert disk.get("/t.txt") == b"from a file\nand a program\n"   # sh < script
         assert disk.get("/typed.txt") == b"line 1\n" and disk.get("/e2") == disk.get("/bin/echo")
         assert echo > sizes["echo"] + 8           # TEX2: the header, the words, the relocations
         assert disk.check() == [], disk.check()
