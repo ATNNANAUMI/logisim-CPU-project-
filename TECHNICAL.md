@@ -1352,7 +1352,9 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 23 checks: `claude` (tynix/bin/claude.c and the device with a fake
+python compiler/src/disk/selftest.py  # 24 checks: `environment` (export/set/unset/env, $NAME ${NAME} $?, quotes,
+                                      # PATH order, /etc/profile, getenv/setenv/unsetenv in a
+                                      # program and its child), `claude` (tynix/bin/claude.c and the device with a fake
                                       # backend under the kernel: commands with output, stdin,
                                       # cd, write_file, the timeout killing a program and its
                                       # child, /approve n, Ctrl-X, wrapping at 64 columns,
@@ -1795,15 +1797,18 @@ leads to after an unconditional jump.
   binary file (it spots the magic). The kernel (`tynix/kernel.c`, 11) picks a
   region, copies the words with `_fs_read` (about 14 instructions a word),
   adds `region - base` to the r words, zeroes the data, copies argv to the
-  top of the region, and starts it with R1 = a block (`B_ARGC`, `B_ARGV`,
+  top of the region and the parent's environment below it (at most
+  `ENV_MAX` = 64 strings and `ENV_CHARS` = 4096 chars; the rest are left
+  out), and starts it with R1 = a block (`B_ARGC`, `B_ARGV`,
   `B_PID`, `B_END` the end of its heap, `B_OUT` whether stdout is a file,
   `B_FG` the address of the kernel's foreground pid, `B_LOST`, `B_IN`
-  whether stdin is a file). That crt0
+  whether stdin is a file, `B_ENV` its environment: `NAME=value` strings
+  ended by 0). That crt0
   keeps the block, stores `B_END` into `_heap_end`, calls the `_init_`
   routines and `_tx_start(block)` (`compiler/libc/tynix/sys.c`: `_set_stdout()` with a
   function that sends stdout to fd 1 64 words at a time when `B_OUT`; when
   `B_IN`, getchar's `_stdin_get` reads fd 0 64 words at a time, without
-  echo), then
+  echo; `environ = B_ENV`), then
   `main(argc, argv)`; its `_Exit` is the system call exit (`TRAP` with R1 = 0,
   R2 = the status). `isatty(1)` in `file.c` is false exactly when stdout is a
   file, `isatty(0)` when stdin is. The old format, TEX1 (5-word header, fixed at `0x1100000`, no
@@ -1832,14 +1837,15 @@ task-switch words). `_Exit` is in the generated crt0.
 | file | what changes |
 | --- | --- |
 | `sys.asm` | `_syscall(n, a, b, c, d)`: `TRAP` with R1 = n, R2..R5 = a..d, the answer in R0 |
-| `sys.c` | `_tx_start` (crt0 calls it), `_tx_call` (a negative answer -> -1 and `errno`), stdout to fd 1, stdin from fd 0 when it is a file |
+| `sys.c` | `_tx_start` (crt0 calls it), `_tx_call` (a negative answer -> -1 and `errno`), stdout to fd 1 (`fflush(stdout)` sends what it kept back), stdin from fd 0 when it is a file, `environ` (the block's `B_ENV`) |
+| `env.c` | `getenv`, `setenv`, `unsetenv` as in `compiler/libc/env.c`, and every change points the block's `B_ENV` at the program's own list, so the programs it starts inherit it |
 | `fs.c` | `fopen` & co., `remove`, `rename`, `stat`, `statvfs`, `fs_reclaim` as system calls; a `FILE` is the kernel's file number with a 64-word buffer (`fd`, `buf` in `local.h`) |
 | `dir.c` | `mkdir`, `rmdir`, `chdir`, `getcwd`, `opendir`/`readdir`/`closedir` as system calls (4 directories open per program) |
 | `spawn.c` | `spawnv`, `spawnv_to`, `spawn`, `spawn_to`, `spawn_io` (stdin from a file too, `SPAWN_IN(fd)`), `waitpid`, `kill`, `getpid`, `yield`, `set_foreground`, `tasks`, `halt_os` (`<unistd.h>`) |
 | `cpu.c` | the keyboard through the kernel (`key_pressed`, `wait_key`, getchar's `_read_key`: only the foreground program gets keys, and the waiting ones sleep), `wait_ms` sleeps, `_gfx_hold` (each `gfx_` call waits for the foreground), `gfx_lost()` |
 
 A ROM program keeps the plain files: `cpu.c`'s `_gfx_hold` is 0 and
-`gfx_lost()` is always 0. The C library itself has no `spawnv` any more
+`gfx_lost()` is always 0, and `env.c` starts from an empty environment. The C library itself has no `spawnv` any more
 outside Tynix (the old `spawn.c`/`spawn.asm` loaded one program over
 `0x1100000` and came back by `longjmp`).
 
@@ -2057,6 +2063,10 @@ Built-in commands (the `commands[]` table, which `help` also prints):
 | `fg pid` | `set_foreground(pid)`, then wait for it as for a program typed at the prompt |
 | `kill pid...` | end those programs (status 130); their files are closed by the kernel |
 | `wait [pid]` | wait for that program to end (its status is the command's); none: for every job |
+| `set [NAME=value...]` | the shell's own variables (not passed to programs): sets them, or lists them. A name that is already exported changes in the environment instead. `set Y=two words` sets `Y=two` and complains about `words`: quote it (`set 'Y=two words'`) |
+| `export [NAME[=value]...]` | puts variables in the environment (`setenv`), which every program started from then on inherits; `export NAME` moves a `set` variable there. Alone, lists the environment |
+| `env` | lists the environment (`NAME=value` a line) |
+| `unset NAME...` | forgets shell variables and environment variables |
 | `run file` | the lines of a text file as if typed (a batch file): blank lines and lines starting with `#` are left out, the status is the last line's. `run file > out` sends their output to `out` (a program among them too); a `>` inside a line still wins. 8 deep at most (a file that runs itself). A line over 255 chars stops the run (status 1) instead of being cut into two commands |
 
 A built-in writes to `out`: the display, or the file after `>` (`fopen`
@@ -2098,6 +2108,23 @@ With `&` at the end of the line the shell doesn't wait: it prints `[pid] NAME
 that ended (`waitpid(-1, ..., WAIT_NOHANG)`) and prints `[pid] done: NAME, exit
 status N`. A program that never ends no longer keeps the CPU: the NMI menu or
 `kill` ends it, and the others run meanwhile.
+
+**Variables** (2026-11-03). In a word, `$NAME` and `${NAME}` become the
+value of the shell variable (`set`) or else of the environment variable
+(`export`), or nothing; `$?` is the status of the last command line (a
+blank line leaves it); a `$` that names nothing stays a `$`. Inside `"..."`
+they expand too, inside `'...'` not. A value stays inside its word (it is
+never split at its spaces). The line with its values may be at most 512
+chars (`the line is too long with its $ values`). Names are letters, digits
+and `_`, not a digit first. At start the shell sets `PATH=/bin` and
+`HOME` (`/home/user` if it exists, else `/`) unless its environment already
+has them, and `PWD` (kept up to date by `cd`); an interactive shell then runs
+`/etc/profile` if there is one, as `run /etc/profile` (`make_disk.py` writes
+one: `export PATH=/bin:/home/user/bin`). A plain command name is looked for
+in each folder of `PATH` (`:` between them) in order; if none has it, the
+error is the first folder's (`NAME: no such command`). A program gets a copy
+of its parent's environment (10.4): `getenv` reads it, `setenv`/`unsetenv`
+change the program's own copy and what its children get.
 
 `sh -c LINE` (Phase 8) runs that one line, with no banner and no prompt, and
 ends with its status (`usage: sh -c 'command line'`, status 2, without a

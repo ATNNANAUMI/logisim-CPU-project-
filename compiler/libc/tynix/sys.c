@@ -11,6 +11,7 @@
 #define OUT_BUF 64
 
 unsigned *_tx_block;            /* the block (sys/tynix.h: B_ARGC ...) */
+char **environ;                 /* unistd.h; env.c (this folder's) changes it */
 
 int _syscall(int n, int a, int b, int c, int d);       /* sys.asm */
 void _set_stdout(int (*put)(int, FILE *), int (*flush)(FILE *));   /* file.c */
@@ -77,6 +78,7 @@ static int in_get(void)
 void _tx_start(unsigned *block)
 {
     _tx_block = block;
+    environ = (char **)block[B_ENV];
     if (block[B_OUT]) {
         _set_stdout(out_put, out_fflush);
         atexit(out_flush);

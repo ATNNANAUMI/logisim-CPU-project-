@@ -36,6 +36,14 @@
  * kill / continue / background / tasks; "background" gives the keyboard
  * back to this shell, which prints the job's number.
  *
+ * Variables: `set NAME=value` (the shell's own), `export NAME=value`
+ * (the environment, which every program started afterwards gets: getenv),
+ * `unset`, `env`. $NAME, ${NAME} and $? (the last line's status) expand in
+ * words and "...", not in '...'. A plain command name is looked for in the
+ * folders of $PATH (default /bin) in order. At start the shell sets PATH,
+ * HOME and PWD if they are missing, and an interactive one runs
+ * /etc/profile when the disk has one.
+ *
  * `sh -c LINE` runs that one line and ends with its status, without the
  * banner or a prompt (Claude's `claude` program runs its commands so, with
  * stdin and stdout files). `run FILE` runs the lines of a text file as if
@@ -69,6 +77,14 @@ static int append;              /* >> */
 static int background;          /* the line ended with & */
 static FILE *base_out;          /* where a line writes without >: stdout, or run's file */
 static int depth;               /* run inside run */
+static int last_status;         /* $?: the status of the last line */
+static char *var_entry(const char *name, int len, int *at);
+static int good_name(const char *s, int len);
+static char words[2 * LINE_MAX];    /* the line's words, after quotes and $NAME */
+static int words_len;
+#define MAX_VARS 32
+static char *vars[MAX_VARS];    /* the shell's own variables, "NAME=value" (set);
+                                   exported ones are in environ instead (export) */
 static struct job {             /* the programs this shell left running */
     int pid;
     char name[32];
@@ -161,7 +177,127 @@ static int cmd_cd(int argc, char **argv)
     const char *to = argc > 1 ? argv[1] : "/";
     if (argc > 2)
         return -1;
-    return chdir(to) ? fail("cd", to) : 0;
+    if (chdir(to))
+        return fail("cd", to);
+    setenv("PWD", getcwd(cwd, sizeof cwd), 1);
+    return 0;
+}
+
+/* ------------------------------------------------------------- variables */
+
+/* NAME=value: the length of NAME, or -1 (with a message) */
+static int assignment(const char *cmd, const char *a)
+{
+    const char *eq = strchr(a, '=');
+    int len = eq ? eq - a : (int)strlen(a);
+    if (!good_name(a, len)) {
+        printf("%s: %.*s: not a name (letters, digits, _)\n", cmd, len, a);
+        return -1;
+    }
+    return len;
+}
+
+static void forget_var(const char *name, int len)
+{
+    int i;
+    if (var_entry(name, len, &i)) {
+        free(vars[i]);
+        vars[i] = 0;
+    }
+}
+
+/* set: the shell's own variables; set NAME=value...: set them (a name that
+   is exported changes in the environment instead) */
+static int cmd_set(int argc, char **argv)
+{
+    int i, len, status = 0, at;
+    char name[64];
+    if (argc == 1) {
+        for (i = 0; i < MAX_VARS; i++)
+            if (vars[i])
+                fprintf(out, "%s\n", vars[i]);
+        return 0;
+    }
+    for (i = 1; i < argc; i++) {
+        char *eq = strchr(argv[i], '=');
+        if ((len = assignment("set", argv[i])) < 0 || len >= (int)sizeof name || !eq) {
+            if (len >= 0)
+                printf("set: %s: give it as NAME=value\n", argv[i]);
+            status = 1;
+            continue;
+        }
+        strncpy(name, argv[i], len);
+        name[len] = 0;
+        if (getenv(name)) {             /* exported: stays in the environment */
+            setenv(name, eq + 1, 1);
+            continue;
+        }
+        forget_var(name, len);
+        for (at = 0; at < MAX_VARS && vars[at]; at++)
+            ;
+        if (at == MAX_VARS || (vars[at] = strdup(argv[i])) == 0) {
+            printf("set: no room for %s\n", name);
+            status = 1;
+        }
+    }
+    return status;
+}
+
+/* export: the environment; export NAME[=value]...: into it, so programs
+   started from here on get them */
+static int cmd_export(int argc, char **argv)
+{
+    int i, len, status = 0;
+    char name[64], *v;
+    if (argc == 1) {
+        for (i = 0; environ[i]; i++)
+            fprintf(out, "%s\n", environ[i]);
+        return 0;
+    }
+    for (i = 1; i < argc; i++) {
+        char *eq = strchr(argv[i], '=');
+        if ((len = assignment("export", argv[i])) < 0 || len >= (int)sizeof name) {
+            status = 1;
+            continue;
+        }
+        strncpy(name, argv[i], len);
+        name[len] = 0;
+        if (eq)
+            v = eq + 1;
+        else if ((v = var_entry(name, len, 0)) != 0)
+            v += len + 1;               /* a set variable moves to the environment */
+        else
+            continue;                   /* nothing by that name: nothing to export */
+        if (setenv(name, v, 1)) {
+            printf("export: no room for %s\n", name);
+            status = 1;
+        }
+        forget_var(name, len);
+    }
+    return status;
+}
+
+static int cmd_env(int argc, char **argv)
+{
+    return argc == 1 ? cmd_export(argc, argv) : -1;
+}
+
+static int cmd_unset(int argc, char **argv)
+{
+    int i, len, status = 0;
+    char name[64];
+    if (argc == 1)
+        return -1;
+    for (i = 1; i < argc; i++) {
+        if ((len = assignment("unset", argv[i])) < 0 || len >= (int)sizeof name || argv[i][len]) {
+            status = 1;
+            continue;
+        }
+        strcpy(name, argv[i]);
+        forget_var(name, len);
+        unsetenv(name);
+    }
+    return status;
 }
 
 static int cmd_pwd(int argc, char **argv)
@@ -479,6 +615,10 @@ static const struct command {
     {"kill", "kill pid...", "end programs (status 130)", cmd_kill},
     {"wait", "wait [pid]", "wait for a program (none: all)", cmd_wait},
     {"run", "run file", "run the lines of a file as commands", cmd_run},
+    {"set", "set [NAME=value...]", "shell variables ($NAME), or list", cmd_set},
+    {"export", "export [NAME[=v]...]", "into the environment, or list", cmd_export},
+    {"env", "env", "list the environment", cmd_env},
+    {"unset", "unset NAME...", "forget variables", cmd_unset},
 };
 
 #define N_COMMANDS (int)(sizeof commands / sizeof commands[0])
@@ -525,6 +665,42 @@ static FILE *open_input(const char *cmd)
     return f;
 }
 
+/* a plain name: the first DIR/name, for the folders of $PATH in order
+   (none set: /bin), that is a file, in path[]; when none is, the first
+   folder's (whose load error the shell reports) */
+static void find_program(const char *name)
+{
+    static char first[2 * LINE_MAX];
+    const char *p = getenv("PATH"), *end;
+    struct stat st;
+    first[0] = 0;
+    if (p == 0 || *p == 0)
+        p = "/bin";
+    for (;;) {
+        int len;
+        end = strchr(p, ':');
+        if (end == 0)
+            end = p + strlen(p);
+        len = end - p;
+        if (len > 0 && len + strlen(name) + 2 <= sizeof path) {
+            strncpy(path, p, len);
+            path[len] = '/';
+            strcpy(path + len + 1, name);
+            if (first[0] == 0)
+                strcpy(first, path);
+            if (stat(path, &st) == 0 && !S_ISDIR(st.st_mode))
+                return;
+        }
+        if (*end == 0)
+            break;
+        p = end + 1;
+    }
+    if (first[0])
+        strcpy(path, first);
+    else
+        sprintf(path, "/bin/%s", name);
+}
+
 static int run_program(int argc, char **argv)
 {
     int pid;
@@ -532,7 +708,7 @@ static int run_program(int argc, char **argv)
     if (strchr(argv[0], '/'))
         strcpy(path, argv[0]);
     else
-        sprintf(path, "/bin/%s", argv[0]);
+        find_program(argv[0]);
     if (input && (in = open_input(argv[0])) == 0)
         return 1;
     fflush(stdout);                     /* what the shell wrote goes first: the */
@@ -565,37 +741,132 @@ static int run_program(int argc, char **argv)
 
 /* ---------------------------------------------------------------- one line */
 
-/* the next word at *s, its quotes taken out, ended by a 0 written in the
-   line; 0 when the line has no more, -1 (as a pointer) for a missing quote */
+/* $NAME and ${NAME}: a shell variable (set), else one of the environment
+   (export), else nothing */
+static char *var_entry(const char *name, int len, int *at)
+{
+    int i;
+    for (i = 0; i < MAX_VARS; i++)
+        if (vars[i] && strncmp(vars[i], name, len) == 0 && vars[i][len] == '=') {
+            if (at)
+                *at = i;
+            return vars[i];
+        }
+    return 0;
+}
+
+static const char *value_of(const char *name, int len)
+{
+    char *v = var_entry(name, len, 0), *e;
+    int i;
+    if (v)
+        return v + len + 1;
+    for (i = 0; environ && (e = environ[i]); i++)
+        if (strncmp(e, name, len) == 0 && e[len] == '=')
+            return e + len + 1;
+    return "";
+}
+
+static int name_char(int c, int first)
+{
+    return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+           || (!first && c >= '0' && c <= '9');
+}
+
+/* a variable's name: letters, digits, _, not a digit first */
+static int good_name(const char *s, int len)
+{
+    int i;
+    if (len <= 0)
+        return 0;
+    for (i = 0; i < len; i++)
+        if (!name_char(s[i], i == 0))
+            return 0;
+    return 1;
+}
+
+/* put c in the word being made; 0 when the words are full */
+static int put_char(int c)
+{
+    if (words_len == sizeof words - 1)
+        return 0;
+    words[words_len++] = c;
+    return 1;
+}
+
+/* $ at *p (a variable, ${...}, $?): its value into the word; p moved past
+   it. A $ that names nothing stays a $. 0 when the words are full */
+static int expand(char **pp)
+{
+    char *p = *pp + 1, *name = p, num[12];
+    const char *v;
+    int len;
+    if (*p == '?') {
+        sprintf(num, "%d", last_status);
+        v = num;
+        p++;
+    } else if (*p == '{') {
+        name = ++p;
+        while (*p && *p != '}')
+            p++;
+        len = p - name;
+        if (*p != '}' || !good_name(name, len)) {
+            *pp += 1;
+            return put_char('$');       /* not a ${NAME}: as typed */
+        }
+        v = value_of(name, len);
+        p++;
+    } else if (name_char(*p, 1)) {
+        while (name_char(*p, 0))
+            p++;
+        v = value_of(name, p - name);
+    } else {
+        *pp += 1;
+        return put_char('$');
+    }
+    *pp = p;
+    while (*v)
+        if (!put_char(*v++))
+            return 0;
+    return 1;
+}
+
+/* the next word at *s, its quotes taken out and $NAME replaced by its value
+   (not inside '...'), copied into words[]; 0 when the line has no more, -1
+   (as a pointer) for a missing quote or a line too long with its values */
 static char *word(char **s)
 {
-    char *p = *s, *start, *w, end;
+    char *p = *s, *start;
     while (*p == ' ' || *p == '\t' || *p == '\n')
         p++;
     if (!*p)
         return 0;
-    start = w = p;
+    start = words + words_len;
     while (*p && *p != ' ' && *p != '\t' && *p != '\n') {
+        int ok = 1;
         if (*p == '"' || *p == '\'') {
             char q = *p++;
-            while (*p && *p != q)
-                *w++ = *p++;
-            if (!*p) {
+            while (*p && *p != q && ok)
+                ok = q == '"' && *p == '$' ? expand(&p) : put_char(*p++);
+            if (ok && !*p) {
                 printf("missing %c\n", q);
                 return (char *)-1;
             }
             p++;
         } else
-            *w++ = *p++;
+            ok = *p == '$' ? expand(&p) : put_char(*p++);
+        if (!ok) {
+            printf("the line is too long with its $ values\n");
+            return (char *)-1;
+        }
     }
-    end = *p;
-    *w = 0;                             /* may be where end was */
-    *s = end ? p + 1 : p;
+    words[words_len++] = 0;             /* put_char kept room for it */
+    *s = *p ? p + 1 : p;
     return start;
 }
 
-/* the words of the line into args[], > and >> into redirect, < into
-   input; argc, or -1 */
+/* the words of the line (into words[], $NAME replaced) into args[], > and
+   >> into redirect, < into input; argc, or -1 */
 static int split(char *s)
 {
     int n = 0;
@@ -603,6 +874,7 @@ static int split(char *s)
     redirect = 0;
     input = 0;
     background = 0;
+    words_len = 0;
     for (;;) {
         while (*s == ' ' || *s == '\t')
             s++;
@@ -648,7 +920,7 @@ static int split(char *s)
 }
 
 /* one command line; its status */
-static int run_line(char *s)
+static int run_words(char *s)
 {
     int argc = split(s), i, status;
     FILE *to;
@@ -681,6 +953,18 @@ static int run_line(char *s)
         status = 2;
     }
     return status;
+}
+
+/* one command line; its status, which is $? from then on (a blank line
+   leaves $? as it was) */
+static int run_line(char *s)
+{
+    char *p = s;
+    while (*p == ' ' || *p == '\t' || *p == '\n')
+        p++;
+    if (!*p)
+        return 0;
+    return last_status = run_words(s);
 }
 
 /* run FILE: its lines, as if typed; the output of each goes where run's goes */
@@ -725,7 +1009,13 @@ static int cmd_run(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
+    struct stat st;
     base_out = stdout;
+    /* the environment this shell and its programs start with, unless the
+       parent's already says (sh -c from claude, sh from sh) */
+    setenv("PATH", "/bin", 0);
+    setenv("HOME", is_dir("/home/user") ? "/home/user" : "/", 0);
+    setenv("PWD", getcwd(cwd, sizeof cwd), 1);
     if (argc >= 2 && strcmp(argv[1], "-c") == 0) {     /* sh -c LINE: that line, then the end */
         if (argc != 3) {
             printf("usage: sh -c 'command line'\n");
@@ -746,6 +1036,11 @@ int main(int argc, char **argv)
         return status;
     }
     printf("Tynix shell: help lists the commands\n");
+    if (stat("/etc/profile", &st) == 0 && !S_ISDIR(st.st_mode)) {
+        char *profile[] = {"run", "/etc/profile", 0};
+        out = stdout;
+        last_status = cmd_run(2, profile);  /* the settings kept on the disk */
+    }
     for (;;) {
         reap();
         printf("%s> ", getcwd(cwd, sizeof cwd));

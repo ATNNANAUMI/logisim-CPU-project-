@@ -8,8 +8,9 @@ program in PROGRAMS with `cc build --exe` and puts it in /bin under its
 own name, replacing the old copy, and writes /readme.txt. Other files on
 the disk are kept, so what was written from the OS survives a rebuild. From the
 command line it also makes a Linux-like /home/user (Desktop, Documents,
-Downloads, Music, Pictures, Videos, and Documents/welcome.txt) and /tmp,
-where visual_file_manager starts; make(..., home=False) leaves them out.
+Downloads, Music, Pictures, Videos, and Documents/welcome.txt), /tmp,
+where visual_file_manager starts, and /etc/profile (the shell runs it at
+start: PATH=/bin:/home/user/bin); make(..., home=False) leaves them out.
 
     python tynix/make_disk.py
     python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img
@@ -61,6 +62,9 @@ starts the shell, /bin/sh from tynix/shell.c).
   hexdump /readme.txt   the values in hex
   calc 0x1100000 + 256   integer calculator (calc alone: a line at a time)
   ed notes.txt < edits.txt   a file as a program's input (cat < f too)
+  export X=1       a variable for the programs (echo $X; set: the shell's
+                   own; env lists them); /etc/profile runs at start, PATH
+                   lists the folders searched for a command
   primes > p.txt &   runs in the background; jobs lists what runs,
                    fg N brings one forward, kill N ends it
   Esc              (the NMI) on the program in front: kill, continue,
@@ -88,6 +92,16 @@ This is your home folder, /home/user. visual_file_manager starts here
 """
 
 
+# run by the shell at start (`run /etc/profile`): settings kept on the disk
+PROFILE = """\
+# /etc/profile: the shell runs these lines when it starts (not sh -c).
+# export NAME=value passes a variable to every program; set NAME=value
+# keeps it in the shell. PATH: the folders searched for a command (make
+# /home/user/bin for programs of your own).
+export PATH=/bin:/home/user/bin
+"""
+
+
 def make_home(disk):
     for folder in ("/home", "/home/user", "/tmp", *(f"/home/user/{n}" for n in HOME_FOLDERS)):
         if disk.lookup(folder) is None:
@@ -96,9 +110,18 @@ def make_home(disk):
         disk.put("/home/user/Documents/welcome.txt", WELCOME.encode())
 
 
+def make_profile(disk):
+    """/etc/profile, unless one is there (it is the user's to change)."""
+    if disk.lookup("/etc") is None:
+        disk.mkdir("/etc")
+    if disk.lookup("/etc/profile") is None:
+        disk.put("/etc/profile", PROFILE.encode())
+
+
 def make(image=DEFAULT_IMAGE, programs=PROGRAMS, new=False, size_mb=64, log=print, home=False):
     """Make or update the disk image; returns {name: words} of the programs.
-    home: also make /home/user (Desktop, Documents, ... Videos) and /tmp."""
+    home: also make /home/user (Desktop, Documents, ... Videos), /tmp and
+    /etc/profile (each kept when it is there)."""
     image = Path(image)
     if new or not image.exists():
         fs.FileSystem.format(str(image), size_mb * 1024 * 1024 // 4).close()
@@ -121,6 +144,7 @@ def make(image=DEFAULT_IMAGE, programs=PROGRAMS, new=False, size_mb=64, log=prin
         disk.put("/readme.txt", README.encode())
         if home:
             make_home(disk)
+            make_profile(disk)
         log(f"{disk.free_blocks()} of {disk.blocks} blocks free")
     return sizes
 

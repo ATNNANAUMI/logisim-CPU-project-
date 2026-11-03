@@ -1825,6 +1825,141 @@ def check_batch():
     return f"{cpu.instructions} instructions"
 
 
+SHOWENV = r"""
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+/* showenv NAME...: each one's value from getenv(); showenv -s: set
+   CHILD=yes in its own environment, then run showenv CHILD X */
+int main(int argc, char **argv)
+{
+    int i;
+    if (argc == 2 && argv[1][0] == '-') {
+        char *child[] = {"showenv", "CHILD", "X", 0};
+        setenv("CHILD", "yes", 1);
+        unsetenv("X");
+        return spawnv("/bin/showenv", child);
+    }
+    for (i = 1; i < argc; i++) {
+        char *v = getenv(argv[i]);
+        printf("%s=%s\n", argv[i], v ? v : "(not set)");
+    }
+    return 0;
+}
+"""
+
+
+def check_environment():
+    """Environment variables: export passes them to programs (getenv), set
+    keeps them in the shell, $NAME ${NAME} and $? expand except inside
+    '...', unset, env, PATH searched in order, /etc/profile run at start, a
+    program's own setenv/unsetenv inherited by the programs it starts."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+
+    image = os.path.join(TMP.name, "env.img")
+    make_disk.make(image, programs=["echo"], new=True, size_mb=1, log=lambda _: None)
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "showenv.c").write_text(SHOWENV)
+        program, _ = driver.build([str(Path(tmp) / "showenv.c")], exe=True)
+        exe = driver.exe_bytes(program)
+    with FileSystem(image) as disk:
+        disk.put("/bin/showenv", exe, binary=True)
+        disk.mkdir("/mine")
+        disk.put("/mine/other", exe, binary=True)
+        disk.mkdir("/etc")
+        disk.put("/etc/profile", b"# kept on the disk\nexport FROM=profile\nset GREETING=hi\n")
+    keys = ("showenv FROM GREETING PATH HOME PWD\n"
+            "export X=1\n"
+            "sh -c 'echo $X'\n"
+            "showenv X\n"
+            "set Y=two words\n"
+            "set 'Y=two  words'\n"
+            'echo $Y "[$Y]" \'$Y\' ${Y}! $ ${bad $NOPE.\n'
+            "showenv Y\n"
+            "export Y\n"
+            "showenv Y\n"
+            "set\n"
+            "nope\n"
+            "echo $?\n"
+            "echo $?\n"
+            "showenv -s\n"
+            "showenv CHILD X\n"
+            "other X\n"
+            "export PATH=/bin:/mine\n"
+            "other X\n"
+            "unset X 1x\n"
+            "showenv X\n"
+            "cd /mine\n"
+            "env\n"
+            "halt\n")
+    cpu, text = driver.run_in_simulator(_kernel().rom, keys, 80_000_000, disk=image)
+    assert cpu.halted, text
+    expect = """Tynix shell: help lists the commands
+/> showenv FROM GREETING PATH HOME PWD
+FROM=profile
+GREETING=(not set)
+PATH=/bin
+HOME=/
+PWD=/
+/> export X=1
+/> sh -c 'echo $X'
+1
+/> showenv X
+X=1
+/> set Y=two words
+set: words: give it as NAME=value
+/> set 'Y=two  words'
+/> echo $Y "[$Y]" '$Y' ${Y}! $ ${bad $NOPE.
+two  words [two  words] $Y two  words! $ ${bad .
+/> showenv Y
+Y=(not set)
+/> export Y
+/> showenv Y
+Y=two  words
+/> set
+GREETING=hi
+/> nope
+nope: no such command (help lists them)
+/> echo $?
+127
+/> echo $?
+0
+/> showenv -s
+CHILD=yes
+X=(not set)
+/> showenv CHILD X
+CHILD=(not set)
+X=1
+/> other X
+other: no such command (help lists them)
+/> export PATH=/bin:/mine
+/> other X
+X=1
+/> unset X 1x
+unset: 1x: not a name (letters, digits, _)
+/> showenv X
+X=(not set)
+/> cd /mine
+/mine> env
+PATH=/bin:/mine
+HOME=/
+PWD=/mine
+FROM=profile
+Y=two  words
+/mine> halt
+CPU halted
+"""
+    assert text == expect, "\n".join(
+        f"{i}: {a!r} != {b!r}" for i, (a, b) in enumerate(zip(text.splitlines(), expect.splitlines()))
+        if a != b) or text
+    return f"{cpu.instructions} instructions"
+
+
 CHECKS = [
     check_format,
     check_text_round_trip,
@@ -1848,6 +1983,7 @@ CHECKS = [
     check_screen_editor,
     check_tools,
     check_batch,
+    check_environment,
     check_claude,
 ]
 

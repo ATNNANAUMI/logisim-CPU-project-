@@ -45,6 +45,9 @@ You can use the CPU, and a few files of the PC.
   - One command per call: there are no pipes (|), no ; and no &&.
     `>` and `>>` work (`ls -l /bin > /tmp/list.txt`), and so does `<`
     (`ed notes.txt < /tmp/edits.txt`).
+  - `$NAME` and `$?` expand (not inside '...'). Each call is a fresh
+    shell, so an `export` in one call is gone in the next; `env` shows what
+    programs get (PATH, HOME, PWD and what /etc/profile exports).
   - Each call is a fresh shell. `cd DIR` alone is the exception: it changes
     the directory the next commands run in.
   - A command that runs longer than the timeout (30 s unless the person

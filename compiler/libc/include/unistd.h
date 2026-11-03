@@ -48,6 +48,13 @@
  *                        their file's length are cut. Returns how many
  *                        blocks it freed, or -1 (errno ENODEV, no disk).
  *                        Not POSIX.
+ *   environ              the environment: "NAME=value" strings, ended by 0
+ *                        (stdlib.h's getenv, setenv, unsetenv use it). A
+ *                        program for Tynix starts with a copy of its
+ *                        parent's (the kernel copies what the parent's
+ *                        setenv made); a ROM program starts with none.
+ *                        Assign it only through setenv/unsetenv: those also
+ *                        tell the kernel where the list is.
  *   isatty(fd)           1 if fd (0 keyboard, 1 stdout, 2 stderr) is the
  *                        console, 0 if it is a file: stdout when the shell
  *                        started the program with `>`, stdin when it was
@@ -81,5 +88,6 @@ int set_foreground(int pid);
 int tasks(struct task_info *buf, int max);
 void halt_os(void);
 int isatty(int fd);
+extern char **environ;
 
 #endif

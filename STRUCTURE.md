@@ -83,12 +83,13 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       23 checks (incl. claude (tynix/bin/claude.c + the device, fake backend), batch (sh -c, run), abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/bin/ed.c, tynix/bin/edit.c, the nine tools)
+│   │   └── selftest.py       24 checks (incl. environment (export, $NAME, PATH, /etc/profile, setenv inherited), claude (tynix/bin/claude.c + the device, fake backend), batch (sh -c, run), abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/bin/ed.c, tynix/bin/edit.c, the nine tools)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), memory.asm (memcpy, memset), setjmp.asm,
 │   │                         interrupt.asm (vector stubs; a kernel's stack and task switch); include/sys/tynix.h (system calls, TEX2)
 │   │   └── tynix/            the library of a program for the OS (--exe), replacing namesakes: sys.asm (TRAP), sys.c, fs.c, dir.c,
-│   │                         spawn.c (spawnv, spawn, spawn_io, waitpid, kill, ...), cpu.c (keys and wait_ms through the kernel, gfx hold)
+│   │                         spawn.c (spawnv, spawn, spawn_io, waitpid, kill, ...), cpu.c (keys and wait_ms through the kernel, gfx hold),
+│   │                         env.c (getenv/setenv/unsetenv from the block's B_ENV; children inherit)
 │   ├── examples/             example programs, in folders by kind (asm/ and c/; README.md tells what each one shows)
 │   │   ├── asm/              assembly
 │   │   │   ├── programs/     hello, print_a-z, count_0-9, sum_1-10, abs_value, stack_reverse, echo (no stdlib); guess, untested (with stdlib)
@@ -121,8 +122,9 @@ logisim-CPU-project-/
 │   │                         at 0x1100000), round robin on the timer (tickless), system calls (TRAP), the only fs.c,
 │   │                         keyboard and screen focus, NMI menu (1 kill, 2 continue, 3 background, 4 tasks), FAULT = 139
 │   ├── shell.c               /bin/sh: prompts with the current directory; built-ins help ls cd pwd cat echo rm mv cp
-│   │                         mkdir rmdir df clear halt jobs fg kill wait run (> and >> to a file, < from one); any other name runs
-│   │                         /bin/NAME (or a path) and waits, or not with & at the end; sh -c LINE: one line
+│   │                         mkdir rmdir df clear halt jobs fg kill wait run set export env unset (> and >> to a file, < from
+│   │                         one, $NAME ${NAME} $?); any other name runs NAME from $PATH's folders (or a path) and waits, or not
+│   │                         with & at the end; sh -c LINE: one line; runs /etc/profile at start
 │   ├── bin/                  sources of the OS's own programs for /bin (built --exe by make_disk.py; see bin/README.md)
 │   │   ├── ed.c              a line editor for text files (a, i, c, d, p, s, /find, w, q)
 │   │   ├── edit.c            a full-screen editor on the RGB screen (arrows, ^S save, ^Q quit)
@@ -304,7 +306,8 @@ The design follows the "But How Do It Know?" style: a single bus,
   `0x1100000`) runs them several at once; `tynix/shell.c` is `/bin/sh`.
   `gfx_lost()`: redraw after another program had the screen. A child gets
   the caller's stdout and stdin (files when the caller's are); `spawn_io` /
-  `SPAWN_IN(fd)` gives it a stdin file (`B_IN`, `isatty(0)` 0).
+  `SPAWN_IN(fd)` gives it a stdin file (`B_IN`, `isatty(0)` 0). The environment
+  (`B_ENV`, `environ`) is copied from the parent at every spawn.
 * Tests: `compiler/src/cc/tests/*.c` must print exactly gcc's output
   (`.expected`); `difftest.py` checks with gcc.
 
