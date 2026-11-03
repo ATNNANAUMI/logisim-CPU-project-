@@ -1161,7 +1161,7 @@ def check_abuse():
 
 
 def check_editor():
-    """tynix/ed.c as a program from /bin, started by the shell: add, delete,
+    """tynix/bin/ed.c as a program from /bin, started by the shell: add, delete,
     substitute, find, insert, the unsaved-changes warning (q and Ctrl-D), a
     binary file refused, and the file on the disk read back with fs.py."""
     import sys
@@ -1203,7 +1203,7 @@ SCREEN_KEYS = ("edit /s.txt\n"
 
 
 def check_screen_editor():
-    """tynix/edit.c as a program from /bin: insert, arrows, Enter, Backspace
+    """tynix/bin/edit.c as a program from /bin: insert, arrows, Enter, Backspace
     (also joining lines), Ctrl-K, Ctrl-S, the unsaved-changes warning, a
     binary file refused; the file read back with fs.py, text drawn on the
     RGB screen while it runs and the screen blank after it quits."""
@@ -1667,7 +1667,7 @@ int main(int argc, char **argv)
 
 
 def check_claude():
-    """tynix/claude.c with the Claude device (0x9C) and a fake backend (no
+    """tynix/bin/claude.c with the Claude device (0x9C) and a fake backend (no
     network): a conversation where Claude runs commands on the CPU (output,
     stdin from its input, cd, a file written), a command killed with all it
     started at the timeout, a command the user refuses (/approve on),

@@ -1,7 +1,7 @@
 """The Claude device at 0x9C (simulator only, Phase 8; TECHNICAL 1.7 and 11.5).
 
 Claude does not run on the CPU: the CPU is a terminal. A program (Tynix's
-`claude`, tynix/claude.c) sends the text typed on its keyboard here one char
+`claude`, tynix/bin/claude.c) sends the text typed on its keyboard here one char
 at a time; this module, in the simulator's Python process on the PC, calls the
 Claude API in a worker thread and hands the reply back one char at a time as
 it streams in. The simulation never waits for the network.

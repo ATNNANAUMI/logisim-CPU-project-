@@ -26,6 +26,7 @@ logisim-CPU-project-/
 ├── README.md                 short overview + quick start
 ├── TECHNICAL.md              full technical reference (ISA, circuit, sim, asm, stdlib, open questions, outdated list)
 ├── STRUCTURE.md              this file
+├── PLAN.md                   action plan for the next 20 features (2026-11-03): what, how, checks, follow-ups, verdicts
 ├── run.py                    single entry point: `python run.py [asm|sim|build|test|img] ...` (menu if no args)
 ├── check_docs.py             checks the docs against the repo (paths exist, examples and TWEAKS listed); part of `run.py test`
 │
@@ -37,7 +38,7 @@ logisim-CPU-project-/
 │   │   ├── microcode.rom     the generated image ("v2.0 raw")
 │   │   ├── verify.py         runs CONTROL_SECTION's gates through Logisim for every IR/step/flags, compares with the ROM
 │   │   └── ControlSweep.java the sweep verify.py compiles and runs (needs javac + the Logisim jar)
-│   └── cpu datas/            old notes: stack micro-steps, personal TODO
+│   └── old_notes/            old notes: stack micro-steps, personal TODO
 │
 ├── compiler/
 │   ├── assembly_syntax.md    CURRENT assembly language reference
@@ -81,13 +82,13 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       23 checks (incl. claude (tynix/claude.c + the device, fake backend), batch (sh -c, run), abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/ed.c, tynix/edit.c, the nine tools)
+│   │   └── selftest.py       23 checks (incl. claude (tynix/bin/claude.c + the device, fake backend), batch (sh -c, run), abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/bin/ed.c, tynix/bin/edit.c, the nine tools)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), memory.asm (memcpy, memset), setjmp.asm,
 │   │                         interrupt.asm (vector stubs; a kernel's stack and task switch); include/sys/tynix.h (system calls, TEX2)
 │   │   └── tynix/            the library of a program for the OS (--exe), replacing namesakes: sys.asm (TRAP), sys.c, fs.c, dir.c,
 │   │                         spawn.c (spawnv, spawn, spawn_io, waitpid, kill, ...), cpu.c (keys and wait_ms through the kernel, gfx hold)
-│   ├── examples/             example programs, in folders by kind (asm/ and c/)
+│   ├── examples/             example programs, in folders by kind (asm/ and c/; README.md tells what each one shows)
 │   │   ├── asm/              assembly
 │   │   │   ├── programs/     hello, print_a-z, count_0-9, sum_1-10, abs_value, stack_reverse, echo (no stdlib); guess, untested (with stdlib)
 │   │   │   ├── stdlib/       stdlib.asm (standard library: I/O, strings, memory, math, conversion); stdlib_demo (every function but input),
@@ -114,22 +115,23 @@ logisim-CPU-project-/
 │   └── ROM/                  build output (.obj/.rom/.map/.asm), git-ignored, created on first build;
 │                             ROM/libc/ caches the compiled C library
 │
-├── tynix/                    the OS, Tynix (simulator only), AmigaOS style: several programs at once, preemptive, no protection
+├── tynix/                    the OS, Tynix (simulator only), AmigaOS style: several programs at once, preemptive, no protection (README.md lists its files)
 │   ├── kernel.c              the OS's ROM: boots, starts /bin/sh; TEX2 loader (regions from 0x1200000, relocation; TEX1 alone
 │   │                         at 0x1100000), round robin on the timer (tickless), system calls (TRAP), the only fs.c,
 │   │                         keyboard and screen focus, NMI menu (1 kill, 2 continue, 3 background, 4 tasks), FAULT = 139
 │   ├── shell.c               /bin/sh: prompts with the current directory; built-ins help ls cd pwd cat echo rm mv cp
 │   │                         mkdir rmdir df clear halt jobs fg kill wait run (> and >> to a file); any other name runs
 │   │                         /bin/NAME (or a path) and waits, or not with & at the end; sh -c LINE: one line
-│   ├── ed.c                  a line editor for text files (a program for /bin: a, i, c, d, p, s, /find, w, q)
-│   ├── edit.c                a full-screen editor on the RGB screen (a program for /bin: arrows, ^S save, ^Q quit)
-│   ├── more.c                show files a page at a time (-n N; space, Enter, q)
-│   ├── grep.c, find.c        search the lines of files / folders; list paths by name
-│   ├── tree.c, du.c          a folder as a tree (-s sizes); disk KB of folders and files (-a)
-│   ├── diff.c, hexdump.c     changed lines of two text files (LCS, Unix normal format); values in hex
-│   ├── calc.c                32-bit integer calculator (C precedence; no argument: a line at a time)
-│   ├── visual_file_manager.c a two-pane yazi-like file manager on the RGB screen (j k h l, space select, y x p, u, r d a, ~ home, q)
-│   ├── claude.c              talk to Claude through the Claude device (0x9C): chat, `claude QUESTION`, /commands; runs
+│   ├── bin/                  sources of the OS's own programs for /bin (built --exe by make_disk.py; see bin/README.md)
+│   │   ├── ed.c              a line editor for text files (a, i, c, d, p, s, /find, w, q)
+│   │   ├── edit.c            a full-screen editor on the RGB screen (arrows, ^S save, ^Q quit)
+│   │   ├── more.c            show files a page at a time (-n N; space, Enter, q)
+│   │   ├── grep.c, find.c    search the lines of files / folders; list paths by name
+│   │   ├── tree.c, du.c      a folder as a tree (-s sizes); disk KB of folders and files (-a)
+│   │   ├── diff.c, hexdump.c changed lines of two text files (LCS, Unix normal format); values in hex
+│   │   ├── calc.c            32-bit integer calculator (C precedence; no argument: a line at a time)
+│   │   ├── visual_file_manager.c  a two-pane yazi-like file manager on the RGB screen (j k h l, space select, y x p, u, r d a, ~ home, q)
+│   │   └── claude.c          talk to Claude through the Claude device (0x9C): chat, `claude QUESTION`, /commands; runs
 │   │                         Claude's commands (sh -c, stdin/stdout files, timeout kill) and writes its files
 │   ├── cpu_claude.md         the Claude device's system prompt (the machine, ASCII, tools, commands, what not to run)
 │   ├── claude_access.conf    PC paths Claude may read / write (read PATH, write PATH), besides claude/
@@ -371,5 +373,5 @@ pypy3 cpu_sim/src/bench.py [life sqrt ...]                          # simulator 
   `claude` polls the device (no interrupt). A program Claude runs gets stdin
   from a file: full-screen and key-polling programs would hang until the
   timeout, and `tynix/cpu_claude.md` says not to run them.
-* Outdated notes: `logisim/cpu datas/` (see TECHNICAL.md §9). The old
+* Outdated notes: `logisim/old_notes/` (see TECHNICAL.md §9). The old
   hand-assembled programs were removed on 2026-10-06 (still in git history).

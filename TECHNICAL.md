@@ -1352,7 +1352,7 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 23 checks: `claude` (tynix/claude.c and the device with a fake
+python compiler/src/disk/selftest.py  # 23 checks: `claude` (tynix/bin/claude.c and the device with a fake
                                       # backend under the kernel: commands with output, stdin,
                                       # cd, write_file, the timeout killing a program and its
                                       # child, /approve n, Ctrl-X, wrapping at 64 columns,
@@ -1600,7 +1600,7 @@ design. When something here disagrees with sections 1–8, sections 1–8 are
 right.
 
 The old hand-assembled programs (`cpu_sim/examples/`, `logisim/functions/`),
-the outdated `logisim/cpu datas/instruction` table and the old copy of
+the outdated `logisim/old_notes/instruction` table and the old copy of
 `assembly_syntax.md` in `compiler/src/asm/` were removed on 2026-10-06; they
 are still in the git history.
 
@@ -1608,8 +1608,8 @@ are still in the git history.
 
 | file | status |
 | --- | --- |
-| `logisim/cpu datas/stack_instruction.txt` | internal micro-step notes for the stack hardware, not a description of the instructions |
-| `logisim/cpu datas/TO DO.txt` | personal to-do list (future ideas: loading ROM into RAM at start, BIOS, OS) |
+| `logisim/old_notes/stack_instruction.txt` | internal micro-step notes for the stack hardware, not a description of the instructions |
+| `logisim/old_notes/TO DO.txt` | personal to-do list (future ideas: loading ROM into RAM at start, BIOS, OS) |
 
 ### Circuit
 
@@ -1887,18 +1887,18 @@ With no disk, or no `/bin/sh`, the kernel says so and halts.
 | --- | --- |
 | `tynix/kernel.c` | the OS's ROM: tasks, memory, scheduling, system calls, the filesystem, keyboard and screen focus, the NMI menu (21,879 words of ROM, 38,095 of RAM with its 8K-word stack and 16 task records) |
 | `tynix/shell.c` | the shell, `/bin/sh` (17,283 words): built-ins, programs from `/bin`, `&`, `jobs`, `fg`, `kill`, `wait`, `run FILE`; `sh -c LINE` |
-| `tynix/ed.c` | a line editor for text files, a program for `/bin` (15.8K words; section 11.1) |
-| `tynix/edit.c` | a full-screen editor on the RGB screen, a program for `/bin` (section 11.2) |
-| `tynix/more.c` | show text files a page at a time, a program for `/bin` (11.3; 12.4K words) |
-| `tynix/grep.c` | print the lines of files and folders that contain some text (11.3; 13.8K words) |
-| `tynix/find.c` | list the paths under a folder whose names contain some text (11.3; 9.1K words) |
-| `tynix/tree.c` | a folder as an indented tree (11.3; 9.5K words) |
-| `tynix/du.c` | disk space of folders and files, in KB (11.3; 9.4K words) |
-| `tynix/diff.c` | the lines that differ between two text files (11.3; 13.2K words) |
-| `tynix/hexdump.c` | the values of files in hexadecimal (11.3; 11.6K words) |
-| `tynix/calc.c` | a 32-bit integer calculator (11.3; 7.6K words) |
-| `tynix/visual_file_manager.c` | a two-pane file manager on the RGB screen, in the style of yazi (section 11.4; 22.8K words) |
-| `tynix/claude.c` | `claude`: talk to Claude through the Claude device, which runs commands on the CPU for it (section 11.5; 13.5K words) |
+| `tynix/bin/ed.c` | a line editor for text files, a program for `/bin` (15.8K words; section 11.1) |
+| `tynix/bin/edit.c` | a full-screen editor on the RGB screen, a program for `/bin` (section 11.2) |
+| `tynix/bin/more.c` | show text files a page at a time, a program for `/bin` (11.3; 12.4K words) |
+| `tynix/bin/grep.c` | print the lines of files and folders that contain some text (11.3; 13.8K words) |
+| `tynix/bin/find.c` | list the paths under a folder whose names contain some text (11.3; 9.1K words) |
+| `tynix/bin/tree.c` | a folder as an indented tree (11.3; 9.5K words) |
+| `tynix/bin/du.c` | disk space of folders and files, in KB (11.3; 9.4K words) |
+| `tynix/bin/diff.c` | the lines that differ between two text files (11.3; 13.2K words) |
+| `tynix/bin/hexdump.c` | the values of files in hexadecimal (11.3; 11.6K words) |
+| `tynix/bin/calc.c` | a 32-bit integer calculator (11.3; 7.6K words) |
+| `tynix/bin/visual_file_manager.c` | a two-pane file manager on the RGB screen, in the style of yazi (section 11.4; 22.8K words) |
+| `tynix/bin/claude.c` | `claude`: talk to Claude through the Claude device, which runs commands on the CPU for it (section 11.5; 13.5K words) |
 | `tynix/cpu_claude.md` | the Claude device's system prompt: the machine, the characters allowed, the tools, the Tynix commands, what not to run, the limits (11.5) |
 | `tynix/claude_access.conf` | the PC paths Claude may read (`read PATH`) or write (`write PATH`) besides its own folder `tynix/claude/` (what Claude writes there is git-ignored); all commented out, so nothing else is allowed (11.5) |
 | `tynix/make_disk.py` | makes `tynix/disk.img` (git-ignored) when it is missing or with `--new` (TFS1, 64 MB or `--size`), builds `shell.c` as `/bin/sh` and every program in its `PROGRAMS` list (from `tynix/` or `compiler/examples/c/`) with `cc build --exe` into `/bin` (replacing the old copies) and writes `/readme.txt`; from the command line it also makes a Linux-like `/home/user` (`Desktop`, `Documents` with `welcome.txt`, `Downloads`, `Music`, `Pictures`, `Videos`) and `/tmp` when missing (`make(..., home=True)`; the self-checks leave them out); other files on the disk are kept. Twelve C examples, `ed`, `edit`, the nine tools of 11.3 and 11.4 and `claude` (11.5), 2.8K–22.8K words each; `REGIONS` gives `diff` 1.25M words of RAM (`--region`) |
@@ -2070,7 +2070,7 @@ own region, so the caller stays as it was. `visual_file_manager` (11.4) opens
 a file in `edit` that way; the `/.next` file and exit status 254 that it used
 in Phase 5 to ask the shell are gone.
 
-### 11.1 The editor: `ed` (`tynix/ed.c`)
+### 11.1 The editor: `ed` (`tynix/bin/ed.c`)
 
 A line editor in the style of Unix's `ed`, a program in `/bin` (the text
 display is a teletype: append only, no cursor positioning, so a screen
@@ -2100,7 +2100,7 @@ A range is `N`, `N,M`, `.` (the current line), `$` (the last), or `,`
 line). The self-check `editor` (disk suite) drives it through the shell and
 reads the file back with `fs.py`.
 
-### 11.2 The full-screen editor: `edit` (`tynix/edit.c`)
+### 11.2 The full-screen editor: `edit` (`tynix/bin/edit.c`)
 
 `edit notes.txt` shows the text on the RGB screen (256 x 256, 6 x 8 cells:
 42 columns, 31 text lines and a status line in inverted colours with the
@@ -2124,7 +2124,7 @@ through the shell, reads the file back with `fs.py`, and checks the screen
 holds text while it runs and is blank after.
 
 
-### 11.3 The tools (`tynix/more.c` ... `tynix/calc.c`)
+### 11.3 The tools (`tynix/bin/more.c` ... `tynix/bin/calc.c`)
 
 Eight small programs for `/bin`, one file each, written like `ed.c`: a header
 comment (what, how built, usage), errors as `NAME: PATH: reason` (the
@@ -2164,7 +2164,7 @@ whole transcript (the `grep` and `diff` texts were compared with the real Unix
 tools on the same files), and reads the redirected files and `du`'s block counts
 back with `fs.py`.
 
-### 11.4 The file manager: `visual_file_manager` (`tynix/visual_file_manager.c`)
+### 11.4 The file manager: `visual_file_manager` (`tynix/bin/visual_file_manager.c`)
 
 A yazi-like file manager on the RGB screen, built like `edit.c`: 42 columns x
 32 rows of 6 x 8 cells, keys polled with `key_pressed()`, `shown[][]` remembering
@@ -2225,7 +2225,7 @@ beyond the screen being blank after `q`, and the screen layout was checked by
 eye from a saved screenshot, not on the circuit (the circuit cannot run these
 programs yet: 16-bit banks).
 
-### 11.5 Claude: the device and `claude` (`cpu_sim/src/claude.py`, `tynix/claude.c`)
+### 11.5 Claude: the device and `claude` (`cpu_sim/src/claude.py`, `tynix/bin/claude.c`)
 
 Phase 8 (2026-11-02). Claude does not run on the CPU: the model runs on
 Anthropic's servers, so the CPU is a terminal. `claude` (a program for `/bin`)

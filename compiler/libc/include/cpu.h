@@ -44,7 +44,7 @@
  * A formatted disk holds a filesystem (stdio.h's fopen, TFS1): raw writes
  * to it can break it.
  *
- * Claude (simulator only, Phase 8; tynix/claude.c is the program that uses
+ * Claude (simulator only, Phase 8; tynix/bin/claude.c is the program that uses
  * it): device_out(CLAUDE_DEVICE, c) adds a char to the message, CLAUDE_SEND
  * (0) sends it, CLAUDE_NEW starts a new conversation, CLAUDE_STOP stops the
  * reply, CLAUDE_HELLO says a program starts using the device.

@@ -26,7 +26,7 @@ import fs                               # compiler/src/disk
 import driver                           # compiler/src/cc
 
 EXAMPLES = ROOT / "compiler" / "examples" / "c"      # in folders by kind (games/, os/, ...)
-OS_DIR = ROOT / "tynix"
+OS_DIR = ROOT / "tynix"                    # kernel.c, shell.c; the other OS programs are in bin/
 DEFAULT_IMAGE = ROOT / "tynix" / "disk.img"
 
 # compiler/examples/c/*/NAME.c -> /bin/NAME. Each one ends by itself, on
@@ -107,8 +107,8 @@ def make(image=DEFAULT_IMAGE, programs=PROGRAMS, new=False, size_mb=64, log=prin
         if disk.lookup("/bin") is None:
             disk.mkdir("/bin")
         for name in ["sh"] + [p for p in programs if p != "sh"]:
-            source = OS_DIR / f"{SOURCES.get(name, name)}.c"   # the OS's own programs
-            if not source.exists():
+            source = OS_DIR / (f"{SOURCES[name]}.c" if name in SOURCES else f"bin/{name}.c")
+            if not source.exists():                            # not one of the OS's own programs
                 found = sorted(EXAMPLES.rglob(f"{name}.c"))
                 if len(found) != 1:
                     raise fs.FsError(f"{name}.c: found {len(found)} times under compiler/examples/c")
