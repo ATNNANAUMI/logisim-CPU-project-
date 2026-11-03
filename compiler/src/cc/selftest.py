@@ -489,6 +489,41 @@ def check_line_info():
         assert info.line_at(cpu.iar)[1] == 3
 
 
+def check_disasm():
+    """compiler/src/asm/disasm.py on C: every C example and every program of
+    tynix/ (its /bin), built as a ROM image (when it builds alone) and as a
+    program for the OS (TEX2, not the kernel), disassembled and linked again,
+    gives the same words (and relocations), with and without its .map."""
+    import disasm                       # compiler/src/asm (driver puts it on the path)
+    import linker
+    root = HERE.parent.parent.parent
+    sources = sorted((root / "compiler" / "examples" / "c").rglob("*.c")) + sorted((root / "tynix").rglob("*.c"))
+    runs = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        for src in sources:
+            for exe in (False, True):
+                if exe and src.name == "kernel.c":
+                    continue
+                try:
+                    program, _ = driver.build([str(src)], exe=exe)
+                except BuildError:
+                    assert not exe, f"{src.name} doesn't build --exe"
+                    continue                    # a program that needs the kernel's calls
+                out = tmp / (src.stem + (".exe" if exe else ".rom"))
+                if exe:
+                    out.write_bytes(driver.exe_bytes(program, 0x123456))
+                else:
+                    out.write_text(linker.format_raw(program.rom))
+                map_ = tmp / (src.stem + (".exe" if exe else "") + ".map")
+                map_.write_text(linker.format_map(program, out.name))
+                for m in (None, map_):
+                    problem = disasm.round_trip(out, m)
+                    assert problem is None, f"{src.relative_to(root)}: {problem}"
+                    runs += 1
+    return f"{runs} round trips"
+
+
 CHECKS = [
     check_preprocessor,
     check_errors,
@@ -507,6 +542,7 @@ CHECKS = [
     check_big_memory,
     check_command_line,
     check_line_info,
+    check_disasm,
     check_programs,
 ]
 

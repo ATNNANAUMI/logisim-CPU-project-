@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # five self-check suites (assembler 22, simulator 51, C compiler 18, image tool 10, disk tool 24), then check_docs.py
+python run.py test                                   # five self-check suites (assembler 23, simulator 51, C compiler 19, image tool 10, disk tool 24), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
@@ -26,6 +26,7 @@ python -c "import sys; sys.path.insert(0,'compiler/src/cc'); import selftest; se
 
 python compiler/src/asm build prog.asm compiler/examples/asm/stdlib/stdlib.asm [-o name.rom] [--map]
 python compiler/src/asm build prog.asm --lib compiler/examples/asm/stdlib/stdlib.asm   # link only the stdlib functions used
+python compiler/src/asm disasm compiler/ROM/prog.rom [--map compiler/ROM/prog.map] [-o out.asm] [--raw]   # a .rom or .exe back to assembly that builds the same words
 python cpu_sim/src/main.py compiler/ROM/prog.rom                             # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 [--trace] [--keys $'text\n'] [--screen out.png] [--disk disk.img]
 python cpu_sim/src/main.py compiler/ROM/prog.rom [--screen-fps 30]            # the window: the RGB screen is drawn at most this often while a program runs

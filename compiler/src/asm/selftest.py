@@ -565,6 +565,68 @@ def check_examples_build():
     return f"{len(built)} built"
 
 
+def check_disasm():
+    """disasm.py: every assembly example (linked with stdlib.asm as a library
+    when it needs it), disassembled and assembled again, gives the same words,
+    with and without its .map, with CALL/RET folded and --raw; strings come
+    back as .string, a word the assembler writes otherwise (NOT R1 with RA 2)
+    as .word, and the CLI writes the file."""
+    import tempfile
+    import disasm
+    root = Path(__file__).resolve().parent.parent.parent / "examples" / "asm"
+    if not root.is_dir():
+        return "skipped, no examples folder"
+
+    def obj(path):
+        return assemble(path.read_text(encoding="utf-8-sig"), str(path))[0]
+
+    stdlib = root / "stdlib" / "stdlib.asm"
+    runs = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        for path in sorted(root.rglob("*.asm")):
+            if path.name in ("stdlib.asm", "lib.asm"):
+                continue
+            files = [obj(path)] + ([obj(root / "two_files" / "lib.asm")] if path.parent.name == "two_files" else [])
+            try:
+                program = linker.link(files)
+            except AsmErrors:
+                lib = obj(stdlib)
+                program = linker.link(files + [lib], [lib])
+            rom, map_ = tmp / (path.stem + ".rom"), tmp / (path.stem + ".map")
+            rom.write_text(linker.format_raw(program.rom))
+            map_.write_text(linker.format_map(program, rom.name))
+            for m in (None, map_):
+                for raw in (False, True):
+                    problem = disasm.round_trip(rom, m, raw)
+                    assert problem is None, problem
+                    runs += 1
+        # a hand-made image: a string, a call, NOT with RA != RB, a jump into an operand word
+        source = """.global start
+start:  DATA R1, msg
+        CALL f
+        RJF Z, start + 1
+        HALT
+f:      RET
+msg:    .string "hi\\n"
+"""
+        program = linker.link([assemble(source, "t.asm")[0]])
+        words = program.rom + [0x1612]                  # NOT with RA 1, RB 2: not what NOT R2 is
+        rom = tmp / "t.rom"
+        rom.write_text(linker.format_raw(words))
+        assert disasm.round_trip(rom) is None
+        text = disasm.disassemble_file(rom)
+        for want in ('.string "hi\\n"', "CALL L_", "        RET", ".word 0x1612", "DATA R1, L_",
+                     "RJF Z, start + 1"):
+            assert want in text, (want, text)
+        assert "        CALL " not in disasm.disassemble_file(rom, raw=True)
+        out = tmp / "t.dis.asm"
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert cli.main(["disasm", str(rom), "-o", str(out)]) == 0
+        assert out.read_text() == text
+    return f"{runs} round trips"
+
+
 CHECKS = [
     check_isa_doc_words,
     check_abs_value_example,
@@ -588,6 +650,7 @@ CHECKS = [
     check_object_file_round_trip,
     check_command_line,
     check_examples_build,
+    check_disasm,
 ]
 
 

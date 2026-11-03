@@ -904,7 +904,40 @@ explains how the tools work.
 python compiler/src/asm assemble prog.asm            [-o prog.obj]
 python compiler/src/asm link     prog.obj lib.obj    [-o prog.rom] [--map] [--lib lib.obj]
 python compiler/src/asm build    prog.asm lib.asm    [-o prog.rom] [--map] [--lib lib.asm]
+python compiler/src/asm disasm   prog.rom|prog.exe   [-o prog.dis.asm] [--map prog.map] [--raw]
 ```
+
+`disasm` (`disasm.py`, 2026-11-03) writes a ROM image or a program for the
+OS (TEX2) back as assembly that builds **the same words** (default output
+`compiler/ROM/<name>.dis.asm`). Each instruction word is assembled once to
+check that the assembler writes that text as exactly that word; one it
+writes otherwise (`NOT` with RA ≠ RB, an `STK PUSH` with RB set) stays a
+`.word`. The linker's part is rebuilt rather than written: from a ROM image
+the vectors and start-up code give `start`, the interrupt handlers that are
+not the defaults (`_nmi` ... `_fault`, made `.global`), the RAM the files
+reserve (one `.space` in `.ram`, with labels where code points) and the
+stack's size (a comment when it isn't 16K words); from a `.exe` the entry
+jump gives `start`, and the header the data, stack and region sizes. Code is
+followed from `start`, the handlers, the map's ROM labels (not the C
+compiler's data labels `_S`, `_F`, `_C`, `_G`, `_V`) and the targets of `DATA
+R0, x` + `STK PUSH` (a return address) and `DATA Rn, x` + `JMRB Rn`; what is
+not reached is data: `.word`, or `.string "..."` for printable chars ending
+in a 0. Labels: the map's names (made unique with `__2` ...), else
+`L_<address>` (code) and `R_<address>` (RAM); a reference inside an
+instruction is `label + k`. In a `.exe` the relocation list says exactly
+which words are addresses; in a ROM image a `DATA` operand or `.word` that
+lands on a map label or in the reserved RAM, or a `DATA` operand that lands
+on code found or on a string, becomes a label marked `; guess` (the words
+are the same either way). `CALL target[, n]` and `RET` come back as the
+pseudo-ops when their words are exactly the expansion and nothing else
+points inside them (`--raw`: never). The C compiler's own calls (`DATA R0,
+ret; STK PUSH; STK CALL; RJMP f`) are not a pseudo-op and stay as they are.
+A ROM image rebuilds with `asm build`; a `.exe` with `linker.link([obj],
+base=0x1100000, exe_stack=N)` and `driver.exe_bytes(program, region)` (the
+numbers are in its first lines). Checked by the assembler suite (every
+assembly example, with and without its map, folded and `--raw`) and the C
+compiler suite (every C example as a ROM and every program of `tynix/` as a
+`.exe`, with and without the map).
 
 `--lib FILE` (repeatable) links FILE as a library: only the parts the
 program needs (4.6). Libraries are placed after the other inputs.
@@ -940,7 +973,8 @@ problems of all files (bad source, unreadable file, broken `.obj`), as
 | `objfile.py` | `ObjectFile` and `Reloc`, saved as readable JSON |
 | `linker.py` | object files → one ROM image, plus `format_raw` and `format_map` |
 | `errors.py` | `AsmError` (one message with file and line) and `AsmErrors` (a batch) |
-| `selftest.py` | 22 checks for the assembler and linker |
+| `disasm.py` | `disasm`: a `.rom` or TEX2 `.exe` back to assembly that builds the same words; `round_trip()` for the self-checks |
+| `selftest.py` | 23 checks for the assembler and linker |
 | `asm_grammar.py` | writes railroad diagrams of the grammar to `asm_grammar.html` (needs `pip install railroad-diagrams`) |
 
 ### 4.3 Assembling (two passes)
@@ -1309,12 +1343,13 @@ repo.
 ### 7.3 Self-checks
 
 ```
-python compiler/src/asm/selftest.py   # 22 checks: encodings, the interrupt group, vectors and start-up code, values, strings, jumps,
+python compiler/src/asm/selftest.py   # 23 checks: encodings, the interrupt group, vectors and start-up code, values, strings, jumps,
                                       # CALL/RET, SAVE/RESTORE, linking, a program past
                                       # 64K words and the size limits, link errors
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
-                                      # round trip, CLI, examples
+                                      # round trip, CLI, examples, disasm (every example
+                                      # back to the same words, map or not, --raw)
 python cpu_sim/src/selftest.py        # 51 checks: the Claude device with a fake backend (ASCII, the request's
                                       # model/effort/max_tokens/caching/tools, errors and no SDK,
                                       # refusal, every slash command, tool frames, bad tool
@@ -1336,7 +1371,7 @@ python cpu_sim/src/selftest.py        # 51 checks: the Claude device with a fake
                                       # the LD trace note when RA == RB, the window's pacing (settle(), screen_due()), step_line (C line
                                       # stepping: line, breakpoint, halt, limit), isa.py against the assembler's
                                       # encoding.py tables (names, groups, one/two-word shapes)
-python compiler/src/cc/selftest.py    # 18 checks: interrupts from C (WAIT, timer and key IRQ, TRAP, the stack limit fault), preprocessor, error messages (several per run), warnings,
+python compiler/src/cc/selftest.py    # 19 checks: disasm on every C example (ROM) and tynix/ program (.exe), interrupts from C (WAIT, timer and key IRQ, TRAP, the stack limit fault), preprocessor, error messages (several per run), warnings,
                                       # type sizes, exit/atexit, strtoul overflow limits, the 256 x 256 screen's edges (clipped, not
                                       # wrapped), keyboard input, globals
                                       # after a reset, library override, reserved names,

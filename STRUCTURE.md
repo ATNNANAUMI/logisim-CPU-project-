@@ -53,7 +53,8 @@ logisim-CPU-project-/
 │   │   ├── objfile.py        ObjectFile / Reloc (abs|rel, rom_only for CALL targets), saved as JSON (.obj)
 │   │   ├── linker.py         .obj files → ROM image; --lib: only the needed parts; checks externs/RAM calls; format_raw(), format_map()
 │   │   ├── errors.py         AsmError (file:line: message), AsmErrors (batch)
-│   │   ├── selftest.py       22 checks (incl. building every compiler/examples program)
+│   │   ├── disasm.py         disasm: a .rom or TEX2 .exe back to assembly that builds the same words (labels, CALL/RET, .string)
+│   │   ├── selftest.py       23 checks (incl. building every compiler/examples program, disasm round trips)
 │   │   └── asm_grammar.py    generates railroad-diagram HTML of the grammar (needs railroad-diagrams)
 │   ├── src/cc/               C compiler (run as `python compiler/src/cc <cmd>`); imports src/asm's modules
 │   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; build: --exe --region; run: --keys --steps --stats --trace)
@@ -66,7 +67,7 @@ logisim-CPU-project-/
 │   │   ├── peephole.py       clean-ups per function
 │   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0 (ROM or --exe), link, TEX2 .exe (+ relocations), libc/tynix/ for --exe, run in simulator
 │   │   ├── cerror.py         CError (file:line:col: error: ...)
-│   │   ├── selftest.py       18 checks (incl. interrupts from C, every tests/ program against gcc's output)
+│   │   ├── selftest.py       19 checks (incl. interrupts from C, disasm of every C program, every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
 │   │                         fuzz.py: random programs, gcc vs tiny C
 │   ├── src/img/              PNG -> compressed image for gfx_image() (run as `python compiler/src/img pic.png`)
@@ -317,6 +318,7 @@ The design follows the "But How Do It Know?" style: a single bus,
 python run.py test
 python compiler/src/asm build prog.asm compiler/examples/asm/stdlib/stdlib.asm [--map]   # -> compiler/ROM/prog.rom
 python compiler/src/asm build prog.asm --lib compiler/examples/asm/stdlib/stdlib.asm       # only the stdlib functions used
+python compiler/src/asm disasm compiler/ROM/prog.rom [--map compiler/ROM/prog.map] [--raw]   # -> compiler/ROM/prog.dis.asm (also a .exe)
 python cpu_sim/src/main.py compiler/ROM/prog.rom                       # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 --keys $'text\n'
 python cpu_sim/src/main.py compiler/ROM/prog.rom --disk disk.img            # with a disk (cc run --disk too)
