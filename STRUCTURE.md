@@ -86,7 +86,7 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       24 checks (incl. environment (export, $NAME, PATH, /etc/profile, setenv inherited), claude (tynix/bin/claude.c + the device, fake backend), batch (sh -c, run), abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/bin/ed.c, tynix/bin/edit.c, the nine tools)
+│   │   └── selftest.py       25 checks (incl. snapshot (primes, the kernel + disk), environment (export, $NAME, PATH, /etc/profile, setenv inherited), claude (tynix/bin/claude.c + the device, fake backend), batch (sh -c, run), abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/bin/ed.c, tynix/bin/edit.c, the nine tools)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), memory.asm (memcpy, memset), setjmp.asm,
 │   │                         interrupt.asm (vector stubs; a kernel's stack and task switch); include/sys/tynix.h (system calls, TEX2)
@@ -159,11 +159,12 @@ logisim-CPU-project-/
     │   ├── translate.py      code jumped to 50 times -> one Python function per block (registers as locals, lazy flags);
     │   │                     dispatcher(): an if-tree per bank calling blocks by name (pypy3 compiles it in); RAM code too
     │   │                     (every RAM store checks a map of translated words and drops RAM blocks it hits)
-    │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
+    │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed, save/load state)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
-    │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG --screen-fps N --claude-model NAME --claude-system FILE]`
+    │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG --screen-fps N --claude-model NAME --claude-system FILE --load-state F --save-state F]`
+    │   ├── snapshot.py       save/load the whole machine (a zip: state.json, ROM/RAM chunks, the screen); digest() for the checks
     │   ├── bench.py          speed check: nine example programs in run(), MHz first/best run + end-state digest
-    │   └── selftest.py       51 checks (incl. interrupts, translated code against step() on random code, the Claude device)
+    │   └── selftest.py       52 checks (incl. snapshots, interrupts, translated code against step() on random code, the Claude device)
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -325,6 +326,8 @@ python compiler/src/asm/isa_page.py [-o isa.html]                  # the ISA as 
 python cpu_sim/src/main.py compiler/ROM/prog.rom                       # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 --keys $'text\n'
 python cpu_sim/src/main.py compiler/ROM/prog.rom --disk disk.img            # with a disk (cc run --disk too)
+python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps N --save-state run.state   # snapshot at the end
+python cpu_sim/src/main.py --load-state run.state [--headless] [--disk copy.img]   # go on from it
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom   (jar: $LOGISIM_JAR or the Arch package path)
 python logisim/microcode/microcode.py [--list]                     # control section -> logisim/microcode/microcode.rom
 python logisim/microcode/verify.py [--quick]                        # that ROM against CONTROL_SECTION's gates (a few minutes)

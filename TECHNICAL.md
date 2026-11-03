@@ -693,7 +693,8 @@ modules import each other by plain name, so run them as scripts
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
 | `main.py` | command line, `build_cpu`, headless runner |
-| `selftest.py` | 51 checks on the core and the Claude device |
+| `snapshot.py` | `save(cpu, path)` / `load(cpu, path, disk=None)`: the whole machine in a file (3.3, "Snapshots"); `digest(cpu)` for the checks |
+| `selftest.py` | 52 checks on the core and the Claude device |
 | `bench.py` | the simulator's speed on nine example programs (3.3) |
 
 ### 3.2 Execution model
@@ -774,7 +775,7 @@ never translated), and `os` stayed about the same (12.8–15.8 against 15.3–16
 ### 3.3 Running it
 
 ```
-python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--trace] [--keys TEXT] [--screen FILE.png] [--disk FILE] [--screen-fps N] [--claude-model NAME] [--claude-system FILE]
+python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--trace] [--keys TEXT] [--screen FILE.png] [--disk FILE] [--screen-fps N] [--claude-model NAME] [--claude-system FILE] [--load-state FILE] [--save-state FILE]
 ```
 
 * without `--headless`: opens the window with the ROM loaded
@@ -793,10 +794,14 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
   (the default, `claude-haiku-5-5`), `sonnet`, `opus`, `fable` or one of
   their ids; anything else is refused. `/model` changes it later
 * `--claude-system FILE`: its system prompt instead of `tynix/cpu_claude.md`
+* `--save-state FILE` (headless): save a snapshot of the whole machine at the
+  end of the run; `--load-state FILE`: start from one instead of a reset (the
+  ROM comes from it, so no ROM argument is needed; `--disk` attaches another
+  disk than the one it names). See "Snapshots" below
 
 **The window:**
 
-* left: load ROM/RAM, attach a disk (a file dialog; a new name creates one), reset, step, run/pause, resume (after `HALT`), a speed
+* left: load ROM/RAM, attach a disk (a file dialog; a new name creates one), reset, save state / load state (snapshots, below), step, run/pause, resume (after `HALT`), a speed
   dropdown (1 Hz … 1 MHz, or `max`), and a trace toggle. Below them: the 16
   registers, IAR, ESP, EBP, the flags as checkboxes, and a status block (bank,
   selected devices, the disk and its position, the Claude device's state
@@ -810,6 +815,28 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
   a second while a program runs), the hex
   display, the keyboard field
   (`0xF0`), and the last executed instructions
+
+**Snapshots** (`snapshot.py`, 2026-11-03). The window's **save state** and
+**load state** buttons (and `--save-state` / `--load-state`) keep the whole
+machine in one file, a zip: `state.json` (format 1: the registers, IAR,
+flags, ESP, EBP, the stack limit, the interrupt bits, halted/stopped, the
+instruction count; the selected device addresses, the text display, the hex
+display, the keyboard buffer, the timer's milliseconds and period, the
+interrupt controller, the disk's path, position, size and modification time;
+the ROM's path and SHA-1), `rom` and `ram` (each bank in chunks of 64K words,
+only the chunks that are not all 0, zlib-compressed: a C program is about 10
+KB, the kernel with two programs loaded 65 KB) and `video` (the RGB screen's
+pixels). Not kept: the disk's contents (loading warns when its file changed
+since, and `--disk` or `load(cpu, path, disk=...)` attaches another, a copy
+made at the time for instance), the Claude device's conversation (it starts
+afresh) and the translated code (a cache, made again as the program runs).
+The timer goes on from its saved milliseconds. The checks: a program with
+timer interrupts (a clock that counts instructions) saved after 1,500 steps,
+loaded into a fresh CPU, and both run 3,000 more steps to the same digest
+(simulator suite); `primes.c` and the kernel with a disk running `/bin`
+programs saved mid-run and both run to `HALT` the same way, the kernel's on
+a copy of the disk (disk suite: the first CPU goes on without its translated
+code too, since where `run()` takes an interrupt can depend on it).
 
 **How the window paces itself** (2026-11-01; `gui.py`). The simulator and the
 window share one thread, and the program's clock (the timer, 1.7) goes on
@@ -1370,7 +1397,7 @@ python compiler/src/asm/selftest.py   # 24 checks: encodings, the interrupt grou
                                       # back to the same words, map or not, --raw),
                                       # isa_page (its decoder against isa.py on all
                                       # 65,536 words, a row for every mnemonic)
-python cpu_sim/src/selftest.py        # 51 checks: the Claude device with a fake backend (ASCII, the request's
+python cpu_sim/src/selftest.py        # 52 checks: snapshot (save, load, both run on the same), the Claude device with a fake backend (ASCII, the request's
                                       # model/effort/max_tokens/caching/tools, errors and no SDK,
                                       # refusal, every slash command, tool frames, bad tool
                                       # input, /approve, Ctrl-X, a new program (SYN) during a
@@ -1407,7 +1434,9 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 24 checks: `environment` (export/set/unset/env, $NAME ${NAME} $?, quotes,
+python compiler/src/disk/selftest.py  # 25 checks: `snapshot` (primes.c and the kernel with a disk saved
+                                      # mid-run, loaded, both to HALT alike; the changed-disk warning;
+                                      # --save-state/--load-state), `environment` (export/set/unset/env, $NAME ${NAME} $?, quotes,
                                       # PATH order, /etc/profile, getenv/setenv/unsetenv in a
                                       # program and its child), `claude` (tynix/bin/claude.c and the device with a fake
                                       # backend under the kernel: commands with output, stdin,

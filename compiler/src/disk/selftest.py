@@ -1987,6 +1987,86 @@ CPU halted
     return f"{cpu.instructions} instructions"
 
 
+def check_snapshot():
+    """cpu_sim/src/snapshot.py: a C program (ROM) and the kernel with a disk
+    running /bin programs, each saved after N instructions, loaded into a
+    fresh CPU (the kernel's with a copy of the disk) and run on: the same
+    end as the first CPU going on from the same point (both without
+    translated code then: it is a cache, and where run() takes an interrupt
+    can depend on it). Also --save-state / --load-state on the command line."""
+    import shutil
+    import subprocess
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    sys.path.append(str(root / "cpu_sim" / "src"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+    import snapshot                     # cpu_sim/src
+    from cpu import CPU
+    from devices import Timer
+
+    def machine(rom, disk=None, keys=""):
+        cpu = CPU()
+        cpu.bus.timer = Timer(clock=lambda: 0.0)        # the same run every time
+        cpu.mem.load_rom(rom)
+        if disk:
+            cpu.bus.attach_disk(disk)
+        cpu.bus.keyboard.type(keys)
+        return cpu
+
+    tmp = Path(TMP.name)
+    primes, _ = driver.build([str(root / "compiler" / "examples" / "c" / "basics" / "primes.c")])
+    image = str(tmp / "snap.img")
+    make_disk.make(image, programs=["echo", "primes"], new=True, size_mb=1, log=lambda _: None)
+    kernel = _kernel()
+    notes = []
+    for name, rom, disk, keys, first, rest in (
+            ("primes", primes.rom, None, "", 60_000, 3_000_000),
+            ("kernel", kernel.rom, image, "primes\necho one two > /x.txt\ncat /x.txt\nls /bin\nhalt\n", 1_000_000, 60_000_000)):
+        a = machine(rom, disk, keys)
+        a.run(first)
+        assert not a.halted, f"{name}: ended before the snapshot"
+        state = str(tmp / f"{name}.state")
+        snapshot.save(a, state, f"{name}.rom")
+        copy = None
+        if disk:
+            copy = str(tmp / "snap-copy.img")
+            shutil.copy2(disk, copy)                    # the same file, its time kept
+        b = CPU()
+        b.bus.timer = Timer(clock=lambda: 0.0)
+        _, warnings = snapshot.load(b, state, disk=copy)
+        assert warnings == [] and snapshot.digest(a) == snapshot.digest(b), (name, warnings)
+        a.forget_code()
+        for cpu in (a, b):
+            cpu.run(rest)
+        assert a.halted and b.halted, (name, a.bus.display.text[-300:])
+        assert snapshot.digest(a) == snapshot.digest(b), f"{name}: the loaded CPU ended elsewhere"
+        if disk:
+            a.bus.attach_disk(None)
+            b.bus.attach_disk(None)
+            assert open(disk, "rb").read() == open(copy, "rb").read(), "the two disks differ"
+            assert "303 primes" in b.bus.display.text and "\none two\n" in b.bus.display.text
+            # loading with the first disk, which /x.txt changed meanwhile: a warning
+            c = CPU()
+            _, warnings = snapshot.load(c, state)
+            assert len(warnings) == 1 and "changed" in warnings[0], warnings
+            c.bus.attach_disk(None)
+        notes.append(f"{name} {os.path.getsize(state) // 1024} KB")
+    # the command line: save at the end of a headless run, go on from it
+    rom_file = tmp / "primes.rom"
+    rom_file.write_text(driver.linker.format_raw(primes.rom))
+    main = str(root / "cpu_sim" / "src" / "main.py")
+    out = subprocess.run([sys.executable, main, str(rom_file), "--headless", "--steps", "100000",
+                          "--save-state", str(tmp / "cli.state")], capture_output=True, text=True)
+    assert out.returncode == 0 and "snapshot saved" in out.stdout, out.stdout + out.stderr
+    out = subprocess.run([sys.executable, main, "--load-state", str(tmp / "cli.state"), "--headless",
+                          "--steps", "5000000"], capture_output=True, text=True)
+    assert out.returncode == 0 and "303 primes" in out.stdout and "HALTED" in out.stdout, out.stdout + out.stderr
+    return ", ".join(notes)
+
+
 CHECKS = [
     check_format,
     check_text_round_trip,
@@ -2011,6 +2091,7 @@ CHECKS = [
     check_tools,
     check_batch,
     check_environment,
+    check_snapshot,
     check_claude,
 ]
 

@@ -783,6 +783,48 @@ def test_timer_interrupt_and_acknowledge():
         assert cpu.bus.interrupts.pending == 0 and cpu.ie == 1
 
 
+def test_snapshot():
+    # snapshot.py: a program with timer interrupts, a key still in the buffer,
+    # text, a pixel, the hex display and RAM writes; saved after N steps, the
+    # snapshot loaded into a fresh CPU and both run M more steps: the same
+    # state (the clock counts instructions, so both see the same ticks)
+    import os
+    import tempfile
+    import snapshot
+    from devices import Timer
+    rom = build(("L", "start"), OUT(0xAD, 1), OUT(0x7C, 2), EI, OUT(0x5C, ord("h")),
+                OUT(0x6C, 0x05060000 | 0xF800), OUT(0x3C, 0xC0FFEE),
+                ("L", "loop"), ADDI(3, 1), [0x0E03],
+                DATA(5, RAM + 7), [0x0253], ("RJMP", "loop"),       # ST R5, R3
+                ("L", "irq"), ADDI(4, 1), [0x0E04], OUT(0xAC, 1), [RTI])
+
+    def fresh():
+        cpu = CPU()
+        cpu.bus.timer = Timer(clock=lambda: cpu.instructions / 10_000)    # 10 instructions a ms
+        cpu.bus.timer.reset()
+        return cpu
+
+    a = fresh()
+    a.mem.load_rom(rom)
+    a.bus.keyboard.type("zz")
+    for _ in range(1500):
+        a.step()
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "s.state")
+        snapshot.save(a, path, "made.rom")
+        b = fresh()
+        rom_path, warnings = snapshot.load(b, path)
+        assert rom_path.endswith("made.rom") and warnings == [], warnings
+        assert snapshot.digest(a) == snapshot.digest(b)
+        assert os.path.getsize(path) < 8000, os.path.getsize(path)     # two 16M-word banks, a few chunks
+    for cpu in (a, b):
+        for _ in range(3000):
+            cpu.step()
+    assert a.regs[4] > 20 and a.mem.ram[7] > 20, (a.regs[4], a.mem.ram[7])   # ticks taken, RAM written
+    assert snapshot.digest(a) == snapshot.digest(b), "the loaded CPU went another way"
+    assert b.bus.display.text == "h" and b.bus.hex_value == 0xC0FFEE and list(b.bus.keyboard.buffer) == [122, 122]
+
+
 def test_a_request_nobody_acknowledges_does_not_starve_the_program():
     # a key raises source 1; the handler never acknowledges, so the IRQ line
     # stays active: one instruction still runs after every RTI

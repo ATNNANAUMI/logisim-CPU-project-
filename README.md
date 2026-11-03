@@ -73,6 +73,8 @@ python compiler/src/asm build compiler/examples/asm/stdlib/stdlib_demo.asm \
 python cpu_sim/src/main.py compiler/ROM/demo.rom
 python cpu_sim/src/main.py compiler/ROM/demo.rom --headless --steps 2000000
 python cpu_sim/src/main.py compiler/ROM/demo.rom --disk disk.img     # with a disk (a file, created if missing)
+python cpu_sim/src/main.py compiler/ROM/demo.rom --headless --save-state run.state   # keep the whole machine
+python cpu_sim/src/main.py --load-state run.state                    # go on from it later (the window: save/load state)
 
 # run it on the real circuit, headless (finds an installed Logisim-evolution; --jar or $LOGISIM_JAR otherwise)
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/demo.rom

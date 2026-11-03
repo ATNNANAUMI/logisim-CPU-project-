@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # five self-check suites (assembler 24, simulator 51, C compiler 19, image tool 10, disk tool 24), then check_docs.py
+python run.py test                                   # five self-check suites (assembler 24, simulator 52, C compiler 19, image tool 10, disk tool 25), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
@@ -31,6 +31,8 @@ python compiler/src/asm/isa_page.py [-o isa.html]    # the ISA as one HTML page 
 python cpu_sim/src/main.py compiler/ROM/prog.rom                             # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 [--trace] [--keys $'text\n'] [--screen out.png] [--disk disk.img]
 python cpu_sim/src/main.py compiler/ROM/prog.rom [--screen-fps 30]            # the window: the RGB screen is drawn at most this often while a program runs
+python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps N --save-state run.state   # the whole machine at the end (snapshot.py)
+python cpu_sim/src/main.py --load-state run.state [--headless] [--disk copy.img]   # go on from a snapshot (the window: save state / load state)
 python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img [--claude-model haiku|sonnet|opus|fable] [--claude-system FILE]   # then `claude` in Tynix (pip install anthropic, a key on the PC)
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom [--seconds N]   # real circuit, headless
 python logisim/microcode/microcode.py [--list]       # CONTROL_SECTION as a 64K x 32 microcode ROM -> logisim/microcode/microcode.rom

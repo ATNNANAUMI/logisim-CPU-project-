@@ -4,6 +4,7 @@ controls."""
 import os
 import time
 import tkinter as tk
+import zipfile
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import alu as alu
@@ -13,6 +14,7 @@ from debuginfo import DebugInfo, step_line, step_out
 from devices import Video, key_code
 from isa import decode, disassemble
 from memory import load_image
+import snapshot
 
 PAGE_WORDS = 256
 MONO = "TkFixedFont"
@@ -480,6 +482,11 @@ class SimulatorWindow(tk.Tk):
         ttk.Button(row1, text="disk", command=self.load_disk).pack(side="left")
         ttk.Button(row1, text="reset", command=self.reset).pack(side="left", padx=2)
 
+        row1b = ttk.Frame(box)
+        row1b.pack(fill="x", padx=4, pady=2)
+        ttk.Button(row1b, text="save state", command=self.save_state).pack(side="left")
+        ttk.Button(row1b, text="load state", command=self.load_state).pack(side="left", padx=2)
+
         row2 = ttk.Frame(box)
         row2.pack(fill="x", padx=4, pady=2)
         ttk.Button(row2, text="step", command=self.step).pack(side="left")
@@ -670,6 +677,41 @@ class SimulatorWindow(tk.Tk):
             return
         self._log(f"disk {path}: {self.cpu.bus.disk.words} words")
         self.refresh(memory=False)
+
+    def save_state(self) -> None:
+        """The whole machine to a snapshot file (snapshot.py)."""
+        path = filedialog.asksaveasfilename(title="save the machine's state",
+                                            defaultextension=".state")
+        if not path:
+            return
+        self.set_running(False)
+        try:
+            snapshot.save(self.cpu, path, self.rom_path)
+        except OSError as error:
+            messagebox.showerror("save failed", str(error))
+            return
+        self._log(f"state saved to {path} ({self.cpu.instructions} instructions)")
+
+    def load_state(self) -> None:
+        """Go on from a snapshot: ROM, RAM, registers and devices as they were."""
+        path = filedialog.askopenfilename(title="load a saved state")
+        if not path:
+            return
+        self.set_running(False)
+        try:
+            rom_path, warnings = snapshot.load(self.cpu, path)
+        except (OSError, ValueError, KeyError, zipfile.BadZipFile) as error:
+            messagebox.showerror("load failed", str(error))
+            return
+        if rom_path and os.path.exists(rom_path):
+            self.rom_path = rom_path
+            self.info = DebugInfo.for_rom(rom_path)
+            self.source_pane.set_info(self.info)
+        self._moved = False
+        self._log(f"state loaded from {path} ({self.cpu.instructions} instructions)")
+        for warning in warnings:
+            self._log(f"warning: {warning}")
+        self.refresh()
 
     def _load(self, path, loader) -> None:
         try:
