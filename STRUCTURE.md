@@ -29,7 +29,8 @@ logisim-CPU-project-/
 ├── PLAN.md                   action plan for the next 20 features (2026-11-03): what, how, checks, follow-ups, verdicts
 ├── run.py                    single entry point: `python run.py [asm|sim|build|test|img] ...` (menu if no args)
 ├── .github/workflows/test.yml   CI: `run.py test` on Python 3.10 and 3.13; difftest.py + fuzz.py (200, seed 1) against gcc
-├── check_docs.py             checks the docs against the repo (paths exist, examples and TWEAKS listed); part of `run.py test`
+├── check_docs.py             checks the docs against the repo (paths exist, examples and TWEAKS listed, every mnemonic in
+│                             assembly_syntax.md 4); part of `run.py test`
 │
 ├── logisim/
 │   ├── CPU.circ              THE CIRCUIT. Top-level circuit = "PC" (RGB Video fed by RGB_Display)
@@ -54,7 +55,8 @@ logisim-CPU-project-/
 │   │   ├── linker.py         .obj files → ROM image; --lib: only the needed parts; checks externs/RAM calls; format_raw(), format_map()
 │   │   ├── errors.py         AsmError (file:line: message), AsmErrors (batch)
 │   │   ├── disasm.py         disasm: a .rom or TEX2 .exe back to assembly that builds the same words (labels, CALL/RET, .string)
-│   │   ├── selftest.py       23 checks (incl. building every compiler/examples program, disasm round trips)
+│   │   ├── isa_page.py       the ISA as one HTML page (assembly_syntax.md 4 parsed, bit fields, micro-steps, decoder, encoder)
+│   │   ├── selftest.py       24 checks (incl. building every compiler/examples program, disasm round trips, isa_page)
 │   │   └── asm_grammar.py    generates railroad-diagram HTML of the grammar (needs railroad-diagrams)
 │   ├── src/cc/               C compiler (run as `python compiler/src/cc <cmd>`); imports src/asm's modules
 │   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; build: --exe --region; run: --keys --steps --stats --trace)
@@ -319,6 +321,7 @@ python run.py test
 python compiler/src/asm build prog.asm compiler/examples/asm/stdlib/stdlib.asm [--map]   # -> compiler/ROM/prog.rom
 python compiler/src/asm build prog.asm --lib compiler/examples/asm/stdlib/stdlib.asm       # only the stdlib functions used
 python compiler/src/asm disasm compiler/ROM/prog.rom [--map compiler/ROM/prog.map] [--raw]   # -> compiler/ROM/prog.dis.asm (also a .exe)
+python compiler/src/asm/isa_page.py [-o isa.html]                  # the ISA as one HTML page -> compiler/ROM/isa.html
 python cpu_sim/src/main.py compiler/ROM/prog.rom                       # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 --keys $'text\n'
 python cpu_sim/src/main.py compiler/ROM/prog.rom --disk disk.img            # with a disk (cc run --disk too)

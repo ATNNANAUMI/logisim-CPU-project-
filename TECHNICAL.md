@@ -905,7 +905,24 @@ python compiler/src/asm assemble prog.asm            [-o prog.obj]
 python compiler/src/asm link     prog.obj lib.obj    [-o prog.rom] [--map] [--lib lib.obj]
 python compiler/src/asm build    prog.asm lib.asm    [-o prog.rom] [--map] [--lib lib.asm]
 python compiler/src/asm disasm   prog.rom|prog.exe   [-o prog.dis.asm] [--map prog.map] [--raw]
+python compiler/src/asm/isa_page.py                  [-o isa.html]
 ```
+
+`isa_page.py` (2026-11-03) writes the instruction set as one self-contained
+HTML page (default `compiler/ROM/isa.html`): a row for each row of
+`assembly_syntax.md` section 4 (parsed, so the page follows the doc), and for
+the one clicked its encoding as a 16-bit field drawn from the word the
+assembler writes for an example, the flags it changes (the measured carry
+facts of 8), and its micro-steps from `logisim/microcode/microcode.py` (a
+conditional jump's last step both ways; group `0x2` is marked "simulator
+only": the microcode has no steps for it). A decoder turns a hex word into
+the instruction by `isa.py`'s rules (a word no mnemonic writes still runs as
+something: `0x2A00` is `JMRB R0`), with tables built from `encoding.py`; an
+encoder builds the words from a form, RA, RB, the flags and a value (where
+each field goes was found by assembling the form with different registers,
+so `NOT` puts RB in both fields). The assembler suite runs the page's
+decoding in Python on all 65,536 words against `isa.py`; `check_docs.py`
+checks that section 4 and `encoding.py` name the same instructions.
 
 `disasm` (`disasm.py`, 2026-11-03) writes a ROM image or a program for the
 OS (TEX2) back as assembly that builds **the same words** (default output
@@ -974,7 +991,8 @@ problems of all files (bad source, unreadable file, broken `.obj`), as
 | `linker.py` | object files → one ROM image, plus `format_raw` and `format_map` |
 | `errors.py` | `AsmError` (one message with file and line) and `AsmErrors` (a batch) |
 | `disasm.py` | `disasm`: a `.rom` or TEX2 `.exe` back to assembly that builds the same words; `round_trip()` for the self-checks |
-| `selftest.py` | 23 checks for the assembler and linker |
+| `isa_page.py` | writes the instruction set as one HTML page (`compiler/ROM/isa.html` unless `-o`): section 4 of `assembly_syntax.md` parsed, bit fields from words the assembler writes, flags, micro-steps from `logisim/microcode/microcode.py`, a decoder (`isa.py`'s rules, tables from `encoding.py`) and an encoder |
+| `selftest.py` | 24 checks for the assembler and linker |
 | `asm_grammar.py` | writes railroad diagrams of the grammar to `asm_grammar.html` (needs `pip install railroad-diagrams`) |
 
 ### 4.3 Assembling (two passes)
@@ -1343,13 +1361,15 @@ repo.
 ### 7.3 Self-checks
 
 ```
-python compiler/src/asm/selftest.py   # 23 checks: encodings, the interrupt group, vectors and start-up code, values, strings, jumps,
+python compiler/src/asm/selftest.py   # 24 checks: encodings, the interrupt group, vectors and start-up code, values, strings, jumps,
                                       # CALL/RET, SAVE/RESTORE, linking, a program past
                                       # 64K words and the size limits, link errors
                                       # (RAM calls, unexported externs), warnings,
                                       # library parts (--lib), raw output, .obj
                                       # round trip, CLI, examples, disasm (every example
-                                      # back to the same words, map or not, --raw)
+                                      # back to the same words, map or not, --raw),
+                                      # isa_page (its decoder against isa.py on all
+                                      # 65,536 words, a row for every mnemonic)
 python cpu_sim/src/selftest.py        # 51 checks: the Claude device with a fake backend (ASCII, the request's
                                       # model/effort/max_tokens/caching/tools, errors and no SDK,
                                       # refusal, every slash command, tool frames, bad tool
@@ -1423,9 +1443,11 @@ python compiler/src/disk/selftest.py  # 24 checks: `environment` (export/set/uns
                                       # then visual_file_manager's copy, cut, paste, rename,
                                       # delete, new folder, opening a file in `edit` and a program
                                       # (spawnv), read back with fs.py (11.3, 11.4)
-python check_docs.py                  # 3 checks on the docs: every repo path they name
+python check_docs.py                  # 4 checks on the docs: every repo path they name
                                       # exists, every example (.asm, .c) and tynix/*.c is
-                                      # listed (5.3, 11), every TWEAKS switch is in 3.4
+                                      # listed (5.3, 11), every TWEAKS switch is in 3.4,
+                                      # every mnemonic of encoding.py has a row in
+                                      # assembly_syntax.md 4 (and every row a mnemonic)
 ```
 
 `check_docs.py` checks only mechanical facts. It skips build output under

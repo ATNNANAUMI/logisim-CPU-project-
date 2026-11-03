@@ -174,7 +174,9 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 * [STRUCTURE.md](STRUCTURE.md) — a compact map of the project, written to be
   pasted into a chat with an AI assistant.
 * [compiler/assembly_syntax.md](compiler/assembly_syntax.md) — the assembly
-  language reference.
+  language reference; `python compiler/src/asm/isa_page.py` turns its
+  instruction tables into one HTML page with each word's bits, the circuit's
+  micro-steps, a decoder and an encoder (`compiler/ROM/isa.html`).
 * [compiler/c_language.md](compiler/c_language.md) — the C language (tiny C)
   and its library; [compiler/c_decisions.md](compiler/c_decisions.md) — why
   the C compiler works the way it does.

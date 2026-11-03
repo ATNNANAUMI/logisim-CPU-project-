@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # five self-check suites (assembler 23, simulator 51, C compiler 19, image tool 10, disk tool 24), then check_docs.py
+python run.py test                                   # five self-check suites (assembler 24, simulator 51, C compiler 19, image tool 10, disk tool 24), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
@@ -27,6 +27,7 @@ python -c "import sys; sys.path.insert(0,'compiler/src/cc'); import selftest; se
 python compiler/src/asm build prog.asm compiler/examples/asm/stdlib/stdlib.asm [-o name.rom] [--map]
 python compiler/src/asm build prog.asm --lib compiler/examples/asm/stdlib/stdlib.asm   # link only the stdlib functions used
 python compiler/src/asm disasm compiler/ROM/prog.rom [--map compiler/ROM/prog.map] [-o out.asm] [--raw]   # a .rom or .exe back to assembly that builds the same words
+python compiler/src/asm/isa_page.py [-o isa.html]    # the ISA as one HTML page (default compiler/ROM/isa.html): bits, micro-steps, decoder, encoder
 python cpu_sim/src/main.py compiler/ROM/prog.rom                             # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 [--trace] [--keys $'text\n'] [--screen out.png] [--disk disk.img]
 python cpu_sim/src/main.py compiler/ROM/prog.rom [--screen-fps 30]            # the window: the RGB screen is drawn at most this often while a program runs
@@ -92,7 +93,7 @@ Most facts are written in more than one doc. When you change one of these, updat
 
 | when this changes | update |
 | --- | --- |
-| an instruction (encoding or behaviour) | `encoding.py` + `asm_grammar.py` + `isa.py` + `alu.py`/`cpu.py` (both `_execute()` and the `_interpret()` loop) + `translate.py` (the code it writes); TECHNICAL §1 (and 1.8 for group 0x2), `compiler/assembly_syntax.md` §4, STRUCTURE "ISA cheat sheet", README if it's the one-paragraph summary |
+| an instruction (encoding or behaviour) | `encoding.py` + `asm_grammar.py` + `isa.py` (+ a row in `assembly_syntax.md` §4, which `isa_page.py` and `check_docs.py` read) + `alu.py`/`cpu.py` (both `_execute()` and the `_interpret()` loop) + `translate.py` (the code it writes); TECHNICAL §1 (and 1.8 for group 0x2), `compiler/assembly_syntax.md` §4, STRUCTURE "ISA cheat sheet", README if it's the one-paragraph summary |
 | assembler syntax, directives, pseudo-ops | `compiler/assembly_syntax.md`; TECHNICAL §4, STRUCTURE "Assembler conventions" |
 | a command, flag or output path | TECHNICAL §3.3 / §4.1 / §7; README "Quick start", STRUCTURE "Common commands", `assembly_syntax.md` §10, this file's Commands |
 | a stdlib function or the calling convention | the header of `stdlib.asm`; TECHNICAL §5.1–5.2, STRUCTURE "Assembler conventions" |

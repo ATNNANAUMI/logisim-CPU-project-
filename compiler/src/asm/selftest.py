@@ -627,6 +627,55 @@ msg:    .string "hi\\n"
     return f"{runs} round trips"
 
 
+def check_isa_page():
+    """isa_page.py: the page builds, has a row for every mnemonic of
+    encoding.py (and section 4 has no row the assembler doesn't know), and
+    its decoder's tables, run the way the page runs them, give isa.py's
+    decode() on all 65,536 words (name, groups, RA, RB)."""
+    import sys
+    import isa_page
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent / "cpu_sim" / "src"))
+    import isa                          # cpu_sim/src
+    import encoding as enc
+    assert isa_page.documented() == isa_page.encoded(), \
+        (isa_page.encoded() - isa_page.documented(), isa_page.documented() - isa_page.encoded())
+    tables = isa_page.decoder_tables()
+    for w in range(0x10000):
+        d = isa.decode(w)
+        name = d.name
+        if d.is_alu:
+            if d.is_float:
+                name = name if name in ("FLOAT", "INT") else "F" + name
+            else:
+                name = {"INC": "++", "DEC": "--"}.get(name, name)
+            if name not in enc.MNEMONICS:
+                name = None             # a word no mnemonic writes (float opcode 4, ...)
+        want = (name, d.is_alu, d.is_float, d.is_imm, d.ra, d.rb)
+        assert isa_page.page_decode(tables, w) == want, (hex(w), isa_page.page_decode(tables, w), want)
+    ins = isa_page.instructions()
+    groups = {i["group"] for i in ins}
+    assert len(ins) == len(isa_page.doc_rows()) and len(groups) == 3, groups
+    assert all(i["steps"] for i in ins if i["circuit"]) and not any(i["steps"] for i in ins if not i["circuit"])
+    rti = next(i for i in ins if i["name"] == "RTI")
+    assert not rti["circuit"] and rti["forms"][0]["example_words"] == [0x2000]
+    add = next(i for i in ins if i["name"] == "ADD")
+    assert [f["example_words"] for f in add["forms"]] == [[0x1012], [0x5010, 5]]
+    assert add["forms"][0]["ra"] == 0x10 and add["forms"][0]["rb"] == 0x1
+    not_ = next(i for i in ins if i["name"] == "NOT")
+    assert not_["forms"][0]["rb"] == 0x11      # NOT puts RB in both fields
+    rjf = next(i for i in ins if i["name"] == "RJF")
+    assert [c for c, _ in rjf["steps"]].count("taken") == 1
+    text = isa_page.page()
+    assert text.startswith("<!doctype html>") and "<title>ISA Reference</title>" in text
+    for name in enc.MNEMONICS - enc.PSEUDO_OPS - {"INC", "DEC"}:
+        assert json_name(name) in text, name
+    return f"{len(ins)} instructions, 65536 words decoded"
+
+
+def json_name(name):
+    return '"name": "' + name
+
+
 CHECKS = [
     check_isa_doc_words,
     check_abs_value_example,
@@ -651,6 +700,7 @@ CHECKS = [
     check_command_line,
     check_examples_build,
     check_disasm,
+    check_isa_page,
 ]
 
 
