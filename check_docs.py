@@ -16,9 +16,9 @@ EXAMPLES = ROOT / "compiler" / "examples"
 OS = ROOT / "tynix"
 
 # repo paths as the docs write them: compiler/..., cpu_sim/..., logisim/..., tynix/...
-# ("logisim/cpu datas/" has a space), .claude/..., run.py, *.md at the root
+# .claude/..., run.py, *.md at the root
 PATH = re.compile(r"(?<![\w./-])((?:compiler|cpu_sim|logisim|tynix|\.claude)/"
-                  r"(?:cpu datas/?)?[\w./*-]*|run\.py|[A-Z]+\.md)")
+                  r"[\w./*-]*|run\.py|[A-Z]+\.md)")
 
 
 def generated_or_placeholder(path):
@@ -52,7 +52,7 @@ def check_paths_exist():
     """Every repo path named in the docs exists (globs must match something).
     Build output, diagNN placeholders and paragraphs about removed files are
     skipped.  A `backticked` span that is an existing path counts as a whole,
-    so names with spaces (`logisim/cpu datas/TO DO.txt`) work."""
+    so names with spaces work."""
     missing = []
     for doc in DOCS:
         for start, lines in paragraphs((ROOT / doc).read_text()):
