@@ -160,6 +160,7 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 | `compiler/c_decisions.md` | the C compiler's design decisions, guesses and open questions |
 | `cpu_sim/src/` | Python simulator (core, a translator of hot code into Python, GUI, the Claude device `claude.py`, self-checks, `bench.py` speed check) |
 | `run.py` | one entry point for all of the above |
+| `PLAN.md` | action plan for the next features (not built yet) |
 
 ## Documentation
 

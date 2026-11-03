@@ -26,6 +26,7 @@ logisim-CPU-project-/
 ├── README.md                 short overview + quick start
 ├── TECHNICAL.md              full technical reference (ISA, circuit, sim, asm, stdlib, open questions, outdated list)
 ├── STRUCTURE.md              this file
+├── PLAN.md                   action plan for the next 20 features (2026-11-03): what, how, checks, follow-ups, verdicts
 ├── run.py                    single entry point: `python run.py [asm|sim|build|test|img] ...` (menu if no args)
 ├── check_docs.py             checks the docs against the repo (paths exist, examples and TWEAKS listed); part of `run.py test`
 │
