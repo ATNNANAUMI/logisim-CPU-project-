@@ -1395,6 +1395,26 @@ python check_docs.py                  # 3 checks on the docs: every repo path th
 `compiler/ROM/`, `diagNN`-style placeholders, and paragraphs that mention
 files as removed.
 
+**CI.** `.github/workflows/test.yml` runs on every push to `main` and `os`
+and on every pull request (and by hand, `workflow_dispatch`), on GitHub's
+Ubuntu runners:
+
+* `test`: `python run.py test` on Python 3.10 (the oldest supported) and
+  3.13. It needs no tkinter (the window's check skips itself), no network
+  (the Claude device's checks use `FakeBackend`), no Logisim and no javac;
+  without ffmpeg the image suite notes that it read no video file.
+* `gcc`: `difftest.py` (every test program against gcc's build) and
+  `fuzz.py --count 200 --seed 1` (the same 200 random programs every time;
+  a longer or random-seed run stays a local job).
+
+`compiler/ROM/libc/` is cached between runs; `driver.py` keys each cached file
+on a hash of its source and of the compiler, so an out-of-date cache is
+rebuilt, never used. A failed run uploads `compiler/ROM/` (or
+`compiler/ROM/fuzz/`, the programs that differed) as an artifact. Measured
+locally on 2026-11-03: `run.py test` 1 min 41 s (CPython 3.13), `difftest.py`
+16 s, `fuzz.py --count 200 --seed 1` 2 min 15 s (195 programs agree, 5
+skipped as not well defined).
+
 ### 7.4 Pictures for the RGB screen (`compiler/src/img/`)
 
 ```

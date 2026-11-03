@@ -28,6 +28,7 @@ logisim-CPU-project-/
 ├── STRUCTURE.md              this file
 ├── PLAN.md                   action plan for the next 20 features (2026-11-03): what, how, checks, follow-ups, verdicts
 ├── run.py                    single entry point: `python run.py [asm|sim|build|test|img] ...` (menu if no args)
+├── .github/workflows/test.yml   CI: `run.py test` on Python 3.10 and 3.13; difftest.py + fuzz.py (200, seed 1) against gcc
 ├── check_docs.py             checks the docs against the repo (paths exist, examples and TWEAKS listed); part of `run.py test`
 │
 ├── logisim/

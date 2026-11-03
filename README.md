@@ -1,5 +1,7 @@
 # logisim-CPU-project
 
+[![test](https://github.com/ATNNANAUMI/logisim-CPU-project-/actions/workflows/test.yml/badge.svg)](https://github.com/ATNNANAUMI/logisim-CPU-project-/actions/workflows/test.yml)
+
 A 32-bit CPU built from logic gates in Logisim-evolution, with the tools to
 program it: an assembler and linker, a small standard library, a C compiler
 with a C library, and a Python simulator that runs the same ROM images as the
@@ -50,6 +52,7 @@ Everything can be driven from `run.py` at the project root:
 ```
 python run.py                     # interactive menu
 python run.py test                # assembler, simulator, C compiler, image and disk tool self-checks, docs check
+                                  # (GitHub Actions runs it on every push and pull request: .github/workflows/test.yml)
 python run.py asm   prog.asm lib.asm            # -> compiler/ROM/prog.rom
 python run.py sim   compiler/ROM/prog.rom
 python run.py build prog.asm lib.asm            # assemble, then open the simulator
@@ -160,6 +163,7 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 | `compiler/c_decisions.md` | the C compiler's design decisions, guesses and open questions |
 | `cpu_sim/src/` | Python simulator (core, a translator of hot code into Python, GUI, the Claude device `claude.py`, self-checks, `bench.py` speed check) |
 | `run.py` | one entry point for all of the above |
+| `.github/workflows/test.yml` | CI: `run.py test` on Python 3.10 and 3.13, and the C compiler against gcc |
 | `PLAN.md` | action plan for the next features (not built yet) |
 
 ## Documentation

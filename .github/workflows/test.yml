@@ -1,0 +1,70 @@
+# The self-checks on every push and pull request (TECHNICAL 7.3).
+#
+#   test: python run.py test (the five suites and check_docs.py) on the oldest
+#         supported Python and a recent one. No tkinter, network, Logisim or
+#         javac is needed: the window's check skips itself without tkinter and
+#         the Claude device's checks use FakeBackend.
+#   gcc:  the C compiler against gcc: every test program (difftest.py) and
+#         200 random programs with a fixed seed (fuzz.py).
+#
+# compiler/ROM/libc/ (the compiled C library) is cached; driver.py keys every
+# cached file on a hash of its source and of the compiler, so a stale cache
+# is rebuilt, never used.
+name: test
+
+on:
+  push:
+    branches: [main, os]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/cache@v4
+        with:
+          path: compiler/ROM/libc
+          key: libc-${{ matrix.python }}-${{ hashFiles('compiler/libc/**', 'compiler/src/cc/**', 'compiler/src/asm/**') }}
+          restore-keys: libc-${{ matrix.python }}-
+      - name: self-checks and docs check
+        run: python run.py test
+      - name: keep the build output of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rom-${{ matrix.python }}
+          path: compiler/ROM/
+          if-no-files-found: ignore
+
+  gcc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/cache@v4
+        with:
+          path: compiler/ROM/libc
+          key: libc-gcc-${{ hashFiles('compiler/libc/**', 'compiler/src/cc/**', 'compiler/src/asm/**') }}
+          restore-keys: libc-gcc-
+      - name: test programs against gcc
+        run: python compiler/src/cc/tests/difftest.py
+      - name: random programs against gcc
+        run: python compiler/src/cc/tests/fuzz.py --count 200 --seed 1
+      - name: keep the programs that differed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz
+          path: compiler/ROM/fuzz/
+          if-no-files-found: ignore
