@@ -109,7 +109,7 @@ logisim-CPU-project-/
 │   │       │                 interrupts (WAIT, a timer IRQ and a key IRQ served by a C handler)
 │   │       ├── games/        guess (keyboard input), snake (W/A/S/D, R restarts, Q quits), stackfall (falling blocks, gravity chains),
 │   │       │                 game_of_life (64x64 torus, 7 scenes of well-known patterns, checks itself; keys 1-7 n r space s q)
-│   │       ├── graphics/     the RGB screen: gfx_demo; image_demo (gfx_image) with images/: mandelbrot, smiley (.png + the .h made from it);
+│   │       ├── graphics/     the RGB screen: gfx_demo; paint (mouse); image_demo (gfx_image) with images/: mandelbrot, smiley (.png + the .h made from it);
 │   │       │                 video_player (plays a video.py .h on time with clock()) with videos/demo (.mp4 + .h);
 │   │       │                 grapher (graphing calculator: type f(x), Enter; zoom/move/view commands);
 │   │       │                 qr (QR code encoder: the repo link, then any typed text; checked with zbarimg/qrencode)
@@ -169,7 +169,7 @@ logisim-CPU-project-/
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG --screen-fps N --claude-model NAME --claude-system FILE --load-state F --save-state F]`
     │   ├── snapshot.py       save/load the whole machine (a zip: state.json, ROM/RAM chunks, the screen); digest() for the checks
     │   ├── bench.py          speed check: nine example programs in run(), MHz first/best run + end-state digest
-    │   └── selftest.py       54 checks (incl. machine_view and its window tabs, snapshots, interrupts, translated code against step() on random code, the Claude device)
+    │   └── selftest.py       55 checks (incl. machine_view and its window tabs, snapshots, interrupts, translated code against step() on random code, the Claude device)
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)

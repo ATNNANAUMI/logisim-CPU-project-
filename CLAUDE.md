@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # five self-check suites (assembler 24, simulator 54, C compiler 20, image tool 10, disk tool 26), then check_docs.py
+python run.py test                                   # five self-check suites (assembler 24, simulator 55, C compiler 20, image tool 10, disk tool 26), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
@@ -30,6 +30,7 @@ python compiler/src/asm disasm compiler/ROM/prog.rom [--map compiler/ROM/prog.ma
 python compiler/src/asm/isa_page.py [-o isa.html]    # the ISA as one HTML page (default compiler/ROM/isa.html): bits, micro-steps, decoder, encoder
 python cpu_sim/src/main.py compiler/ROM/prog.rom                             # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 [--trace] [--keys $'text\n'] [--screen out.png] [--disk disk.img]
+python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps N --mouse '40,5,1@300000'   # a scripted pointer (x,y,buttons@step;...) for the mouse device 0xBC/0xBD
 python cpu_sim/src/main.py compiler/ROM/prog.rom [--screen-fps 30]            # the window: the RGB screen is drawn at most this often while a program runs
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps N --save-state run.state   # the whole machine at the end (snapshot.py)
 python cpu_sim/src/main.py --load-state run.state [--headless] [--disk copy.img]   # go on from a snapshot (the window: save state / load state)

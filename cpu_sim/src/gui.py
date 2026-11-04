@@ -747,6 +747,14 @@ class SimulatorWindow(tk.Tk):
         size = self.screen_zoom * max(video.width, video.height) + 8
         screen_box.configure(width=size, height=size)
         screen_box.bind("<Configure>", self._fit_screen)
+        self.screen_label.bind("<Motion>", self._mouse_moved)
+        self.screen_label.bind("<Leave>", lambda _e: setattr(self.cpu.bus.mouse, "inside", False))
+        for number, name in enumerate((1, 3, 2)):          # Tk buttons 1 left, 2 middle, 3 right
+            self.screen_label.bind(f"<ButtonPress-{name}>", lambda e, n=number: self._mouse_button(e, n, True))
+            self.screen_label.bind(f"<ButtonRelease-{name}>", lambda e, n=number: self._mouse_button(e, n, False))
+        self.screen_label.bind("<Button-4>", lambda _e: self.cpu.bus.mouse.wheel(True))     # X11 wheel
+        self.screen_label.bind("<Button-5>", lambda _e: self.cpu.bus.mouse.wheel(False))
+        self.screen_label.bind("<MouseWheel>", lambda e: self.cpu.bus.mouse.wheel(e.delta > 0))
         self._screen_shown = False
         self.display = tk.Text(box, font=MONO, height=16, wrap="char",
                                background="#101010", foreground="#c8ffc8",
@@ -1148,6 +1156,14 @@ class SimulatorWindow(tk.Tk):
             for pane in self.view_panes:
                 if pane.winfo_ismapped():                  # only the tab being looked at
                     pane.render()
+
+    def _mouse_moved(self, event) -> None:
+        """The pointer over the screen picture, in screen pixels (the picture is zoomed)."""
+        self.cpu.bus.mouse.move(event.x // self.screen_zoom, event.y // self.screen_zoom)
+
+    def _mouse_button(self, event, number: int, down: bool) -> None:
+        self._mouse_moved(event)
+        self.cpu.bus.mouse.button(number, down)
 
     def _fit_screen(self, event) -> None:
         """Zoom the RGB screen by the largest whole factor that fits its tab."""

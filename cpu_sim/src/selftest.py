@@ -1383,6 +1383,10 @@ def test_window_view_panes():
         assert stack.text.get("1.0", "end").count(" fact ") == 5 and "main" in stack.text.get("1.0", "end")
         assert "4 blocks" in heap_pane.label.cget("text") and "ESP index" in map_pane.label.cget("text")
         stack.pick(type("E", (), {"x": 5, "y": 5})())      # a click on the first frame
+        click = type("E", (), {"x": 6 * window.screen_zoom, "y": 9 * window.screen_zoom})()
+        window._mouse_button(click, 0, True)                # a left press on the screen picture
+        assert cpu.bus.mouse.state() == (6 << 24 | 9 << 16 | 1 | 8) and cpu.bus.mouse.events
+        window._mouse_button(click, 0, False)
         ram = window.ram_pane
         ram.show_float.set(True)
         ram.show_text.set(True)
@@ -1399,6 +1403,65 @@ def test_window_view_panes():
         window.refresh()
     finally:
         window.destroy()
+
+
+def test_mouse_device():
+    """The mouse (0xBC state, 0xBD events): the state word's layout, a button
+    event raises IRQ_MOUSE and queues, motion does not, the queue keeps 64,
+    --mouse scripts parse, and paint.c under a script draws, erases and quits."""
+    import sys
+    from pathlib import Path
+    import main as main_module
+    cpu = CPU()
+    bus, mouse = cpu.bus, cpu.bus.mouse
+    bus.in_address(config.MOUSE_STATE_ADDR)
+    assert bus.in_data() == 0
+    mouse.move(300, -4)                                       # clamped to the screen
+    assert (mouse.x, mouse.y) == (config.VIDEO_WIDTH - 1, 0) and bus.interrupts.pending == 0
+    mouse.move(0x12, 0x34)
+    mouse.button(0, True)
+    mouse.button(0, True)                                     # no change: no second event
+    mouse.button(1, True)
+    mouse.wheel(False)
+    assert bus.in_data() == 0x12340000 | 3 | 8 and bus.interrupts.pending == 1 << config.IRQ_MOUSE
+    bus.in_address(config.MOUSE_EVENT_ADDR)
+    got = [bus.in_data() for _ in range(5)]
+    assert got == [0x12340101, 0x12340103, 0x12340403, 0, 0], [hex(g) for g in got]
+    mouse.button(0, False)
+    mouse.button(1, False)
+    assert [bus.in_data() >> 8 & 0xFF for _ in range(3)] == [config.MOUSE_RELEASE] * 2 + [0]
+    for i in range(100):
+        mouse.wheel(True)
+    assert len(mouse.events) == config.MOUSE_QUEUE
+    cpu.reset()
+    assert mouse.events == type(mouse.events)() and mouse.state() == 0
+    assert main_module.parse_mouse("5,6,1@20; 1,2,0@10") == [(10, 1, 2, 0), (20, 5, 6, 1)]
+    try:
+        main_module.parse_mouse("1,2")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a bad --mouse script was accepted")
+    cc = str(Path(__file__).resolve().parents[2] / "compiler" / "src" / "cc")
+    sys.path.insert(0, cc)
+    try:
+        import driver
+        program, _ = driver.build([str(Path(__file__).resolve().parents[2] / "compiler" / "examples" / "c" / "graphics" / "paint.c")])
+    finally:
+        sys.path.remove(cc)
+    cpu = CPU()
+    cpu.mem.load_rom(program.rom)
+    script = ("40,5,0@300000;40,5,1@400000;40,5,0@450000;10,50,1@500000;60,50,1@600000;60,90,1@700000;"
+              "60,90,0@750000;100,100,2@800000;120,100,2@850000;0,0,4@900000")
+    for step, x, y, buttons in main_module.parse_mouse(script):
+        cpu.run(step - cpu.instructions)
+        main_module.apply_mouse(cpu.bus.mouse, x, y, buttons)
+    cpu.run(2_000_000)
+    pixels = cpu.bus.video.pixels
+    assert cpu.halted and cpu.bus.display.text == "painted 5\n", cpu.bus.display.text
+    red = 0xF800
+    assert [pixels[y * 256 + x] for x, y in ((40, 5), (10, 50), (35, 50), (60, 70), (60, 90))] == [red] * 5
+    assert pixels[100 * 256 + 110] == 0                      # erased with black
 
 
 def main():

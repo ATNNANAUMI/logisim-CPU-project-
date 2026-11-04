@@ -241,7 +241,8 @@ power function is `ipow`, so it doesn't clash with C's `pow`.)
 | `halt()` | the shutdown: stops the CPU (`__builtin_trap()`); only an NMI or a reset wakes it. It does not close files: `exit()` and the end of `main()` do (`atexit`), then halt, so nothing is lost by a reset after them |
 | `interrupts_on()`, `interrupts_off()` | the interrupt enable bit (off at reset; the start-up code leaves it alone) |
 | `set_interrupt_handler(which, fn)` | `which`: `INT_NMI`, `INT_IRQ`, `INT_TRAP`, `INT_FAULT`; `fn` is `unsigned fn(void)`, runs with interrupts off and every register saved, and returns 0 (go back where the program was) or an address to return to instead |
-| `irq_enable(mask)`, `irq_ack(mask)`, `irq_pending()` | the interrupt controller (devices `0xAC`/`0xAD`): sources `IRQ_TIMER` (1) and `IRQ_KEYBOARD` (2); a handler must acknowledge its source |
+| `mouse_state(&x, &y)`, `mouse_event(&x, &y, &buttons)` | the mouse over the RGB screen (devices `0xBC`/`0xBD`, simulator only): the buttons (bit 3 when the pointer is on the screen) and position; the next press, release or wheel step (kind `MOUSE_PRESS` ... `MOUSE_WHEEL_DOWN`, 0 when none) |
+| `irq_enable(mask)`, `irq_ack(mask)`, `irq_pending()` | the interrupt controller (devices `0xAC`/`0xAD`): sources `IRQ_TIMER` (1), `IRQ_KEYBOARD` (2) and `IRQ_MOUSE` (4); a handler must acknowledge its source |
 | `timer_interrupt_every(ms)` | the timer raises `IRQ_TIMER` every `ms` (0 = off) |
 | `wait_for_interrupt()` | sleeps until an interrupt (`WAIT`) |
 | `software_interrupt()` | `TRAP`: calls the `INT_TRAP` handler |

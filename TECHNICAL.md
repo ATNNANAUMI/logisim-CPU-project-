@@ -230,6 +230,8 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 | `0x8C` | disk seek (*simulator only*) | `OUTDATA` sets the disk's word position; `INDATA` reads the disk's size in words |
 | `0x8D` | disk data (*simulator only*) | `OUTDATA` writes the word at the position, `INDATA` reads it; both move the position on by one. Past the end, reads give 0 and writes are dropped |
 | `0x9C` | Claude (*simulator only*) | a terminal to the Claude API, on the PC (11.5). `OUTDATA`: a char of the message; `0` sends it; `0x18` a new conversation; `0x03` stops the reply; `0x16` a program starts using it. `INDATA`: the next char of the reply, `0` none yet, `4` the end of the turn, `2` a tool for the CPU (a letter, fields split by `0x1F`, then `0x03`; the CPU answers with the result and `0`) |
+| `0xBC` | Mouse state (*simulator only*) | `INDATA`: x in bits 31–24, y in 23–16 (screen pixels), the buttons in 2–0 (1 left, 2 right, 4 middle), 8 when the pointer is over the RGB screen |
+| `0xBD` | Mouse events (*simulator only*) | `INDATA`: the next press, release or wheel step of a queue of 64 (0 when empty): x, y as above, the kind in bits 15–8 (1 press, 2 release, 3 wheel up, 4 wheel down), the buttons after it in 2–0. A button or wheel event raises `IRQ_MOUSE` (bit 4 of the controller), motion does not |
 
 `0x6C`/`0x6D` were chosen on 2026-10-11; `0x6C` was built on the circuit
 (`RGB_Display`, section 2.2) on 2026-10-22. The numbers are `VIDEO_*` in
@@ -686,7 +688,7 @@ modules import each other by plain name, so run them as scripts
 | `isa.py` | opcode tables, `decode(word) -> Instr`, `disassemble(word, operand)`. `Instr.takes_operand` says whether a literal word follows |
 | `alu.py` | `int_op(name, a, b)` and `float_op(name, a, b)`, each returning `(R0 value, flag nibble)`; float32 ↔ bits helpers |
 | `memory.py` | `Memory` with two 16M-word banks (Python lists, 128 MB each, kept out of the cycle collector's sight with `gc.freeze()`: it walked their 32M items, 66 ms a time), `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
-| `devices.py` | `Display` (lines of text; `\n` new line, `\r` back to the start of the line (what follows overwrites it), `\b` deletes, `\f` clears it all, so headless output shows only what came after the last `\f`), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; the selected input and output addresses, and `hex_value`, the last word sent to the hex display; `OUTADDR` looks the output device up once and keeps its function in `send`, and putting another device in `display`, `video` or `disk` rewires it; `claude`, the device at `0x9C`) |
+| `devices.py` | `Display` (lines of text; `\n` new line, `\r` back to the start of the line (what follows overwrites it), `\b` deletes, `\f` clears it all, so headless output shows only what came after the last `\f`), `Keyboard` (a deque; empty reads 0), `Mouse` (`0xBC`/`0xBD`), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; the selected input and output addresses, and `hex_value`, the last word sent to the hex display; `OUTADDR` looks the output device up once and keeps its function in `send`, and putting another device in `display`, `video` or `disk` rewires it; `claude`, the device at `0x9C`) |
 | `claude.py` | the Claude device (`0x9C`, 11.5): `ClaudeDevice` (the protocol, the worker thread, the history, the slash commands, the costs), `Access` (the PC paths of `tynix/claude_access.conf`), the tools, `AnthropicBackend` (the `anthropic` SDK, imported on first use) and `FakeBackend` (the self-checks) |
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()` (translated blocks, and the `_interpret()` loop), `reset()`, `resume()`, `forget_code()` |
 | `translate.py` | turns code that runs often into Python functions for `run()` (3.2): `translate()` (one block), `dispatcher()` (the loop that runs them) |
@@ -695,7 +697,7 @@ modules import each other by plain name, so run them as scripts
 | `machine_view.py` | the call chain (`frames`: stack[EBP] is the caller's EBP, stack[EBP-1] the return address), malloc's blocks (`heap`: a header word, negative when used) and RAM's parts (`regions`), all read through the `.map` (`DebugInfo.symbols`); the window's Stack, Heap and Map tabs draw them |
 | `main.py` | command line, `build_cpu`, headless runner |
 | `snapshot.py` | `save(cpu, path)` / `load(cpu, path, disk=None)`: the whole machine in a file (3.3, "Snapshots"); `digest(cpu)` for the checks |
-| `selftest.py` | 54 checks on the core and the Claude device |
+| `selftest.py` | 55 checks on the core and the Claude device |
 | `bench.py` | the simulator's speed on nine example programs (3.3) |
 
 ### 3.2 Execution model
@@ -791,6 +793,9 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
 * `--screen-fps N`: the window draws the RGB screen at most N times a second
   while a program runs (default 30; 0 = at every tick). See "How the window
   paces itself" below
+* `--mouse "X,Y,B@STEP;..."` (headless): put the pointer at X,Y with buttons B
+  (1 left, 2 right, 4 middle) once STEP instructions have run; the window sends
+  the real pointer over the screen tab (`Motion`, buttons, the wheel).
 * `--claude-model NAME`: the Claude device's model (`0x9C`, 11.5): `haiku`
   (the default, `claude-haiku-5-5`), `sonnet`, `opus`, `fable` or one of
   their ids; anything else is refused. `/model` changes it later
@@ -1295,6 +1300,7 @@ Assembly is under `asm/` (`programs/`, `stdlib/`, `two_files/`, `tests/` for cir
 | `c/basics/hello.c` | C: `printf("hello, world\n")` |
 | `c/basics/primes.c` | C: a sieve, `printf` with a width, the hex display (`cpu.h`) |
 | `c/basics/interrupts.c` | C: the CPU's interrupts (simulator only): `main` sleeps with `wait_for_interrupt()` while a C handler serves a 100 ms timer IRQ and the keyboard IRQ (`irq_enable`, `irq_ack`, `timer_interrupt_every`, `set_interrupt_handler`); prints the keys typed (`--keys abc`), five ticks, and that the stack pointer came back. Takes half a second of real time |
+| `c/graphics/paint.c` | C: draw with the mouse (`0xBC`/`0xBD`, `cpu.h`'s `mouse_state`): left draws, right erases, the top strip picks a colour, middle quits; headless it takes `--mouse` scripts (the self-check `test_mouse_device` plays one) |
 | `c/graphics/gfx_demo.c` | C: the RGB screen with `gfx.h`: gradient, text, shapes, a sine wave (`--screen` saves the picture) |
 | `c/graphics/image_demo.c` | C: compressed pictures with `gfx_image` (7.4): a 256×256 Mandelbrot picture and a transparent 16×16 sprite from `c/graphics/images/` (the PNGs and the `.h` files made from them), clipped at the edges |
 | `c/basics/structs.c` | C: an array of structs, `qsort`, `malloc`, `printf("%.2f")` |
@@ -1413,7 +1419,7 @@ python compiler/src/asm/selftest.py   # 24 checks: encodings, the interrupt grou
                                       # back to the same words, map or not, --raw),
                                       # isa_page (its decoder against isa.py on all
                                       # 65,536 words, a row for every mnemonic)
-python cpu_sim/src/selftest.py        # 54 checks: snapshot (save, load, both run on the same), the Claude device with a fake backend (ASCII, the request's
+python cpu_sim/src/selftest.py        # 55 checks: snapshot (save, load, both run on the same), the Claude device with a fake backend (ASCII, the request's
                                       # model/effort/max_tokens/caching/tools, errors and no SDK,
                                       # refusal, every slash command, tool frames, bad tool
                                       # input, /approve, Ctrl-X, a new program (SYN) during a

@@ -117,6 +117,48 @@ class Keyboard:
         self.buffer.clear()
 
 
+class Mouse:
+    """The pointer over the RGB screen (0xBC state, 0xBD events; config.py)."""
+
+    def __init__(self, interrupts=None):
+        self.interrupts = interrupts
+        self.reset()
+
+    def reset(self) -> None:
+        self.x = self.y = self.buttons = 0
+        self.inside = False
+        self.events = deque(maxlen=config.MOUSE_QUEUE)
+
+    def _word(self, kind=0) -> int:
+        return (self.x & 0xFF) << 24 | (self.y & 0xFF) << 16 | kind << 8 | self.buttons
+
+    def move(self, x: int, y: int, inside: bool = True) -> None:
+        self.x = max(0, min(config.VIDEO_WIDTH - 1, x))
+        self.y = max(0, min(config.VIDEO_HEIGHT - 1, y))
+        self.inside = inside
+
+    def button(self, number: int, down: bool) -> None:
+        """number 0 left, 1 right, 2 middle."""
+        before = self.buttons
+        self.buttons = self.buttons | 1 << number if down else self.buttons & ~(1 << number)
+        if self.buttons != before:
+            self._event(config.MOUSE_PRESS if down else config.MOUSE_RELEASE)
+
+    def wheel(self, up: bool) -> None:
+        self._event(config.MOUSE_WHEEL_UP if up else config.MOUSE_WHEEL_DOWN)
+
+    def _event(self, kind: int) -> None:
+        self.events.append(self._word(kind))          # a full queue drops the oldest
+        if self.interrupts is not None:
+            self.interrupts.raise_(config.IRQ_MOUSE)
+
+    def state(self) -> int:
+        return self._word() | (8 if self.inside else 0)
+
+    def next_event(self) -> int:
+        return self.events.popleft() if self.events else 0
+
+
 class Timer:
     """Input device at 0x7C: milliseconds since the last reset, wrapping at
     32 bits (C's clock()). It follows the computer's own clock, so a program
@@ -348,6 +390,7 @@ class DeviceBus:
         self.interrupts = InterruptController()
         self.keyboard = Keyboard(self.interrupts)
         self.timer = Timer(interrupts=self.interrupts)
+        self.mouse = Mouse(self.interrupts)
         self.claude = ClaudeDevice(screenshot=lambda: self._video.png(scale=2))
         self.hex_value = None          # None = nothing sent yet (display blank)
         self._wire()
@@ -395,6 +438,10 @@ class DeviceBus:
             return self.timer.read()
         if self.in_addr == config.CLAUDE_ADDR:
             return self.claude.read()
+        if self.in_addr == config.MOUSE_STATE_ADDR:
+            return self.mouse.state()
+        if self.in_addr == config.MOUSE_EVENT_ADDR:
+            return self.mouse.next_event()
         if self.in_addr == config.INT_ACK_ADDR:
             return self.interrupts.status()
         if self.in_addr == config.INT_ENABLE_ADDR:
@@ -434,6 +481,7 @@ class DeviceBus:
         self.hex_value = None
         self.display.clear()
         self.keyboard.clear()
+        self.mouse.reset()
         self.video.clear()
         self.video.used = False
         self.timer.reset()
