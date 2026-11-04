@@ -35,6 +35,36 @@ which `claude` on Tynix talks to the Claude API on the PC and lets Claude run
 commands on the CPU).
 Every ALU result goes to **R0**.
 
+## Why there is a simulator
+
+The project started as the circuit. Programs then grew past what the circuit
+can run, so most of the work moved to a Python simulator, for two reasons:
+
+* **Speed.** The circuit in Logisim-evolution runs a few hundred instructions
+  a second (TECHNICAL.md gives 160 a second); the simulator runs
+  about 100 million under pypy3. The C compiler's test programs, the OS and
+  the video player (about 50 million instructions a second) are out of
+  reach for the circuit: one full RGB-screen picture is 0.5 to 1 million
+  instructions.
+* **Missing parts.** Several things exist only in the simulator because they
+  were never built from gates: the disk, the Claude device, the timer's
+  wiring, the interrupts (Phase 6), and the 24-bit banks (the circuit still
+  has 16-bit banks, so programs built now do not run on it;
+  [TECHNICAL.md](TECHNICAL.md) §2.4 and §2.6 list what is left to wire).
+
+The simulator was written from the ISA, so the circuit stays the ground truth:
+
+* the behaviours the ISA did not settle (the carry flag, the float special
+  cases, which input `NOT` inverts) were measured on the circuit with the
+  `diag` programs in `compiler/examples/asm/tests/`, and the simulator copies
+  what was measured (`TWEAKS` in `cpu_sim/src/config.py` marks each one
+  confirmed or guess);
+* `logisim/microcode/verify.py` checks the control table against the
+  circuit's gates, for every instruction, step and flag combination;
+* `logisim/run_rom.py` runs a ROM on the real circuit, headless (16-bit
+  builds only), and `compiler/examples/c/tests/circuit_test.c` checks the C
+  compiler's code that way.
+
 ## Requirements
 
 * Python 3.10+, standard library only

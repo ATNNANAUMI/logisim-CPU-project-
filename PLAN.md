@@ -332,6 +332,19 @@ redirection.
 **Verdict: do it, with (b).** It is the biggest change in phase B, and the
 one that makes the tools compose.
 
+**Done 2026-11-03, with (b), and more than planned.** Kernel pipes as
+above (`SYS_PIPE`, `W_PIPE`, status 141; `pipe()` and `fdopen()` in the
+library). The shell got a whole small POSIX sh at the same time, since
+scripts and aliases were the next wish: `;` `&&` `||` `!`, `if` `while`
+`until` `for` `case`, `{ }` `( )`, functions with `local` and `return`,
+`$( )`, `$(( ))`, `${..}` forms, `* ? [..]`, `~`, `#` comments, `test`,
+`read`, `shift`, `break`/`continue`, `exit`, `eval`, `alias`, `type`,
+continuation lines, `sh FILE ARGS` and `#!/bin/sh` scripts, `~/.profile`.
+Built-ins in a pipeline are v2 from the start: they run in a new shell
+(`sh -S STATE -c TEXT`) that gets the variables, functions and aliases
+through a file in /tmp. `more` reads stdin with no path. Check: the disk
+suite's `scripting`. TECHNICAL §11 ("The language"), `tynix/README.md`.
+
 ---
 
 ## C. Simulator window

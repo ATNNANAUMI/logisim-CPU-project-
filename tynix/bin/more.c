@@ -1,7 +1,7 @@
 /* more.c - show text files a page at a time (a program for Tynix, in /bin)
  *
  *   python tynix/make_disk.py              (builds it into /bin)
- *   (in the shell)   more [-n N] file...
+ *   (in the shell)   more [-n N] file...     or   command | more
  *
  * Shows N lines (default PAGE_LINES), then the prompt
  *   --more-- (space: page, Enter: line, q: quit)
@@ -9,7 +9,8 @@
  * the next page, Enter one more line, q stops (so does Ctrl-D, Tynix's
  * end of input). With several files each starts under a "::::: name" line.
  * When stdout goes to a file (`more a.txt > b.txt`) it only copies the
- * files, no prompt. A binary file (a program) is refused.
+ * files, no prompt. A binary file (a program) is refused. With no file and
+ * stdin not the keyboard (`ls -l /bin | more`, `more < f`), it pages stdin.
  *
  * PAGE_LINES is a guess: the circuit's TTY has cols=64 and no rows
  * attribute, so Logisim's default of 8 rows applies, and 7 lines plus the
@@ -116,11 +117,19 @@ int main(int argc, char **argv)
         }
         i = 3;
     }
+    tty = isatty(1);
+    if (i >= argc && !isatty(0)) {      /* a pipe or a file as stdin */
+        int c;
+        while (!quit && (c = getchar()) != EOF)
+            quit = !emit(c);
+        if (tty && col > 0)
+            printf("\n");
+        return 0;
+    }
     if (i >= argc) {
         printf("usage: more [-n N] file...\n");
         return 1;
     }
-    tty = isatty(1);
     files = argc - i;
     for (; i < argc && !quit; i++)
         status |= show(argv[i], files > 1);

@@ -405,8 +405,14 @@ lets the others run; `set_foreground(pid)`; `tasks(buf, max)` fills
 file and stops the CPU. `isatty(fd)` (not standard in what it covers) says whether
 `fd` 0, 1 or 2 is the console: 1 is not when the shell's `>` gave the program a
 file, 0 is not when it was started with a `stdin` file (`spawn_io`), so a program can leave out a prompt that would end up in the file
-(`more` does). `tynix/shell.c` (TECHNICAL §11) is the shell built on these.
-`errno.h` gained `ESRCH EIO ECHILD EAGAIN ENOMEM ENFILE ENOSYS` with Linux's
+(`more` does). `pipe(fds)` makes a kernel pipe: `fds[0]` reads what
+`fds[1]` writes, 256 words held; a read waits for words (0 once every write
+end is closed), a write waits for room, and a program that writes to a pipe
+nobody reads ends with status 141. `fdopen(fd, mode)` (POSIX, declared in
+`unistd.h`) wraps such an end in a `FILE`, for `spawn_io` and `fclose`; a
+program in a pipeline is just started with an end as its stdin or stdout.
+`tynix/shell.c` (TECHNICAL §11) is the shell built on these.
+`errno.h` gained `ESRCH EIO ECHILD EAGAIN ENOMEM ENFILE ENOSYS EPIPE` with Linux's
 messages.
 
 **stdlib.h:** `malloc`, `calloc`, `realloc`, `free` (first fit, from

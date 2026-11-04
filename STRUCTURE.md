@@ -86,7 +86,7 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       25 checks (incl. snapshot (primes, the kernel + disk), environment (export, $NAME, PATH, /etc/profile, setenv inherited), claude (tynix/bin/claude.c + the device, fake backend), batch (sh -c, run), abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/bin/ed.c, tynix/bin/edit.c, the nine tools)
+│   │   └── selftest.py       26 checks (incl. scripting (the shell's language, pipes, #!/bin/sh), snapshot (primes, the kernel + disk), environment (export, $NAME, PATH, /etc/profile, setenv inherited), claude (tynix/bin/claude.c + the device, fake backend), batch (sh -c, run), abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/bin/ed.c, tynix/bin/edit.c, the nine tools)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), memory.asm (memcpy, memset), setjmp.asm,
 │   │                         interrupt.asm (vector stubs; a kernel's stack and task switch); include/sys/tynix.h (system calls, TEX2)
@@ -125,9 +125,13 @@ logisim-CPU-project-/
 │   │                         at 0x1100000), round robin on the timer (tickless), system calls (TRAP), the only fs.c,
 │   │                         keyboard and screen focus, NMI menu (1 kill, 2 continue, 3 background, 4 tasks), FAULT = 139
 │   ├── shell.c               /bin/sh: prompts with the current directory; built-ins help ls cd pwd cat echo rm mv cp
-│   │                         mkdir rmdir df clear halt jobs fg kill wait run set export env unset (> and >> to a file, < from
-│   │                         one, $NAME ${NAME} $?); any other name runs NAME from $PATH's folders (or a path) and waits, or not
-│   │                         with & at the end; sh -c LINE: one line; runs /etc/profile at start; Up/Down history, Tab completion
+│   │                         mkdir rmdir df clear halt jobs fg kill wait run/source/. set export env unset local alias
+│   │                         unalias type test [ true false read shift break continue return exit eval (> >> <);
+│   │                         any other name runs NAME from $PATH's folders (or a path; #!/bin/sh scripts too) and waits,
+│   │                         or not after &. A small POSIX sh: | (kernel pipes) ; && || ! if while until for case { } ( )
+│   │                         NAME() { }, $NAME ${..} $( ) $(( )) * ? [..] ~, # comments; a pipeline stage that is not a
+│   │                         program runs in sh -S STATE -c TEXT. sh FILE ARGS, sh -c TEXT; runs /etc/profile and
+│   │                         ~/.profile at start; Up/Down history, Tab completion, "> " for unfinished lines
 │   ├── bin/                  sources of the OS's own programs for /bin (built --exe by make_disk.py; see bin/README.md)
 │   │   ├── ed.c              a line editor for text files (a, i, c, d, p, s, /find, w, q)
 │   │   ├── edit.c            a full-screen editor on the RGB screen (arrows, ^S save, ^Q quit)

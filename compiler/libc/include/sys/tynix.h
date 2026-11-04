@@ -40,6 +40,7 @@
 #define SYS_STATVFS 30      /* (path, struct statvfs *) */
 #define SYS_RECLAIM 31      /* -> blocks freed */
 #define SYS_LENGTH 32       /* (fd) -> the file's length (chars or words) */
+#define SYS_PIPE 33         /* (int fds[2]) -> 0; fds[0] reads what fds[1] writes (256 words held) */
 /* keyboard and screen */
 #define SYS_GETKEY 40       /* (wait) -> a key, or 0 (no wait and none typed) */
 #define SYS_WAITFG 41       /* sleep until this program is in the foreground */

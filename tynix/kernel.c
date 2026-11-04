@@ -34,6 +34,12 @@
  *   NMI        (Esc) on the foreground program: 1 kill, 2 continue,
  *              3 background (the shell gets the keyboard back), 4 tasks.
  *              A kill that arrives inside a system call waits for its end.
+ *   pipes      SYS_PIPE gives two numbers, a read end and a write end of a
+ *              256-word ring buffer (the shell's `a | b`). Reading an empty
+ *              pipe sleeps until a write, or gives 0 (the end) once no write
+ *              end is open; writing to a full one sleeps until a read. A
+ *              program that writes to a pipe nobody reads any more ends with
+ *              status 141 (Unix's SIGPIPE).
  *   FAULT      a program that runs past its stack ends with status 139.
  */
 #include <stdio.h>
@@ -67,6 +73,9 @@ int _loads_programs = 1;        /* the C compiler keeps this program's heap belo
 #define SH_PID 1
 #define STATUS_KILLED 130
 #define STATUS_FAULT 139
+#define STATUS_PIPE 141          /* wrote to a pipe with no reader */
+#define MAX_PIPES 16
+#define PIPE_WORDS 256
 
 #define FREE 0                  /* task states (TASK_READY ... in sys/tynix.h) */
 #define W_NONE 0                /* what a blocked task waits for */
@@ -74,6 +83,7 @@ int _loads_programs = 1;        /* the C compiler keeps this program's heap belo
 #define W_CHILD 2
 #define W_SLEEP 3
 #define W_FG 4
+#define W_PIPE 5                /* a read of an empty pipe, a write to a full one */
 
 struct ctx { unsigned esp, ebp, limit; };   /* interrupt.asm reads and writes these */
 
@@ -86,17 +96,29 @@ struct task {
     int status;                 /* a zombie's exit status */
     unsigned base, words;       /* the region (0: none) */
     int exclusive;              /* a TEX1 program: nobody else runs meanwhile */
-    int kill_pending;
+    int kill_pending;           /* the status it ends with at the end of the system call, or 0 */
+    struct pipe *pipe;          /* W_PIPE: the pipe, */
+    int pipe_writes;            /* 1 for a write, 0 for a read, */
+    unsigned *pipe_buf;         /* the program's words, */
+    int pipe_n, pipe_done;      /* how many, and (a write) how many went in so far */
     int fd[MAX_FDS];            /* object number + 1; fd 1 = 0: the display */
     unsigned block[B_WORDS];
     char name[32];
     char cwd[_FS_PATH];
 };
 
-struct obj {                    /* an open file or directory, shared by fds */
+struct obj {                    /* an open file, directory or end of a pipe, shared by fds */
     int refs;
     FILE *file;
     DIR *dir;
+    struct pipe *pipe;
+    int writer;                 /* a pipe's write end */
+};
+
+struct pipe {                   /* SYS_PIPE: words written at one end, read at the other */
+    int used, readers, writers; /* writers: the write ends open (0: a read gives the end) */
+    int head, count;            /* the oldest word, how many wait */
+    unsigned buf[PIPE_WORDS];
 };
 
 extern struct ctx *_int_cur, *_int_next;   /* interrupt.asm */
@@ -104,6 +126,7 @@ extern unsigned _int_kstack, _int_klimit, _int_depth;
 
 static struct task table[MAX_TASKS];        /* table[0] is the idle task */
 static struct obj objs[MAX_OBJS];
+static struct pipe pipes[MAX_PIPES];
 static struct task *cur;
 static struct ctx boot;                     /* where main() ran: left at the first switch */
 static int fg_pid;                          /* the program that has the keyboard and screen */
@@ -179,15 +202,31 @@ static int new_obj(FILE *file, DIR *dir)
             objs[i].refs = 1;
             objs[i].file = file;
             objs[i].dir = dir;
+            objs[i].pipe = 0;
+            objs[i].writer = 0;
             return i;
         }
     return -1;
 }
 
+static void pipe_kick(struct pipe *p);
+
 static void drop_obj(int i)
 {
+    struct pipe *p = objs[i].pipe;
     if (--objs[i].refs > 0)
         return;
+    if (p) {                            /* an end of a pipe closes */
+        objs[i].pipe = 0;
+        if (objs[i].writer)
+            p->writers--;
+        else
+            p->readers--;
+        if (p->readers + p->writers == 0)
+            p->used = 0;
+        else
+            pipe_kick(p);               /* a reader gets the end, a writer status 141 */
+    }
     if (objs[i].file)
         fclose(objs[i].file);
     if (objs[i].dir)
@@ -241,6 +280,155 @@ static void close_all(void)
             objs[i].refs = 1;
             drop_obj(i);
         }
+}
+
+/* ---------------------------------------------------------------- pipes */
+
+/* up to n words out of p into buf; how many */
+static int pipe_take(struct pipe *p, unsigned *buf, int n)
+{
+    int k = 0;
+    while (k < n && p->count) {
+        buf[k++] = p->buf[p->head];
+        p->head = (p->head + 1) % PIPE_WORDS;
+        p->count--;
+    }
+    return k;
+}
+
+/* up to n words of buf into p; how many fitted */
+static int pipe_put(struct pipe *p, unsigned *buf, int n)
+{
+    int k = 0;
+    while (k < n && p->count < PIPE_WORDS) {
+        p->buf[(p->head + p->count) % PIPE_WORDS] = buf[k++];
+        p->count++;
+    }
+    return k;
+}
+
+/* the programs asleep on p go on when they can: a reader when words came
+   or the last writer closed (0: the end), a writer when there is room, or
+   ends with status 141 when the last reader closed. Until nothing moves:
+   room a reader made lets a writer in, and its words a reader out. */
+static void pipe_kick(struct pipe *p)
+{
+    int i, moved = 1, k;
+    while (moved) {
+        moved = 0;
+        for (i = 1; i < MAX_TASKS; i++) {
+            struct task *t = &table[i];
+            if (t->state != TASK_BLOCKED || t->wait != W_PIPE || t->pipe != p || t->kill_pending)
+                continue;
+            if (!t->pipe_writes) {
+                if (p->count) {
+                    answer(t, pipe_take(p, t->pipe_buf, t->pipe_n));
+                    moved = 1;
+                } else if (p->writers == 0)
+                    answer(t, 0);
+            } else if (p->readers == 0) {
+                t->kill_pending = STATUS_PIPE;
+                kills = 1;
+            } else {
+                k = pipe_put(p, t->pipe_buf + t->pipe_done, t->pipe_n - t->pipe_done);
+                t->pipe_done += k;
+                if (k)
+                    moved = 1;
+                if (t->pipe_done == t->pipe_n)
+                    answer(t, t->pipe_n);
+            }
+        }
+    }
+}
+
+static void pipe_sleep(struct task *t, struct obj *o, unsigned *buf, int n, int done)
+{
+    t->pipe = o->pipe;
+    t->pipe_writes = o->writer;
+    t->pipe_buf = buf;
+    t->pipe_n = n;
+    t->pipe_done = done;
+    block_on(t, W_PIPE);
+}
+
+/* SYS_READ on a pipe: the words there (at most n), or sleep until some come */
+static int pipe_read(struct task *t, struct obj *o, unsigned *buf, int n)
+{
+    struct pipe *p = o->pipe;
+    int k;
+    if (o->writer)
+        return -EBADF;
+    if (n <= 0)
+        return 0;
+    if (p->count) {
+        k = pipe_take(p, buf, n);
+        pipe_kick(p);                   /* a writer waiting for room */
+        return k;
+    }
+    if (p->writers == 0)
+        return 0;                       /* the end */
+    pipe_sleep(t, o, buf, n, 0);
+    return 0;
+}
+
+/* SYS_WRITE on a pipe: all n words, sleeping while it is full */
+static int pipe_write(struct task *t, struct obj *o, unsigned *buf, int n)
+{
+    struct pipe *p = o->pipe;
+    int k;
+    if (!o->writer)
+        return -EBADF;
+    if (p->readers == 0) {
+        if (t->pid != SH_PID) {         /* SIGPIPE; the shell itself only hears EPIPE */
+            t->kill_pending = STATUS_PIPE;
+            kills = 1;
+        }
+        return -EPIPE;
+    }
+    k = pipe_put(p, buf, n);
+    pipe_kick(p);                       /* a reader waiting for words */
+    if (k < n)
+        pipe_sleep(t, o, buf, n, k);
+    return n;
+}
+
+/* SYS_PIPE: fds[0] the read end, fds[1] the write end */
+static int sys_pipe(struct task *t, int *fds)
+{
+    int i, r, w, fr, fw;
+    struct pipe *p = 0;
+    for (i = 0; i < MAX_PIPES; i++)
+        if (!pipes[i].used) {
+            p = &pipes[i];
+            break;
+        }
+    if (p == 0)
+        return -ENFILE;
+    if ((r = new_obj(0, 0)) < 0)
+        return -ENFILE;
+    p->used = 1;
+    p->head = p->count = 0;
+    p->readers = 1;
+    p->writers = 0;
+    objs[r].pipe = p;
+    if ((fr = new_fd(t, r)) < 0)
+        return fr;                      /* new_fd dropped it: the pipe is free again */
+    if ((w = new_obj(0, 0)) < 0) {
+        drop_obj(t->fd[fr] - 1);
+        t->fd[fr] = 0;
+        return -ENFILE;
+    }
+    p->writers = 1;
+    objs[w].pipe = p;
+    objs[w].writer = 1;
+    if ((fw = new_fd(t, w)) < 0) {
+        drop_obj(t->fd[fr] - 1);
+        t->fd[fr] = 0;
+        return fw;
+    }
+    fds[0] = fr;
+    fds[1] = fw;
+    return 0;
 }
 
 /* ---------------------------------------------------------------- memory */
@@ -417,7 +605,7 @@ static unsigned finish_timer(int rotate, int force)
         kills = 0;
         for (i = 1; i < MAX_TASKS; i++)
             if (table[i].kill_pending)
-                kill_now(&table[i], STATUS_KILLED);
+                kill_now(&table[i], table[i].kill_pending);
     }
     if (rotate || cur->state != TASK_READY || cur == &table[0] || ex)
         run(pick());
@@ -477,9 +665,9 @@ static int load_program(struct task *parent, const char *path, char **argv, int 
        the file SPAWN_IN gives, or the caller's (a file only when it has one) */
     struct obj *out = parent ? obj_of(parent, out_fd) : 0;
     struct obj *in = parent ? obj_of(parent, in_fd) : 0;
-    if (out_fd != 1 && (out == 0 || out->file == 0))
+    if (out_fd != 1 && (out == 0 || (out->file == 0 && (out->pipe == 0 || !out->writer))))
         return -EBADF;
-    if (in_fd && (in == 0 || in->file == 0))
+    if (in_fd && (in == 0 || (in->file == 0 && (in->pipe == 0 || in->writer))))
         return -EBADF;
     if (_fs_lookup(path, &node))
         return -errno;
@@ -687,7 +875,9 @@ static int file_call(struct task *t, unsigned n, unsigned a, unsigned b, unsigne
         t->fd[fd] = 0;
         return 0;
     case SYS_READ:
-        if ((o = obj_of(t, a)) == 0 || o->file == 0)
+        if ((o = obj_of(t, a)) != 0 && o->pipe)
+            return pipe_read(t, o, (unsigned *)b, c);
+        if (o == 0 || o->file == 0)
             return -EBADF;
         r = fread((void *)b, 1, c, o->file);
         return ferror(o->file) ? -EIO : r;
@@ -701,6 +891,8 @@ static int file_call(struct task *t, unsigned n, unsigned a, unsigned b, unsigne
             }
             return -EBADF;
         }
+        if (o->pipe)
+            return pipe_write(t, o, (unsigned *)b, c);
         if (o->file == 0)
             return -EBADF;
         {                                       /* not fwrite: it stops at a word of -1 (EOF) */
@@ -754,6 +946,8 @@ static int file_call(struct task *t, unsigned n, unsigned a, unsigned b, unsigne
             return -ERANGE;
         strcpy((char *)a, t->cwd);
         return 0;
+    case SYS_PIPE:
+        return sys_pipe(t, (int *)a);
     case SYS_RECLAIM:
         for (r = 0; r < MAX_OBJS; r++)          /* lengths on the disk first: it trusts them */
             if (objs[r].refs && objs[r].file)
@@ -870,7 +1064,7 @@ static unsigned on_irq(void)
 static void list_tasks(void)
 {
     static const char *const states[] = {"", "ready", "waiting", "ended"};
-    static const char *const waits[] = {"", " (keys)", " (child)", " (sleep)", " (screen)"};
+    static const char *const waits[] = {"", " (keys)", " (child)", " (sleep)", " (screen)", " (pipe)"};
     int i;
     for (i = 1; i < MAX_TASKS; i++) {
         struct task *t = &table[i];
@@ -899,9 +1093,10 @@ static unsigned on_nmi(void)
         list_tasks();
     }
     if (c == '1') {
-        if (_int_depth > 1)
-            t->kill_pending = kills = 1;    /* inside a system call: at its end */
-        else
+        if (_int_depth > 1) {
+            t->kill_pending = STATUS_KILLED;    /* inside a system call: at its end */
+            kills = 1;
+        } else
             kill_now(t, STATUS_KILLED);
     } else if (c == '3') {
         p = task_of(t->parent);

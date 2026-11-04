@@ -1436,7 +1436,10 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 25 checks: `snapshot` (primes.c and the kernel with a disk saved
+python compiler/src/disk/selftest.py  # 26 checks: `scripting` (the shell's language under the kernel:
+                                      # a #!/bin/sh script, loops, break 2, functions, local, $( ), $(( )),
+                                      # *, pipes of programs and built-ins, a writer ending with 141,
+                                      # & on a pipeline, "> " lines, /tmp left empty), `snapshot` (primes.c and the kernel with a disk saved
                                       # mid-run, loaded, both to HALT alike; the changed-disk warning;
                                       # --save-state/--load-state), `environment` (export/set/unset/env, $NAME ${NAME} $?, quotes,
                                       # PATH order, /etc/profile, getenv/setenv/unsetenv in a
@@ -1927,7 +1930,7 @@ task-switch words). `_Exit` is in the generated crt0.
 | `sys.asm` | `_syscall(n, a, b, c, d)`: `TRAP` with R1 = n, R2..R5 = a..d, the answer in R0 |
 | `sys.c` | `_tx_start` (crt0 calls it), `_tx_call` (a negative answer -> -1 and `errno`), stdout to fd 1 (`fflush(stdout)` sends what it kept back), stdin from fd 0 when it is a file, `environ` (the block's `B_ENV`) |
 | `env.c` | `getenv`, `setenv`, `unsetenv` as in `compiler/libc/env.c`, and every change points the block's `B_ENV` at the program's own list, so the programs it starts inherit it |
-| `fs.c` | `fopen` & co., `remove`, `rename`, `stat`, `statvfs`, `fs_reclaim` as system calls; a `FILE` is the kernel's file number with a 64-word buffer (`fd`, `buf` in `local.h`) |
+| `fs.c` | `fopen` & co., `remove`, `rename`, `stat`, `statvfs`, `fs_reclaim` as system calls; a `FILE` is the kernel's file number with a 64-word buffer (`fd`, `buf` in `local.h`), 16 open per program; `pipe()`, and `fdopen()` to wrap a pipe's end in a `FILE` |
 | `dir.c` | `mkdir`, `rmdir`, `chdir`, `getcwd`, `opendir`/`readdir`/`closedir` as system calls (4 directories open per program) |
 | `spawn.c` | `spawnv`, `spawnv_to`, `spawn`, `spawn_to`, `spawn_io` (stdin from a file too, `SPAWN_IN(fd)`), `waitpid`, `kill`, `getpid`, `yield`, `set_foreground`, `tasks`, `halt_os` (`<unistd.h>`) |
 | `cpu.c` | the keyboard through the kernel (`key_pressed`, `wait_key`, getchar's `_read_key`: only the foreground program gets keys, and the waiting ones sleep), `wait_ms` sleeps, `_gfx_hold` (each `gfx_` call waits for the foreground), `gfx_lost()` |
@@ -1999,8 +2002,8 @@ With no disk, or no `/bin/sh`, the kernel says so and halts.
 
 | file | what it is |
 | --- | --- |
-| `tynix/kernel.c` | the OS's ROM: tasks, memory, scheduling, system calls, the filesystem, keyboard and screen focus, the NMI menu (21,879 words of ROM, 38,095 of RAM with its 8K-word stack and 16 task records) |
-| `tynix/shell.c` | the shell, `/bin/sh` (17,283 words): built-ins, programs from `/bin`, `&`, `jobs`, `fg`, `kill`, `wait`, `run FILE`; `sh -c LINE` |
+| `tynix/kernel.c` | the OS's ROM: tasks, memory, scheduling, system calls, the filesystem, keyboard and screen focus, the NMI menu (23,640 words of ROM, 42,431 of RAM with its 8K-word stack, 16 task records and 16 pipes) |
+| `tynix/shell.c` | the shell, `/bin/sh` (54,779 words): built-ins, programs from `/bin`, `&`, `jobs`, `fg`, `kill`, `wait`; a small POSIX sh language (pipes, `;` `&&` `\|\|`, `if` `while` `for` `case`, functions, `$( )`, `$(( ))`, `*`, aliases, scripts with `#!/bin/sh`); `sh FILE`, `sh -c TEXT` |
 | `tynix/bin/ed.c` | a line editor for text files, a program for `/bin` (15.8K words; section 11.1) |
 | `tynix/bin/edit.c` | a full-screen editor on the RGB screen, a program for `/bin` (section 11.2) |
 | `tynix/bin/more.c` | show text files a page at a time, a program for `/bin` (11.3; 12.4K words) |
@@ -2055,7 +2058,7 @@ full speed (the simulator's `run()` keeps one chunk, 3.2). With nothing ready
 the idle task executes `WAIT`.
 
 **Waiting.** A system call that has to wait (a key, a child's end, a time, the
-foreground) marks the program blocked and returns to another one; whoever
+foreground, a pipe) marks the program blocked and returns to another one; whoever
 ends the wait (the keyboard interrupt, the end of the child, the timer) writes
 the answer into the waiting program's saved R0 and marks it ready. So one
 kernel stack is enough: kernel code never sleeps.
@@ -2071,11 +2074,27 @@ kernel stack is enough: kernel code never sleeps.
 | `tasks(buf, max)`, `foreground(pid)`, `halt` | `struct task_info` for `jobs`; the keyboard and screen to that program; close every file and stop |
 | `open close read write seek length` | files by number: fd 0 stdin (nothing: the keyboard, through `getkey`; or a file), 1 stdout (the display, or a file), 2 the display, 3 and up opened files, 16 per program, 32 in all (each a `FILE` of the kernel's `fs.c`, shared by the fds that point to it) |
 | `stat remove rename mkdir rmdir chdir getcwd opendir readdir statvfs reclaim` | the filesystem, with each program's own current directory |
+| `pipe(fds)` | two fds: `fds[0]` reads what `fds[1]` writes (below) |
 | `getkey(wait)`, `waitfg` | the keyboard (only the foreground program's call reads it; a background one waits), wait to be the foreground |
 
 A negative answer is `-errno`. A `key_pressed()` costs about 390 instructions
 (the interrupt entry and exit are most of it; the kernel answers it before
 anything else).
+
+**Pipes** (2026-11-03). `pipe()` makes two objects next to the open files,
+a read end and a write end of one 256-word ring buffer (16 pipes in all).
+`read` on an empty pipe sleeps (wait kind `W_PIPE`) until a write comes, or
+answers 0, the end, once the write end is closed (every program holding it
+ended or closed it); `write` puts what fits and sleeps until a read makes
+room for the rest. Whoever moves words wakes the other side
+(`pipe_kick()`, which repeats until nothing moves). A write to a pipe whose
+read end is closed ends the writer with status 141 (Unix's SIGPIPE, done
+like the NMI's kill: `kill_pending` holds the status and `finish()` ends the
+task at the end of the call); the shell (pid 1) only gets `EPIPE`. A pipe's
+end is given to a program as its stdin or stdout with `spawn` (`out_fd`,
+`SPAWN_IN`), so programs need no change: their `getchar` and `printf` go
+through `read` and `write` already when stdin or stdout is not the
+keyboard or display. `seek` and `length` on a pipe are `EBADF`.
 
 **The filesystem is only in the kernel.** Each program used to link its own
 `fs.c`, with its own idea of the disk (a cache of the last chain, the
@@ -2120,25 +2139,27 @@ disk (`_fs_forget()`). Its heap is not bounded by the kernel (its crt0 says the
 end of RAM): rebuild it.
 
 At start the shell prints its banner, then prompts with the current
-directory (`/docs> `), reads a line (below), splits it into words at spaces (`"..."` and `'...'` keep
-spaces in one word; the quotes go), takes out `> FILE` or `>> FILE`, `<
-FILE`, and a last word `&`. The first word picks the command. Each of `>`,
-`>>` and `<` must start a word (`cat </a.txt` works, `cat</a.txt` is one
-word; `<<` is an ordinary word, so `calc 1 << 2` needs no quotes, while
-`calc "256 >> 4"` does). When its stdin is a file and not the keyboard (`sh < script.txt`,
-`isatty(0)` is 0) the shell prints no banner and no prompt, runs the lines
-it reads and, at the end of the file, ends with the last one's status
-instead of halting the CPU.
+directory (`/docs> `) and reads a line (below). What it reads is a text in a
+small POSIX sh language (the next part, **The language**): words split at
+spaces (`"..."` and `'...'` keep spaces in one word, `\` the next char; the
+quotes go), the operators `; & | && || ( ) < > >>` (they end a word:
+`cat</a.txt` works; `<<` is an ordinary word, so `calc 1 << 2` needs no
+quotes, while `calc "256 >> 4"` and `calc "6 & 3"` do), `#` comments. The
+first word of a command picks it: an alias, a function, a built-in, else a
+program. When its stdin is a file and not the keyboard (`sh < script.txt`,
+`isatty(0)` is 0) the shell prints no banner and no prompt, reads the whole
+input, runs it as a script and ends with the last command's status instead
+of halting the CPU.
 
 Built-in commands (the `commands[]` table, which `help` also prints):
 
 | command | what it does |
 | --- | --- |
 | `help` | the commands, then the programs in `/bin` |
-| `ls [-l] [path...]` | the names (directories end in `/`), two spaces apart, wrapped at 64 columns (the circuit's TTY); `-l`: one a line with its size (chars for a text file, words for a binary one) or `<dir>`. A file's path prints its name |
+| `ls [-l] [path...]` | the names (directories end in `/`), two spaces apart, wrapped at 64 columns (the circuit's TTY), or one a line without the `/` when the output is a file or a pipe (`ls > f`, `ls \| while read f`); `-l`: one a line with its size (chars for a text file, words for a binary one) or `<dir>`. A file's path prints its name |
 | `cd [dir]`, `pwd` | `chdir` (no argument: `/`), `getcwd` |
-| `cat [file...]` | the files; it stops at a char over 255, which only a binary file has ("a binary file (a program?)"). With no file, the keyboard up to Ctrl-D, then `clearerr(stdin)` so the prompt reads again: `cat > notes.txt` writes a file |
-| `echo [word...]` | the words, one space apart |
+| `cat [file...]` | the files; it stops at a char over 255, which only a binary file has ("a binary file (a program?)"). With no file, the `<` file, or else stdin (the keyboard, or a pipe) up to Ctrl-D, then `clearerr(stdin)` so the prompt reads again: `cat > notes.txt` writes a file |
+| `echo [-n] [word...]` | the words, one space apart (`-n`: no newline after them) |
 | `rm path...` | `remove`: files and empty directories |
 | `mv from to` | `rename`; into `to` when that is a directory |
 | `cp from to` | a copy; into `to` when that is a directory. `stat()` says whether the source is a text file or binary (`fopen` `"r"`/`"w"` or `"rb"`/`"wb"`), so a program in `/bin` copies and still runs. Not a directory; copying a file onto itself is refused ("are the same file") |
@@ -2154,19 +2175,30 @@ Built-in commands (the `commands[]` table, which `help` also prints):
 | `export [NAME[=value]...]` | puts variables in the environment (`setenv`), which every program started from then on inherits; `export NAME` moves a `set` variable there. Alone, lists the environment |
 | `env` | lists the environment (`NAME=value` a line) |
 | `unset NAME...` | forgets shell variables and environment variables |
-| `run file` | the lines of a text file as if typed (a batch file): blank lines and lines starting with `#` are left out, the status is the last line's. `run file > out` sends their output to `out` (a program among them too); a `>` inside a line still wins. 8 deep at most (a file that runs itself). A line over 255 chars stops the run (status 1) instead of being cut into two commands |
+| `run file [arg...]`, `source`, `.` | the text of a file run in this shell (so what it sets stays: `/etc/profile` is run so), `$1 ...` the args if given; the status is the last command's, or `return N`'s. `run file > out` sends its output to `out` (a program in it too) |
+| `local NAME[=v]...` | in a function: variables that get their old value back when it returns |
+| `alias [NAME[=text]...]`, `unalias NAME... \| -a` | an alias: a command whose first word is NAME (as typed, unquoted) runs `text` followed by the rest of its words, in this shell (so `alias ll='ls -l'`, `alias up='cd ..; ls'`); not again inside its own text. Alone, lists them as `alias NAME='text'` |
+| `type NAME...` | an alias (its text), a function, a built-in, or the path of the program `PATH` finds |
+| `test EXPR`, `[ EXPR ]` | status 0 if true, 1 if false, 2 for a bad expression: `-e -f -d -s FILE` (`-r -w -x` are `-e`: no permissions), `-z -n TEXT`, `= != < >` (text), `-eq -ne -lt -le -gt -ge` (integers, `0x` too), `!`, `-a`, `-o`, `( )`; one word: true if not empty |
+| `true`, `false`, `:` | status 0, 1, 0 |
+| `read [-r] [NAME...]` | a line of stdin (the keyboard, a pipe, or a `<` file, also one after `done`) into the variables, split at spaces, the last one getting the rest (no NAME: `REPLY`); `\x` is `x` unless `-r`. Status 1 at the end of the input |
+| `shift [n]` | drop `$1` (n arguments) |
+| `break [n]`, `continue [n]` | leave the loop (n loops), or start its next round |
+| `return [n]`, `exit [n]` | leave the function or the `run` file; end the shell (the prompt's: as Ctrl-D) or the script. Without n, the last command's status |
+| `eval word...` | the words joined by spaces, run as a text |
 
 A built-in writes to `out`: the display, or the file after `>` (`fopen`
 `"w"`, a text file) or `>>` (`"a"`), closed after the command. Error
 messages always go to the display. A command with the wrong arguments
-prints its usage. A built-in can't run in the background (`&` is ignored with a
-message).
+prints its usage (status 2). A built-in after `&`, or in a pipeline, runs in
+a new shell (below).
 
 Any other first word is a program: a word with a `/` is a path (relative
 ones start at the current directory), else `/bin/NAME`. `spawn_to(path,
 words, out, SPAWN_FG)` loads it and runs it in the current directory with the
 words as `argv`, and the shell waits for it (`waitpid`). When it ends, the shell prints `[NAME: exit status N]`
-if N isn't 0 (130 killed, 139 past its stack). If it can't be loaded the shell says `NAME: no such command`
+if N isn't 0 (130 killed, 139 past its stack, 141 a pipe's reader gone), at the end of the `&& ||` list, and
+not when something tested it (`if`, `while`, `&&`, `||`, `!`). If it can't be loaded the shell says `NAME: no such command`
 (a plain name not in `/bin`) or the path and `strerror` (`Exec format
 error` for a text file, `Is a directory`, `Cannot allocate memory`). `>` and `>>` work after a
 program too: the shell opens the file and passes it as the program's stdout
@@ -2184,14 +2216,16 @@ at once; `getchar`, `fgets` and `scanf` read the file without echo and get
 from the keyboard. A missing file or a directory is an error before
 anything starts (`NAME: FILE: No such file or directory`, status 1); `<` and
 `>` combine (`prog < in.txt > out.txt`). Of the built-ins only a bare `cat`
-reads stdin, so `cat < FILE` is `cat FILE`; any other built-in with `<`
-says `NAME: < works for programs and a bare cat only` (status 2). Before
+and `read` read stdin; any other built-in with `<`
+says `NAME: < works for programs, a bare cat and read only` (status 2). Before
 starting a program the shell flushes its own stdout (`fflush`), since the
 program writes to the same file: `sh < script > out` keeps the lines in
 order.
 
-With `&` at the end of the line the shell doesn't wait: it prints `[pid] NAME
-&` and prompts again. Before each prompt it collects the background jobs
+With `&` after a command the shell doesn't wait: it prints `[pid] NAME
+&` and goes on (`$!` is that pid). A program alone is started so; anything
+else (a built-in, `a | b`, `a && b`, a loop) runs in a new shell, `[pid] sh
+&`, whose programs don't take the foreground (`sh -B`). Before each prompt it collects the background jobs
 that ended (`waitpid(-1, ..., WAIT_NOHANG)`) and prints `[pid] done: NAME, exit
 status N`. A program that never ends no longer keeps the CPU: the NMI menu or
 `kill` ends it, and the others run meanwhile.
@@ -2219,24 +2253,81 @@ window sends Tab as 9 (Shift-Tab stays with Tk).
 value of the shell variable (`set`) or else of the environment variable
 (`export`), or nothing; `$?` is the status of the last command line (a
 blank line leaves it); a `$` that names nothing stays a `$`. Inside `"..."`
-they expand too, inside `'...'` not. A value stays inside its word (it is
-never split at its spaces). The line with its values may be at most 512
-chars (`the line is too long with its $ values`). Names are letters, digits
+they expand too, inside `'...'` not. Outside quotes a value is split at its
+spaces into words (as in sh: quote `"$X"` to keep it one word). Names are letters, digits
 and `_`, not a digit first. At start the shell sets `PATH=/bin` and
 `HOME` (`/home/user` if it exists, else `/`) unless its environment already
 has them, and `PWD` (kept up to date by `cd`); an interactive shell then runs
 `/etc/profile` if there is one, as `run /etc/profile` (`make_disk.py` writes
-one: `export PATH=/bin:/home/user/bin`). A plain command name is looked for
+one: `export PATH=/bin:/home/user/bin`), then `$HOME/.profile` if there is
+one (the place for your aliases and functions). A plain command name is looked for
 in each folder of `PATH` (`:` between them) in order; if none has it, the
 error is the first folder's (`NAME: no such command`). A program gets a copy
 of its parent's environment (10.4): `getenv` reads it, `setenv`/`unsetenv`
 change the program's own copy and what its children get.
 
-`sh -c LINE` (Phase 8) runs that one line, with no banner and no prompt, and
-ends with its status (`usage: sh -c 'command line'`, status 2, without a
-line); a line is 255 chars at most, one command (there are no pipes or
-`;`; `<` works). Run with stdout or stdin files, it passes them on to the program it
-starts. That is how `claude` (11.5) runs Claude's commands.
+`sh -c TEXT [NAME ARG...]` (Phase 8) runs that text, with no banner and no
+prompt, and ends with its status (`usage: sh -c 'command line'`, status 2,
+without a text); NAME and ARG are `$0` and `$1 ...`. `sh FILE [ARG...]` runs a
+script the same way, with `$0` the file. Run with stdout or stdin files (or
+pipes), it passes them on to the programs it starts. That is how `claude`
+(11.5) runs Claude's commands.
+
+**The language** (2026-11-03). A text is lists of commands: `a ; b` (or a
+newline), `a & b`, `a && b`, `a || b`, `! a`, `a | b | c`. A command is a
+simple command (`NAME=value` words, then words, with `< > >>` anywhere), or a
+compound one, which may have `< > >>` after it: `if LIST; then LIST; [elif
+...;] [else LIST;] fi`, `while LIST; do LIST; done`, `until`, `for NAME [in
+WORDS]; do LIST; done` (no `in`: `"$@"`), `case WORD in PAT|PAT) LIST ;;
+... esac` (patterns as file names), `{ LIST; }`, `( LIST )`; or a function
+definition, `NAME() { LIST; }`, whose body runs with `$1 ... $# $@` its
+arguments. Words expand in this order: `~` (at the start: `$HOME`),
+`$NAME ${NAME} $? $# $@ $* $0 $1 ... $$ $!`, `${#NAME}`, `${NAME:-w}`
+`${NAME:=w}` `${NAME:+w}` `${NAME:?w}` (also without `:`, which then means unset
+only), `$(LIST)` and `` `LIST` `` (the output, last newlines off), `$((EXPR))`
+(32-bit integers with C's operators and precedence, no assignments; names
+are variables, empty 0); then the values not in quotes are split at spaces,
+tabs and newlines, and a word with an unquoted `* ? [...]` becomes the
+sorted paths that match (a name starting with `.` only for a pattern that
+does; none: the word stays as it is). `"$@"` is one word per argument.
+`NAME=value` alone sets a shell variable (or the exported one); before a
+command, it is in that command's environment only.
+
+How it runs: there is no syntax tree. A parser with a pointer into the text
+runs what it parses, unless `skip` is set, when it only finds the end; a loop
+goes back to where its condition or body starts, and a function keeps its
+body's text. A whole text (a typed line with its continuation lines, a
+script, a function's body, an alias's text, `$( )`, `eval`) is first parsed
+with `skip`, so a syntax error anywhere stops it before anything ran
+(`NAME: line N: unexpected 'done'`, status 2; at the prompt without the
+name and line). At the prompt a text that ends inside something (an open
+quote, `if` without `fi`, a `|` or `&&` last) asks for more lines with `> `
+(Ctrl-D drops it). `break`, `continue`, `return` and `exit` set a flag that
+makes the rest of the text parse with nothing run, until the loop, the
+function, the file or the shell they name.
+
+A pipeline starts every command at once: the shell makes a kernel pipe for
+each `|`, starts each command with its ends (`spawn_io` with `fdopen()`
+`FILE`s), closes its own copies, and waits for the last one (the foreground
+one; its status is the pipeline's) and then for the others. A built-in, an
+alias, a function or a compound command in a pipeline, after `&`, or in
+`( )` runs in a new shell, `/bin/sh [-B] -S STATE -c TEXT`, as Unix forks a
+subshell: STATE is a file in `/tmp` the shell writes just before, with `set
+-- ARGS`, `NAME='value'` for its variables, its aliases and its functions;
+the new shell runs it and deletes it. So `ls | while read f; do ...; done`
+works, but what such a command sets stays in that shell. `$( )` runs in this
+shell, with `base_out` (where commands write) a file in `/tmp`, read back and
+deleted; `exit` inside it ends only it. A text file named as a command whose
+first line is `#!PROGRAM [ARG]` runs as `PROGRAM [ARG] FILE ARGS` (`#!/bin/sh`:
+a script in a new shell; Esc can kill it); without `#!` it is still `Exec
+format error`. Limits, each with a message: 64 words and 4 redirections in a
+simple command (1,024 words after `*`), 8 commands in a pipeline, 64K chars
+in a script, 128 variables, 32 functions, 32 aliases, 64 `local`s, 24 levels
+of functions, `run`, `eval`, aliases and `$( )` inside each other (the C
+stack is 16K words). An endless loop typed at the prompt can't be stopped:
+the NMI goes to the program in front, and the shell is not one; in a script
+started with `sh FILE` or `./FILE` it is (Esc, kill). `tynix/README.md` has
+examples.
 
 Any program can start another now (`spawnv()`, `spawn()`): the child gets its
 own region, so the caller stays as it was. `visual_file_manager` (11.4) opens
@@ -2305,22 +2396,23 @@ comment (what, how built, usage), errors as `NAME: PATH: reason` (the
 status 1 (the shell then shows `[NAME: exit status 1]`), wrong arguments
 print the usage and exit 1. A tool that reads text refuses a binary file
 (`stat()` without `S_ISTEXT`, as `ed` does). The text display is 7-bit ASCII
-and 64 columns wide, so output uses plain characters. There are no pipes: tools
-take paths, and `>` works after a program (11). The tools that walk folders
+and 64 columns wide, so output uses plain characters. Tools take paths, and
+`>` and `|` work after a program (11); `grep` and `more` with no path read
+stdin, so `ls -l /bin | grep sh` and `primes | more` work. The tools that walk folders
 copy a folder's entry names, close it and then go into the subfolders, because
 only 4 directories can be open at once; the few helpers they share are copied
 into each file (a program for the OS has no shared code but the C library).
 
 | tool | usage | what it does, exit status |
 | --- | --- | --- |
-| `more` | `more [-n N] file...` | N lines (default `PAGE_LINES`), then `--more-- (space: page, Enter: line, q: quit)` and one key from `wait_key()` (no echo, no Enter; Ctrl-D quits too). With several files each starts under `::::: name`. A line over 64 chars counts for the rows it wraps to. With stdout redirected (`isatty(1)` false) it copies the files, no prompt. Exit 0, or 1 if a file failed |
+| `more` | `more [-n N] [file...]` | no file and stdin not the keyboard (a pipe, `<`): stdin. N lines (default `PAGE_LINES`), then `--more-- (space: page, Enter: line, q: quit)` and one key from `wait_key()` (no echo, no Enter; Ctrl-D quits too). With several files each starts under `::::: name`. A line over 64 chars counts for the rows it wraps to. With stdout redirected (`isatty(1)` false) it copies the files, no prompt. Exit 0, or 1 if a file failed |
 | `grep` | `grep [-i] [-n] [-v] text [path...]` | the lines containing `text` (plain text, no regex; flags may be joined, `-in`). A folder is searched through all its subfolders, skipping binary files; a binary file named on the command line is an error. With several paths, or a folder, each line starts with `path:` (then `N:` with `-n`), as `grep -r`. No path: the keyboard up to Ctrl-D. Lines of any length. Exit 0 if a line was printed, 1 if none, 2 on an error |
 | `find` | `find [dir] text` | every path under `dir` (default `.`) whose last name contains `text`, folders with a `/` at the end, `dir` itself not listed. Paths start with `dir` as typed. Exit 0, or 1 on an error |
 | `tree` | `tree [-s] [dir]` | `dir`, then its contents indented, with `\|-- ` before each name and a backquote and `-- ` before the last of a folder, ending with `N directories, M files` (singular `1 directory`, `1 file` as in Unix; what is under `dir`, not `dir` itself). `-s` puts `[size]` in front of a name: chars for a text file, words for a binary, `<dir>` for a folder (as `ls -l`). Names in the order the disk keeps them. Exit 0, or 1 on an error |
 | `du` | `du [-a] [path...]` | size in disk KB, one block (256 words) each: a text file holds 4 chars a word (1024 per block), a binary 256 words, an empty file 0 blocks; a folder also counts its own directory file (`stat()`'s `st_blocks`). One line `KB path` per folder (subfolders first, the folder last, so the last line is the total), per file with `-a`, like `du -k`; a file as the path gets one line. Exit 0, or 1 |
 | `diff` | `diff from to` | Unix's normal format (`2c2`, `5a6`, `3d2`; `< old`, `---`, `> new`) from a longest common subsequence of the lines: a table of (n+1) x (m+1) words from `malloc`, after skipping the lines the files share at the start and the end. Both files may have at most 1000 lines (1M table words); more is refused with `diff: PATH: more than 1000 lines, too big to compare`, never cut. A missing newline at the end of a file is not reported. Exit 0 the same, 1 different, 2 error |
 | `hexdump` | `hexdump file...` | 8 values a line: `%06x:` (the number of the first value), the values as `%08x`, two spaces and a column with each value as a char (`.` outside 32-126). A text file gives its chars (`fgetc` unpacks the 4 a word), a binary file its whole words. With several files each starts with `name:`. A full line is 89 columns, wider than the circuit's 64-column display (it wraps there); `PER_LINE` is 8 as asked, and 4 would fit. Exit 0, or 1 |
-| `calc` | `calc expr` or `calc` | a 32-bit integer expression as decimal, and the unsigned value after it when the number is negative (`-1 (4294967295 unsigned)`). Numbers: decimal, `0x`, `0b`, `'c'` (with `\n \t \\ \' \0`). Operators with C precedence: `( )`, unary `- + ~`, `* / %`, `+ -`, `<< >>`, `&`, `^`, `\|`. 32-bit wrap-around; `/` and `%` signed, truncating; `>>` arithmetic; a shift count is 0 to 31; division by zero, numbers past 32 bits and bad characters print `calc: ...` (no crash; `INT_MIN / -1` gives `INT_MIN`). The shell's words are joined with spaces, so `calc 2 * (3 + 4)` works; the shell itself takes a `>` (a redirect: write `calc "256 >> 4"`) and removes quotes (write `calc "'a'"`). With no argument it reads a line at a time up to Ctrl-D. Exit 0, or 1 for an error in `calc expr` |
+| `calc` | `calc expr` or `calc` | a 32-bit integer expression as decimal, and the unsigned value after it when the number is negative (`-1 (4294967295 unsigned)`). Numbers: decimal, `0x`, `0b`, `'c'` (with `\n \t \\ \' \0`). Operators with C precedence: `( )`, unary `- + ~`, `* / %`, `+ -`, `<< >>`, `&`, `^`, `\|`. 32-bit wrap-around; `/` and `%` signed, truncating; `>>` arithmetic; a shift count is 0 to 31; division by zero, numbers past 32 bits and bad characters print `calc: ...` (no crash; `INT_MIN / -1` gives `INT_MIN`). The shell's words are joined with spaces, so `calc 0x1100000 + 256` works; the shell itself takes `( ) | & < >` and `*` (quote: `calc '2 * (3 + 4)'`, `calc "256 >> 4"`) and removes quotes (write `calc "'a'"`). With no argument it reads a line at a time up to Ctrl-D. Exit 0, or 1 for an error in `calc expr` |
 
 `PAGE_LINES` is 7 in `more.c`: the circuit's TTY has `cols=64` and no `rows`
 attribute, so Logisim's default of 8 rows applies and 7 lines plus the prompt
