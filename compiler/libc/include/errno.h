@@ -21,6 +21,7 @@ extern int errno;
 #define ENFILE 23       /* Tynix: too many files open in all */
 #define EMFILE 24       /* too many open files */
 #define ENOSPC 28       /* disk full */
+#define EPIPE 32        /* Tynix: a pipe with no reader left */
 #define ERANGE 34
 #define EDOM 33
 #define ENAMETOOLONG 36

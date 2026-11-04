@@ -70,7 +70,11 @@ starts the shell, /bin/sh from tynix/shell.c).
                    fg N brings one forward, kill N ends it
   Esc              (the NMI) on the program in front: kill, continue,
                    background, or the list of tasks
-  sh -c 'ls /bin'  one command line, then the end; run FILE: a file's lines
+  ls /bin | grep e   a pipe: both run at once (; && || work too)
+  for f in /bin/*; do echo $f; done   loops, if, case, functions: a
+                   small sh (tynix/README.md in the repository)
+  sh FILE ARGS     a script (#!/bin/sh first: runs by its name too);
+                   run FILE: in this shell; alias ll='ls -l'
   claude           talk to Claude (on the PC, through device 0x9C: needs
                    an API key there); claude QUESTION asks once
 

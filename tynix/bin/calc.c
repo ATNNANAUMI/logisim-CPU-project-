@@ -1,7 +1,7 @@
 /* calc.c - a 32-bit integer calculator (a program for Tynix, in /bin)
  *
  *   python tynix/make_disk.py              (builds it into /bin)
- *   (in the shell)   calc expr        calc 2 * (3 + 4)  ->  14
+ *   (in the shell)   calc expr        calc '2 * (3 + 4)'  ->  14
  *                    calc             type an expression a line, Ctrl-D ends
  *
  * The result is printed in decimal; when the 32-bit value is negative as a
@@ -14,11 +14,12 @@
  * zero, >> copies the sign bit, a shift count is 0 to 31. A division by zero,
  * a number past 32 bits or a bad character gives an error message, not a crash.
  *
- * The shell splits the line into words and joins them again with spaces, so
- * `calc 2 * (3 + 4)` works as typed. Two things the shell itself takes: a >
- * starts a redirect, so quote an expression with a shift: calc "256 >> 4";
- * and it removes quotes, so write a char as calc "'a'" (typed to calc with no
- * argument, 'a' needs no care).
+ * The shell splits the line into words and calc joins them again with
+ * spaces, so `calc 0x1100000 + 256` works as typed. The shell takes some
+ * operators itself, as any sh does: ( ) | & < > are its syntax and * a file
+ * name pattern, so quote an expression that has them: calc '2 * (3 + 4)',
+ * calc "256 >> 4"; and it removes quotes, so write a char as calc "'a'"
+ * (typed to calc with no argument, nothing needs care).
  *
  * Exit status: 0, or 1 for an error in `calc expr` (with no argument, 0).
  */

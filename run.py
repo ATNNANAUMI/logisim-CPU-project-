@@ -87,7 +87,7 @@ def built_rom(args):
 
 
 def run(*cmd):
-    print("$ python", *cmd)
+    print("$ pypy3", *cmd)
     code = subprocess.run([sys.executable, *map(str, cmd)]).returncode
     if code:
         sys.exit(code)
@@ -136,7 +136,7 @@ def ask():
     if cmd == "img":
         png = pick(find("*.png"), "PNG", multi=False)
         print("options, e.g. --colors 16 --size 64x --dither --preview p.png "
-              "(python run.py img -h lists them all)")
+              "(pypy3 run.py img -h lists them all)")
         options = shlex.split(input("options (Enter = none): "))
         if "-o" not in options and "--output" not in options:
             print(f"output: {png[0].with_suffix('.h').relative_to(ROOT)}")
@@ -144,7 +144,7 @@ def ask():
     if cmd == "video":
         clip = pick(sorted(p for kind in VIDEO_TYPES for p in find(kind)), "video", multi=False)
         print("options, e.g. --fps 12 --colors 16 --seconds 5 --size 96x --preview frames/ "
-              "(python run.py video -h lists them all)")
+              "(pypy3 run.py video -h lists them all)")
         options = shlex.split(input("options (Enter = none): "))
         if "-o" not in options and "--output" not in options:
             print(f"output: {clip[0].with_suffix('.h').relative_to(ROOT)}")

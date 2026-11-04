@@ -685,7 +685,7 @@ cat: /nope: No such file or directory
 /docs> cat < /docs
 cat: /docs: Is a directory
 /docs> ls < /b.txt
-ls: < works for programs and a bare cat only
+ls: < works for programs, a bare cat and read only
 /docs> cat <
 < needs a file name
 /docs> echo "echo from a file" > /s.txt
@@ -715,7 +715,7 @@ hi
 two  spaces
 more
 /> c
-cd  cat  cp  clear
+cd  cat  cp  clear  continue
 /> cd /bin/
 /bin> /
 bin/  readme.txt  a.txt  b.txt  e2  p.txt  q.txt  c.txt  s.txt
@@ -1154,7 +1154,7 @@ def check_abuse():
                             ("int_restore", 0)):
             at = where[name]
             cpu = fresh()
-            run(cpu, steps=500_000)
+            run(cpu, steps=2_000_000)
             run(cpu, "loop &\nloop\n", 600_000)
             for _ in range(400_000):                        # the first way out of an interrupt through `at`
                 if cpu.iar == at:
@@ -1176,7 +1176,7 @@ def check_abuse():
             assert "loop          running" in text.rpartition("jobs")[2], (name, text[-200:])
         # (2) a region of 0xFFFFFFFF words is refused, and the shell goes on
         cpu = fresh()
-        run(cpu, steps=500_000)
+        run(cpu, steps=2_000_000)
         run(cpu, "/bin/wild\n/bin/hi\n", 3_000_000)
         text = cpu.bus.display.text
         assert "wild: Cannot allocate memory" in text and text.endswith("hi\n/> "), text[-200:]
@@ -1318,14 +1318,14 @@ TOOLS_KEYS = ("grep -n -i beta /docs/a.txt\n"
               "diff /docs/a.txt /bin/echo\n"
               "hexdump /h.txt\n"
               "hexdump /nope /h.txt\n"
-              "calc 2 * (3 + 4)\n"
+              "calc '2 * (3 + 4)'\n"
               "calc -1\n"
               "calc 1 / 0\n"
               "calc 0x1100000 + 256\n"
               "calc \"256 >> 4\"\n"
               "calc \"'a' + 1\"\n"
-              "calc 7 % 3 | 8 ^ 2\n"
-              "calc 2 + 3 * 4\n"
+              "calc '7 % 3 | 8 ^ 2'\n"
+              "calc '2 + 3 * 4'\n"
               "calc 1 << 2 + 1\n"
               "calc -7 / 2 + -7 % 2\n"
               "calc \"-16 >> 2\"\n"
@@ -1430,7 +1430,7 @@ hexdump: /nope: No such file or directory
 /h.txt:
 {hex}
 [hexdump: exit status 1]
-/> calc 2 * (3 + 4)
+/> calc '2 * (3 + 4)'
 14
 /> calc -1
 -1 (4294967295 unsigned)
@@ -1443,9 +1443,9 @@ calc: division by zero
 16
 /> calc "'a' + 1"
 98
-/> calc 7 % 3 | 8 ^ 2
+/> calc '7 % 3 | 8 ^ 2'
 11
-/> calc 2 + 3 * 4
+/> calc '2 + 3 * 4'
 14
 /> calc 1 << 2 + 1
 8
@@ -1790,7 +1790,7 @@ def check_claude():
     text = cpu.bus.display.text
     assert cpu.halted, text
     assert results[:6] == [
-        "exit status 0\nsh  claude  echo  spin\n",
+        "exit status 0\nsh\nclaude\necho\nspin\n",       # ls into a file: a name a line
         "exit status 0\nfed\nthrough stdin\n",             # input: the program's stdin
         "wrote 11 chars to /tmp/n.txt",
         "exit status 0 (the directory is now /tmp)",
@@ -1799,7 +1799,7 @@ def check_claude():
     assert not re.search(r"spin +(running|waiting)", results[6]), results[6]   # killed, all of them
     assert re.search(r"claude +waiting", results[6]), results[6]
     assert results[7] == "the user said no: the command was not run"
-    assert ("you> list\nLet me look.\n[claude runs: ls /bin]\nsh  claude  echo  spin\nok\n"
+    assert ("you> list\nLet me look.\n[claude runs: ls /bin]\nsh\nclaude\necho\nspin\nok\n"
             "you> feed\n[claude runs: cat]\nfed\nthrough stdin\nok\n") in text, text
     assert "[claude runs: spin]\n[killed: it ran past 1 s]\nok\n" in text, text
     assert "[claude wants to run: echo never] allow? (y/n) n\nok\n" in text, text
@@ -1833,22 +1833,180 @@ def check_batch():
     make_disk.make(image, programs=["echo"], new=True, size_mb=1, log=lambda _: None)
     with FileSystem(image) as disk:
         disk.put("/s.txt", b"# a batch file\n\necho one\n  echo two three\n/bin/echo four\nls /nope\n")
-        disk.put("/long.txt", b"echo " + b"x" * 300 + b"\necho next\n")      # cut, it would run as two commands
+        disk.put("/long.txt", b"echo " + b"x" * 300 + b"\necho next\n")      # a script's lines have no limit
     keys = ("run /long.txt\nrun /s.txt\nrun /s.txt > /r.txt\nsh -c 'echo inner' > /c.txt\n"
             "sh -c 'cat /c.txt'\nsh -c\nrun\nhalt\n")
     cpu, text = driver.run_in_simulator(_kernel().rom, keys, 50_000_000, disk=image)
     assert cpu.halted, text
     assert text.endswith(
-        "/> run /long.txt\nrun: /long.txt: line 1 is longer than 255 chars, stopped\n"
+        "/> run /long.txt\n" + "x" * 300 + "\nnext\n"
         "/> run /s.txt\none\ntwo three\nfour\nls: /nope: No such file or directory\n"
         "/> run /s.txt > /r.txt\nls: /nope: No such file or directory\n"
         "/> sh -c 'echo inner' > /c.txt\n"
         "/> sh -c 'cat /c.txt'\ninner\n"
-        "/> sh -c\nusage: sh -c 'command line'\n[sh: exit status 2]\n"
-        "/> run\nusage: run file\n/> halt\nCPU halted\n"), text
+        "/> sh -c\nusage: sh -c 'command line' [name arg...]\n[sh: exit status 2]\n"
+        "/> run\nusage: run file [arg...]\n/> halt\nCPU halted\n"), text
     with FileSystem(image) as disk:
         assert disk.get("/r.txt") == b"one\ntwo three\nfour\n"
         assert disk.get("/c.txt") == b"inner\n"
+    return f"{cpu.instructions} instructions"
+
+
+SCRIPT = """\
+#!/bin/sh
+# count the arguments, skip b, stop at 3
+count() {
+    local n=0
+    for a in "$@"; do n=$((n + 1)); done
+    echo $n
+}
+echo "args: $(count "$@") first=$1"
+shift
+echo "after shift: $*"
+for i in 1 2 3; do
+    for j in a b c; do
+        if [ $j = b ]; then continue; fi
+        if [ $i = 3 ]; then break 2; fi
+        echo "$i$j"
+    done
+done
+while read line; do
+    case "$line" in
+        *two*) echo "two: $line" ;;
+        *) ;;
+    esac
+done < /t.txt | grep two
+exit 7
+"""
+
+SCRIPT_KEYS = ("/s.sh 'a b' c d; echo \"status $?\"\n"
+               "sh /bad.sh\n"
+               "x=5; echo \"x is $x\" ${UNSET:-default} ${#x} $((x * (3 + 2) % 4))\n"
+               "false && echo yes || echo no; ! false && echo negated\n"
+               "case hello in h*) echo starts-h;; *) echo other;; esac\n"
+               "f() { echo \"f: $# $1\"; return 3; }; f 'p q' r; echo $?\n"
+               "echo $(echo inner) `echo back` \"$(echo \"in $(echo deep)\")\"\n"
+               "echo /bin/e* /nope/*.txt\n"
+               "ls /bin | while read f; do echo \"[$f]\"; done\n"
+               "alias g='grep -n'; ls /bin | cat | g h; type g f cd nope\n"
+               "for w in 1 2; do echo $w; done > /w.txt; cat /w.txt\n"
+               "x=1; { x=2; }; (x=3); echo $x\n"
+               "(primes; echo st=$? > /st.txt) | false; cat /st.txt\n"
+               "primes | grep 97 > /p.txt &\n"
+               "wait\n"
+               "deep() { deep; }; deep\n"
+               "if true; then\n"
+               "echo continued\n"
+               "fi\n"
+               "echo 'a\n"
+               "b'\n"
+               "ls /tmp\n"
+               "halt\n")
+
+SCRIPT_OUTPUT = """\
+/> /s.sh 'a b' c d; echo "status $?"
+args: 3 first=a b
+after shift: c d
+1a
+1c
+2a
+2c
+two: line two
+[/s.sh: exit status 7]
+status 7
+/> sh /bad.sh
+/bad.sh: line 3: unexpected 'done'
+[sh: exit status 2]
+/> x=5; echo "x is $x" ${UNSET:-default} ${#x} $((x * (3 + 2) % 4))
+x is 5 default 1 1
+/> false && echo yes || echo no; ! false && echo negated
+no
+negated
+/> case hello in h*) echo starts-h;; *) echo other;; esac
+starts-h
+/> f() { echo "f: $# $1"; return 3; }; f 'p q' r; echo $?
+f: 2 p q
+3
+/> echo $(echo inner) `echo back` "$(echo "in $(echo deep)")"
+inner back in deep
+/> echo /bin/e* /nope/*.txt
+/bin/echo /nope/*.txt
+/> ls /bin | while read f; do echo "[$f]"; done
+[sh]
+[echo]
+[grep]
+[primes]
+/> alias g='grep -n'; ls /bin | cat | g h; type g f cd nope
+1:sh
+2:echo
+g is an alias for grep -n
+f is a function
+cd is a shell built-in
+type: nope: not found
+/> for w in 1 2; do echo $w; done > /w.txt; cat /w.txt
+1
+2
+/> x=1; { x=2; }; (x=3); echo $x
+2
+/> (primes; echo st=$? > /st.txt) | false; cat /st.txt
+st=141
+/> primes | grep 97 > /p.txt &
+[{bg}] sh &
+/> wait
+[{bg}] done: sh, exit status 0
+/> deep() { deep; }; deep
+deep: functions 24 levels deep
+/> if true; then
+> echo continued
+> fi
+continued
+/> echo 'a
+> b'
+a
+b
+/> ls /tmp
+/> halt
+CPU halted
+"""
+
+
+def check_scripting():
+    """The shell's language under the kernel: a #!/bin/sh script with a
+    function, local, "$@", shift, nested loops with continue and break 2,
+    while read from a < file piped into grep, exit N; a syntax error found
+    before anything runs; ; && || !, case, $( ) and backquotes nested,
+    ${..} forms, $(( )), * against the disk, a built-in and an alias in a
+    pipeline (a new shell with the state), > after done, { } and ( ),
+    a writer whose reader quit ending with 141, a pipeline in the
+    background, the nesting limit, "> " for unfinished lines, and the state
+    files in /tmp gone. fs.py finds the disk consistent; the pipe really
+    carried more than its 256 words (primes' output)."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+
+    image = os.path.join(TMP.name, "script.img")
+    make_disk.make(image, programs=["echo", "grep", "primes"], new=True, size_mb=1, log=lambda _: None)
+    with FileSystem(image) as disk:
+        disk.mkdir("/tmp")
+        disk.put("/s.sh", SCRIPT.encode())
+        disk.put("/bad.sh", b"echo one\nif true; then\ndone\n")
+        disk.put("/t.txt", b"line one\nline two\nline three\n")
+    cpu, text = driver.run_in_simulator(_kernel().rom, SCRIPT_KEYS, 150_000_000, disk=image)
+    assert cpu.halted, text
+    got = text[text.index("/> /s.sh"):]
+    bg = re.search(r"\[(\d+)\] sh &", got)
+    assert bg, got
+    assert got == SCRIPT_OUTPUT.replace("{bg}", bg.group(1)), got
+    with FileSystem(image) as disk:
+        primes = disk.get("/p.txt").decode()
+        assert primes.count("\n") >= 10 and all("97" in l for l in primes.splitlines()), primes
+        left = [n.name for n in disk.entries(disk.lookup("/tmp"))]
+        assert left == [], left
+        assert disk.check() == [], disk.check()
     return f"{cpu.instructions} instructions"
 
 
@@ -1942,7 +2100,7 @@ X=1
 set: words: give it as NAME=value
 /> set 'Y=two  words'
 /> echo $Y "[$Y]" '$Y' ${Y}! $ ${bad $NOPE.
-two  words [two  words] $Y two  words! $ ${bad .
+two words [two  words] $Y two words! $ ${bad .
 /> showenv Y
 Y=(not set)
 /> export Y
@@ -2090,6 +2248,7 @@ CHECKS = [
     check_screen_editor,
     check_tools,
     check_batch,
+    check_scripting,
     check_environment,
     check_snapshot,
     check_claude,

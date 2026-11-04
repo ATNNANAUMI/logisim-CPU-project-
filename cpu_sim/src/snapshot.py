@@ -16,7 +16,7 @@ A snapshot is a zip file:
                  its number (4 bytes) and its zlib-compressed little-endian words
     video        the RGB screen's 65,536 pixels, zlib-compressed
 
-Not saved: the disk's contents (only where it is: loading warns when the file
+Not saved: the disk's contents (only where it is and a SHA-1 of them: loading warns when the file
 changed since, and another disk can be given instead), the Claude device's
 conversation (it starts afresh, with a note) and the translated code (a cache:
 it is made again as the program runs). The timer continues from its saved
@@ -73,8 +73,13 @@ def _unpack_bank(data):
 
 
 def _disk_facts(path):
-    st = os.stat(path)
-    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
+    # content, not mtime: writes through the mmap may not touch the mtime (tmpfs)
+    # shortcut: hashes the whole file (64 MB: ~0.1 s), slow only for a disk of GBs
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        while chunk := f.read(1 << 22):
+            h.update(chunk)
+    return {"size": os.path.getsize(path), "sha1": h.hexdigest()}
 
 
 def save(cpu, path, rom_path=None):
@@ -135,7 +140,7 @@ def load(cpu, path, disk=None):
         bus.attach_disk(disk)
     elif saved_disk and os.path.exists(saved_disk["path"]):
         bus.attach_disk(saved_disk["path"])
-        if _disk_facts(saved_disk["path"]) != {k: saved_disk[k] for k in ("size", "mtime_ns")}:
+        if _disk_facts(saved_disk["path"]) != {k: saved_disk[k] for k in ("size", "sha1")}:
             warnings.append(f"the disk {saved_disk['path']} changed since the snapshot was saved")
     elif saved_disk:
         warnings.append(f"the disk {saved_disk['path']} is gone: no disk attached")

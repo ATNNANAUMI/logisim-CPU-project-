@@ -225,6 +225,7 @@ char *strerror(int errnum)
     case 23: return "Too many open files in system";
     case 24: return "Too many open files";
     case 28: return "No space left on device";
+    case 32: return "Broken pipe";
     case 36: return "File name too long";
     case 38: return "Function not implemented";
     case 39: return "Directory not empty";

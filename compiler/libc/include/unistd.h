@@ -55,6 +55,13 @@
  *                        setenv made); a ROM program starts with none.
  *                        Assign it only through setenv/unsetenv: those also
  *                        tell the kernel where the list is.
+ *   pipe(fds)            a pipe: fds[0] reads the words written to fds[1];
+ *                        a read waits for words, 0 once every write end is
+ *                        closed; a write waits for room (256 words), and
+ *                        ends the program with status 141 when no read end
+ *                        is open. fdopen(fd, mode) (stdio.h's POSIX
+ *                        function, declared here) wraps an end in a FILE,
+ *                        for spawn_io and fclose. Tynix only.
  *   isatty(fd)           1 if fd (0 keyboard, 1 stdout, 2 stderr) is the
  *                        console, 0 if it is a file: stdout when the shell
  *                        started the program with `>`, stdin when it was
@@ -88,6 +95,8 @@ int set_foreground(int pid);
 int tasks(struct task_info *buf, int max);
 void halt_os(void);
 int isatty(int fd);
+int pipe(int fds[2]);
+FILE *fdopen(int fd, const char *mode);
 extern char **environ;
 
 #endif

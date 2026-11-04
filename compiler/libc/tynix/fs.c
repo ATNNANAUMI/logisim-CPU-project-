@@ -1,5 +1,6 @@
 /* fs.c for a program for Tynix: fopen, fclose, fseek, ftell, rewind, remove,
- * rename, statvfs, stat and fs_reclaim, as in compiler/libc/fs.c, but the
+ * rename, statvfs, stat and fs_reclaim, as in compiler/libc/fs.c, plus pipe
+ * and fdopen (unistd.h), but the
  * filesystem is the kernel's (tynix/kernel.c): an open file is the kernel's
  * number for it, and its words go back and forth 64 at a time.
  */
@@ -12,7 +13,7 @@
 #include <sys/tynix.h>
 #include "../local.h"
 
-#define MAX_OPEN 8
+#define MAX_OPEN 16
 #define BUF 64
 
 int _tx_call(int n, int a, int b, int c, int d);       /* sys.c */
@@ -105,24 +106,27 @@ static void close_all(void)
             fclose(&files[i]);
 }
 
-FILE *fopen(const char *path, const char *mode)
+/* a free FILE, or -1 (EMFILE) */
+static int free_file(const char *mode)
 {
-    int i, fd, plus = strchr(mode, '+') != 0;
-    struct stat st;
-    FILE *f;
+    int i;
     if (mode[0] != 'r' && mode[0] != 'w' && mode[0] != 'a') {
         errno = EINVAL;
-        return 0;
+        return -1;
     }
     for (i = 0; i < MAX_OPEN && in_use[i]; i++)
         ;
     if (i == MAX_OPEN) {
         errno = EMFILE;
-        return 0;
+        return -1;
     }
-    if ((fd = _tx_call(SYS_OPEN, (int)path, (int)mode, 0, 0)) < 0)
-        return 0;
-    f = &files[i];
+    return i;
+}
+
+static FILE *new_file(int i, int fd, const char *mode, int packed)
+{
+    int plus = strchr(mode, '+') != 0;
+    FILE *f = &files[i];
     memset(f, 0, sizeof *f);
     f->get = file_get;
     f->put = file_put;
@@ -130,7 +134,7 @@ FILE *fopen(const char *path, const char *mode)
     f->input = mode[0] == 'r' || plus;
     f->output = mode[0] != 'r' || plus;
     f->append = mode[0] == 'a';
-    f->packed = stat(path, &st) == 0 && S_ISTEXT(st.st_mode);
+    f->packed = packed;
     f->pushed = EOF;
     f->fd = fd;
     f->buf = bufs[i];
@@ -140,6 +144,29 @@ FILE *fopen(const char *path, const char *mode)
         closer_set = 1;
     }
     return f;
+}
+
+FILE *fopen(const char *path, const char *mode)
+{
+    int i = free_file(mode), fd;
+    struct stat st;
+    if (i < 0 || (fd = _tx_call(SYS_OPEN, (int)path, (int)mode, 0, 0)) < 0)
+        return 0;
+    return new_file(i, fd, mode, stat(path, &st) == 0 && S_ISTEXT(st.st_mode));
+}
+
+/* an open number (an end of a pipe) as a FILE: one word a char */
+FILE *fdopen(int fd, const char *mode)
+{
+    int i = free_file(mode);
+    if (i < 0)
+        return 0;
+    return new_file(i, fd, mode, 0);
+}
+
+int pipe(int fds[2])
+{
+    return _tx_call(SYS_PIPE, (int)fds, 0, 0, 0);
 }
 
 int fclose(FILE *stream)
