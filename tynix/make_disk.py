@@ -33,7 +33,7 @@ DEFAULT_IMAGE = ROOT / "tynix" / "disk.img"
 # compiler/examples/c/*/NAME.c -> /bin/NAME. Each one ends by itself, on
 # Ctrl-D or on q, so the shell gets the CPU back.
 PROGRAMS = ["echo", "hello", "primes", "structs", "guess", "gfx_demo", "image_demo",
-            "snake", "stackfall", "game_of_life", "grapher", "qr", "disk_notes", "ed", "edit",
+            "snake", "stackfall", "maze3d", "game_of_life", "grapher", "qr", "disk_notes", "ed", "edit",
             "more", "grep", "find", "tree", "du", "diff", "hexdump", "calc",
             "visual_file_manager", "claude", "basic"]
 SOURCES = {"sh": "shell"}               # /bin/sh is tynix/shell.c
@@ -79,7 +79,8 @@ starts the shell, /bin/sh from tynix/shell.c).
   claude           talk to Claude (on the PC, through device 0x9C: needs
                    an API key there); claude QUESTION asks once
 
-On the RGB screen (the simulator window's tab): snake, stackfall
+On the RGB screen (the simulator window's tab): snake, maze3d (a 3D maze:
+W S A D Q E M R X), stackfall
 (falling blocks with gravity chains) and game_of_life (q quits), gfx_demo, image_demo, grapher and qr
 (Ctrl-D quits these two), and visual_file_manager (j k h l move, space
 select, y x p copy cut paste, u clear, r d a rename delete new folder,

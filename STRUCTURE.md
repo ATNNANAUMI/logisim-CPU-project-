@@ -69,7 +69,7 @@ logisim-CPU-project-/
 │   │   ├── peephole.py       clean-ups per function
 │   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0 (ROM or --exe), link, TEX2 .exe (+ relocations), libc/tynix/ for --exe, run in simulator
 │   │   ├── cerror.py         CError (file:line:col: error: ...)
-│   │   ├── selftest.py       20 checks (incl. interrupts from C, disasm of every C program, stackfall played, every tests/ program against gcc's output)
+│   │   ├── selftest.py       21 checks (incl. interrupts from C, disasm of every C program, stackfall and maze3d played, every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
 │   │                         fuzz.py: random programs, gcc vs tiny C
 │   ├── src/img/              PNG -> compressed image for gfx_image() (run as `python compiler/src/img pic.png`)
@@ -107,7 +107,7 @@ logisim-CPU-project-/
 │   │   └── c/                C
 │   │       ├── basics/       hello, primes (sieve + hex display), structs (structs, qsort, malloc),
 │   │       │                 interrupts (WAIT, a timer IRQ and a key IRQ served by a C handler)
-│   │       ├── games/        guess (keyboard input), snake (W/A/S/D, R restarts, Q quits), stackfall (falling blocks, gravity chains),
+│   │       ├── games/        guess (keyboard input), snake (W/A/S/D, R restarts, Q quits), stackfall (falling blocks, gravity chains), maze3d (a raycaster: a 3D maze),
 │   │       │                 game_of_life (64x64 torus, 7 scenes of well-known patterns, checks itself; keys 1-7 n r space s q)
 │   │       ├── graphics/     the RGB screen: gfx_demo; paint (mouse); image_demo (gfx_image) with images/: mandelbrot, smiley (.png + the .h made from it);
 │   │       │                 video_player (plays a video.py .h on time with clock()) with videos/demo (.mp4 + .h);

@@ -656,6 +656,61 @@ def check_stackfall():
 STACKFALL_RUN = (5, 1626, "b82b1b6b2c93")       # rows, score, the screen: what the player above gets
 
 
+def check_maze3d():
+    """compiler/examples/c/games/maze3d.c on the simulator: the same keys give
+    the same screen (the maze comes from a seed), the ceiling, a wall and the
+    floor are where they should be, the minimap and the text are drawn, a
+    different seed gives another maze, and a player put next to the door
+    (px, py written into RAM) walks through it: the program prints "out in"
+    and ends; X quits."""
+    import hashlib
+    import sys
+    sys.path.append(str(driver.SIM_DIR))
+    from cpu import CPU                 # cpu_sim/src
+    from devices import Timer
+    import alu
+
+    program, _ = driver.build([str(HERE.parent.parent / "examples" / "c" / "games" / "maze3d.c")])
+    at = {s.name: s.address for s in program.symbols}
+
+    def machine(keys, setup=None):
+        cpu = CPU()
+        cpu.bus.timer = Timer(clock=lambda: cpu.instructions / 2_000_000)
+        cpu.bus.timer.reset()
+        cpu.mem.load_rom(program.rom)
+        cpu.run(4_000_000)                      # the first picture
+        if setup:
+            setup(cpu)
+        cpu.bus.keyboard.type(keys)
+        cpu.run(30_000_000)
+        return cpu
+
+    def screen(cpu):
+        return hashlib.sha1(bytes(cpu.bus.video.pixels)).hexdigest() if isinstance(cpu.bus.video.pixels, (bytes, bytearray)) \
+            else hashlib.sha1(repr(list(cpu.bus.video.pixels)).encode()).hexdigest()
+
+    a, b = machine("wwddw"), machine("wwddw")
+    assert screen(a) == screen(b), "the same keys gave two screens"
+    assert not a.halted
+    px = a.bus.video.pixels
+    ceiling, floor = px[0 * 256 + 0], px[175 * 256 + 255]
+    assert ceiling != floor and ceiling != 0 and floor != 0, (ceiling, floor)
+    assert len({px[88 * 256 + x] for x in range(256)}) > 3, "no walls in the middle of the view"
+    assert any(px[y * 256 + x] for y in range(180, 256) for x in range(256)), "no minimap or text"
+    assert machine("wwddw").bus.display.text == "" and screen(machine("w")) != screen(a)
+    c = machine("rwwddw")
+    assert screen(c) != screen(a), "R gave the same maze"
+
+    def next_to_the_door(cpu):                  # px, py = 15.6, 15.5: two steps east is the door
+        cpu.mem.write(at["px"], alu.float_to_bits(15.6))
+        cpu.mem.write(at["py"], alu.float_to_bits(15.5))
+
+    won = machine("ww", next_to_the_door)
+    assert won.halted and won.bus.display.text.startswith("out in "), won.bus.display.text
+    assert machine("x").halted
+    return f"{won.instructions} instructions to the door"
+
+
 CHECKS = [
     check_preprocessor,
     check_errors,
@@ -676,6 +731,7 @@ CHECKS = [
     check_line_info,
     check_disasm,
     check_stackfall,
+    check_maze3d,
     check_programs,
 ]
 
