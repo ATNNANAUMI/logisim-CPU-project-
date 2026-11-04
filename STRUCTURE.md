@@ -165,10 +165,11 @@ logisim-CPU-project-/
     │   │                     (every RAM store checks a map of translated words and drops RAM blocks it hits)
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed, save/load state)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
+    │   ├── machine_view.py   read-only views of the running machine: frames() the call chain, heap() malloc's blocks, regions() RAM's parts (the window's Stack, Heap, Map tabs)
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG --screen-fps N --claude-model NAME --claude-system FILE --load-state F --save-state F]`
     │   ├── snapshot.py       save/load the whole machine (a zip: state.json, ROM/RAM chunks, the screen); digest() for the checks
     │   ├── bench.py          speed check: nine example programs in run(), MHz first/best run + end-state digest
-    │   └── selftest.py       52 checks (incl. snapshots, interrupts, translated code against step() on random code, the Claude device)
+    │   └── selftest.py       54 checks (incl. machine_view and its window tabs, snapshots, interrupts, translated code against step() on random code, the Claude device)
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)

@@ -1272,6 +1272,112 @@ def test_claude_device_on_the_bus():
     assert len(cpu.bus.claude.history) == 2
 
 
+FACT_C = """
+#include <stdio.h>
+#include <stdlib.h>
+int depth_probe;
+int fact(int n) { if (n <= 1) { depth_probe = n; return 1; } return n * fact(n - 1); }
+int main(void) {
+    int *a = malloc(10), *b = malloc(20), *c = malloc(5);
+    free(b);
+    printf("%d %d\\n", fact(5), a != 0 && c != 0);
+    return 0;
+}
+"""
+
+
+def test_machine_view():
+    """machine_view.py: stopped in fact(1) called from fact(5), the chain is
+    fact x5, main, start with the arguments 1..5; the heap holds the blocks
+    malloc(10), malloc(20) freed, malloc(5), then the free rest; the regions
+    tile RAM from the data to its end; no map, no answers."""
+    import sys
+    import tempfile
+    from pathlib import Path
+    from debuginfo import DebugInfo
+    import machine_view as mv
+    cc = str(Path(__file__).resolve().parents[2] / "compiler" / "src" / "cc")
+    sys.path.insert(0, cc)
+    try:
+        import driver
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "fact.c").write_text(FACT_C)
+            program, _ = driver.build([str(Path(tmp) / "fact.c")])
+            (Path(tmp) / "fact.map").write_text(driver.format_map(program, "fact.rom"))
+            info = DebugInfo.load(Path(tmp) / "fact.map")
+    finally:
+        sys.path.remove(cc)
+    cpu = CPU()
+    cpu.mem.load_rom(program.rom)
+    assert mv.frames(cpu, None) == [] and mv.heap(cpu, None) == ([], None) and mv.regions(cpu, None) == []
+    assert mv.heap(cpu, info) == ([], None)                       # before the first malloc
+    probe = info.symbols["depth_probe"]
+    for _ in range(100000):
+        cpu.run(1)
+        if cpu.mem.read(probe) == 1:                               # fact(1) just stored its mark
+            break
+    chain = mv.frames(cpu, info)
+    assert [f[0] for f in chain] == ["fact"] * 5 + ["main", "start"], chain
+    assert [f[4][0] for f in chain[:5]] == [1, 2, 3, 4, 5]
+    assert chain[0][2][1] == 5 and chain[5][2][1] == 9, (chain[0][2], chain[5][2])
+    blocks, damaged = mv.heap(cpu, info)
+    assert damaged is None and [(b[1], b[2]) for b in blocks[:3]] == [(11, True), (21, False), (6, True)], blocks
+    assert blocks[3][2] is False and blocks[3][0] + blocks[3][1] == cpu.mem.read(info.symbols["_heap_end"])
+    cpu.mem.write(blocks[1][0], 0)                                 # a damaged header
+    assert mv.heap(cpu, info)[1] == blocks[1][0]
+    parts = mv.regions(cpu, info)
+    assert [p[0] for p in parts] == ["data", "stack", "heap", "free"][:len(parts)] and parts[0][1] == config.RAM_BIT
+    assert all(a[2] == b[1] for a, b in zip(parts, parts[1:])) and parts[-1][2] == config.RAM_BIT + config.BANK_WORDS
+
+
+def test_window_view_panes():
+    """gui.py's Stack, Heap and Map tabs draw the machine_view answers in a
+    real window (skipped without tkinter or a display)."""
+    try:
+        import tkinter
+        import gui
+    except ImportError:
+        return
+    import tempfile
+    import machine_view
+    from pathlib import Path
+    import sys
+    cc = str(Path(__file__).resolve().parents[2] / "compiler" / "src" / "cc")
+    sys.path.insert(0, cc)
+    try:
+        import driver
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "fact.c").write_text(FACT_C)
+            program, _ = driver.build([str(Path(tmp) / "fact.c")])
+            rom = Path(tmp) / "fact.rom"
+            rom.write_text(driver.linker.format_raw(program.rom))
+            (Path(tmp) / "fact.map").write_text(driver.format_map(program, "fact.rom"))
+            cpu = CPU()
+            cpu.mem.load_rom(program.rom)
+            try:
+                window = gui.SimulatorWindow(cpu, str(rom))
+            except tkinter.TclError:                    # no display
+                return
+    finally:
+        sys.path.remove(cc)
+    try:
+        probe = window.info.symbols["depth_probe"]
+        for _ in range(100000):
+            cpu.run(1)
+            if cpu.mem.read(probe) == 1:
+                break
+        window.update()
+        for pane in window.view_panes:
+            pane.render()
+        stack, heap_pane, map_pane = window.view_panes
+        assert stack.text.get("1.0", "end").count(" fact ") == 5 and "main" in stack.text.get("1.0", "end")
+        assert "4 blocks" in heap_pane.label.cget("text") and "ESP index" in map_pane.label.cget("text")
+        stack.pick(type("E", (), {"x": 5, "y": 5})())      # a click on the first frame
+        window.refresh()
+    finally:
+        window.destroy()
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:

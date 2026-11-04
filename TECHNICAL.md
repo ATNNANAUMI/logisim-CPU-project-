@@ -692,9 +692,10 @@ modules import each other by plain name, so run them as scripts
 | `translate.py` | turns code that runs often into Python functions for `run()` (3.2): `translate()` (one block), `dispatcher()` (the loop that runs them) |
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
+| `machine_view.py` | the call chain (`frames`: stack[EBP] is the caller's EBP, stack[EBP-1] the return address), malloc's blocks (`heap`: a header word, negative when used) and RAM's parts (`regions`), all read through the `.map` (`DebugInfo.symbols`); the window's Stack, Heap and Map tabs draw them |
 | `main.py` | command line, `build_cpu`, headless runner |
 | `snapshot.py` | `save(cpu, path)` / `load(cpu, path, disk=None)`: the whole machine in a file (3.3, "Snapshots"); `digest(cpu)` for the checks |
-| `selftest.py` | 52 checks on the core and the Claude device |
+| `selftest.py` | 54 checks on the core and the Claude device |
 | `bench.py` | the simulator's speed on nine example programs (3.3) |
 
 ### 3.2 Execution model
@@ -887,6 +888,16 @@ buttons run to the next line: *into* follows calls, *over* runs calls to
 the end (lines in a deeper frame, EBP above the current one, don't count),
 *out* runs until the function returns. The line table is read by
 `debuginfo.py`.
+
+Three more tabs read the machine through `machine_view.py` and redraw only
+while they are the visible tab. **Stack** lists the call chain, innermost
+first (function, C file and line, EBP, three argument words); a click shows
+that frame's file and its RAM page. **Heap** draws malloc's blocks (used red,
+free green, a damaged header yellow) with the totals and a fragmentation
+figure. **Map** lists RAM's parts (data, stack, heap, free) with their real
+sizes. All three need the `.map`. Not done: the prologue between a `CALL` and
+`STK CALL` shows the caller's frame; no per-task view under Tynix (needs the
+kernel's debug table, `PLAN.md` item 2).
 
 The keyboard field is read-only: every key goes straight into the buffer
 (Enter as `0x0A`, Backspace as `0x08`, Tab as `0x09`, printable ASCII as itself, the arrows as 28–31, Ctrl+letter as 1–26; `key_code()` in `devices.py`; Shift-Tab stays with the window).
@@ -1398,7 +1409,7 @@ python compiler/src/asm/selftest.py   # 24 checks: encodings, the interrupt grou
                                       # back to the same words, map or not, --raw),
                                       # isa_page (its decoder against isa.py on all
                                       # 65,536 words, a row for every mnemonic)
-python cpu_sim/src/selftest.py        # 52 checks: snapshot (save, load, both run on the same), the Claude device with a fake backend (ASCII, the request's
+python cpu_sim/src/selftest.py        # 54 checks: snapshot (save, load, both run on the same), the Claude device with a fake backend (ASCII, the request's
                                       # model/effort/max_tokens/caching/tools, errors and no SDK,
                                       # refusal, every slash command, tool frames, bad tool
                                       # input, /approve, Ctrl-X, a new program (SYN) during a
