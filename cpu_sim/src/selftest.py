@@ -1325,6 +1325,16 @@ def test_machine_view():
     assert blocks[3][2] is False and blocks[3][0] + blocks[3][1] == cpu.mem.read(info.symbols["_heap_end"])
     cpu.mem.write(blocks[1][0], 0)                                 # a damaged header
     assert mv.heap(cpu, info)[1] == blocks[1][0]
+    cpu.regs[3], cpu.esp = 0x40, 0x200
+    for text, want in (("0x10", 16), ("1000a", 0x1000A), ("R3", 0x40), ("r3+2", 0x42), ("ESP-4", 0x1FC),
+                       ("fact", info.symbols["fact"]), ("fact + 0x10 - 1", info.symbols["fact"] + 15)):
+        assert mv.resolve_address(text, cpu, info) == want, text
+    for bad in ("", "nosuch", "+3", "R3+", "fact+zz"):
+        try:
+            mv.resolve_address(bad, cpu, info)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} accepted")
     parts = mv.regions(cpu, info)
     assert [p[0] for p in parts] == ["data", "stack", "heap", "free"][:len(parts)] and parts[0][1] == config.RAM_BIT
     assert all(a[2] == b[1] for a, b in zip(parts, parts[1:])) and parts[-1][2] == config.RAM_BIT + config.BANK_WORDS
@@ -1373,6 +1383,19 @@ def test_window_view_panes():
         assert stack.text.get("1.0", "end").count(" fact ") == 5 and "main" in stack.text.get("1.0", "end")
         assert "4 blocks" in heap_pane.label.cget("text") and "ESP index" in map_pane.label.cget("text")
         stack.pick(type("E", (), {"x": 5, "y": 5})())      # a click on the first frame
+        ram = window.ram_pane
+        ram.show_float.set(True)
+        ram.show_text.set(True)
+        ram.goto.insert(0, "depth_probe")
+        ram.jump_to()
+        text = ram.text.get("1.0", "end")
+        assert "<depth_probe>" in text and "<handlers>" in text and "0x1000000  00000001" in text, text[:300]
+        ram.render()
+        cpu.mem.write(window.info.symbols["depth_probe"], 7)
+        ram.render()
+        assert ram.text.tag_ranges("changed"), "a changed word is not marked"
+        ram.render()
+        assert not ram.text.tag_ranges("changed")           # marked for one redraw
         window.refresh()
     finally:
         window.destroy()

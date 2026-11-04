@@ -121,6 +121,10 @@ class MemoryPane(ttk.Frame):
         self.page = 0
         self.follow = tk.BooleanVar(value=(bank == "rom"))
         self.disasm = tk.BooleanVar(value=(bank == "rom"))
+        self.show_float = tk.BooleanVar(value=False)
+        self.show_text = tk.BooleanVar(value=False)
+        self.get_info = lambda: None            # the window gives the .map's DebugInfo
+        self.last = {}                          # page -> its words at the last redraw (changed ones are coloured)
 
         bar = ttk.Frame(self)
         bar.pack(fill="x", padx=4, pady=4)
@@ -133,6 +137,10 @@ class MemoryPane(ttk.Frame):
         ttk.Button(bar, text="go", width=3, command=self.jump_to).pack(side="left")
         ttk.Checkbutton(bar, text="follow IAR", variable=self.follow).pack(side="left", padx=8)
         ttk.Checkbutton(bar, text="disassemble", variable=self.disasm,
+                        command=self.render).pack(side="left")
+        ttk.Checkbutton(bar, text="float", variable=self.show_float,
+                        command=self.render).pack(side="left")
+        ttk.Checkbutton(bar, text="text", variable=self.show_text,
                         command=self.render).pack(side="left")
         ttk.Button(bar, text="clear bp", width=8,
                    command=self.clear_breakpoints).pack(side="left", padx=4)
@@ -148,6 +156,7 @@ class MemoryPane(ttk.Frame):
         self.text.configure(yscrollcommand=scroll.set, state="disabled")
         self.text.tag_configure("current", background="#ffe08a")
         self.text.tag_configure("breakpoint", background="#ffbcbc")
+        self.text.tag_configure("changed", background="#b7e4b0")
         self.text.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=(0, 4))
         scroll.pack(side="right", fill="y", pady=(0, 4))
 
@@ -167,16 +176,15 @@ class MemoryPane(ttk.Frame):
         self.render()
 
     def jump_to(self, _event=None) -> None:
-        raw = self.goto.get().strip().replace("0x", "")
-        if not raw:
+        text = self.goto.get().strip()
+        if not text:
             return
         try:
-            addr = int(raw, 16)
-        except ValueError:
+            addr = machine_view.resolve_address(text, self.cpu, self.get_info())
+        except ValueError as problem:
+            self.range_label.configure(text=str(problem))
             return
-        self.follow.set(False)
-        self.page = (addr & config.BANK_MASK) // PAGE_WORDS
-        self.render()
+        self.show_address(addr)
 
     def show_address(self, address: int) -> None:
         """Page to the one holding address (a RAM index or a full address)."""
@@ -240,9 +248,20 @@ class MemoryPane(ttk.Frame):
         marked = []
 
         skip_next = False
+        info = self.get_info()
+        names = {}
+        if info is not None:
+            for name, address in info.symbols.items():
+                names.setdefault(address, name)
+        before = self.last.get(self.page)
+        changed = []
+        now = list(self.words[start:end])
+        self.last = {self.page: now}               # only the page on screen is kept
         for offset, index in enumerate(range(start, end)):
             word = self.words[index]
             addr = self.base | index
+            if before is not None and before[offset] != word:
+                changed.append(offset + 1)
             if addr == iar:
                 current = offset + 1
             mark = " "
@@ -259,14 +278,23 @@ class MemoryPane(ttk.Frame):
                                                         index + 1 < len(self.words)) else None
                     skip_next = ins.takes_operand
                     text = disassemble(word, operand)
-                lines.append(f"{mark} 0x{addr:07X}  {word:08X}  {text}")
+                line = f"{mark} 0x{addr:07X}  {word:08X}  {text}"
             else:
-                lines.append(f"{mark} 0x{addr:07X}  {word:08X}  "
-                             f"{self._signed(word):>12d}  {self._ascii(word)}")
+                line = (f"{mark} 0x{addr:07X}  {word:08X}  "
+                        f"{self._signed(word):>12d}  {self._ascii(word)}")
+            if self.show_float.get():
+                line += f"  {alu.bits_to_float(word):<12.6g}"
+            if self.show_text.get():
+                line += "  " + "".join(self._ascii(word >> s) for s in (0, 8, 16, 24))
+            if addr in names:
+                line += f"  <{names[addr]}>"
+            lines.append(line)
 
         self.text.configure(state="normal")
         self.text.delete("1.0", "end")
         self.text.insert("1.0", "\n".join(lines))
+        for line in changed:
+            self.text.tag_add("changed", f"{line}.0", f"{line}.end")
         for line in marked:
             self.text.tag_add("breakpoint", f"{line}.0", f"{line}.end")
         if current:
@@ -558,6 +586,8 @@ class SimulatorWindow(tk.Tk):
         middle.add(self.rom_pane, text="ROM")
         middle.add(self.ram_pane, text="RAM")
         middle.add(self.source_pane, text="C source")
+        for pane in (self.rom_pane, self.ram_pane):
+            pane.get_info = lambda: self.info
         self.view_panes = [StackPane(middle, self), HeapPane(middle, self), MapPane(middle, self)]
         for pane, name in zip(self.view_panes, ("Stack", "Heap", "Map")):
             middle.add(pane, text=name)

@@ -79,3 +79,41 @@ def regions(cpu, info):
     if heap_end < base + config.BANK_WORDS:
         out.append(("free", heap_end, base + config.BANK_WORDS))
     return [r for r in out if r[2] > r[1]]
+
+
+REGISTER_NAMES = {f"R{i}": i for i in range(16)}
+
+
+def resolve_address(text, cpu, info=None):
+    """The window's go-to box: a sum of terms joined by + and -, each a
+    register (R3, IAR, ESP, EBP: the value it holds), a label from the .map,
+    or a hex number (0x optional). "ESP-4", "main+10", "1000a". Raises
+    ValueError saying which term it could not read."""
+    total, sign, term = 0, 1, ""
+    for char in text.replace(" ", "") + "\0":
+        if char in "+-\0" and term:
+            total += sign * _term(term, cpu, info)
+            term = ""
+        elif char in "+-" and not term:
+            raise ValueError(f"a number is missing before '{char}'")
+        if char == "+" or char == "-":
+            sign = 1 if char == "+" else -1
+        elif char != "\0":
+            term += char
+    if text.strip() == "" or text.strip()[-1] in "+-":
+        raise ValueError("a number is missing")
+    return total
+
+
+def _term(term, cpu, info):
+    upper = term.upper()
+    if upper in REGISTER_NAMES:
+        return cpu.regs[REGISTER_NAMES[upper]]
+    if upper in ("IAR", "ESP", "EBP"):
+        return getattr(cpu, upper.lower())
+    if info is not None and term in info.symbols:
+        return info.symbols[term]
+    try:
+        return int(term, 16)
+    except ValueError:
+        raise ValueError(f"'{term}' is not a register, a label or a hex number") from None

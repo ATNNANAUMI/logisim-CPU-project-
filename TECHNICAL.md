@@ -809,7 +809,11 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
   (idle, answering, tool) and dollars so far, instruction count, measured
   rate, run state)
 * middle: ROM and RAM tabs, 256 words per page, with optional disassembly and
-  "follow IAR"; and a C source tab (below)
+  "follow IAR"; the go-to box takes a hex address, a label from the `.map`,
+  a register (`R3`, `ESP`) or a sum like `ESP-4` (`machine_view.resolve_address`);
+  optional float and text (4 packed characters) columns; label names at
+  their addresses; words changed since the last redraw in green; and a C
+  source tab (below). Not done: bookmarks
 * right: the display (`0x5C`) and the RGB screen (`0x6C`, a tab that comes
   forward when a program first draws; redrawn from the pixels that changed,
   or as one PPM picture when more than 400 did, at most `--screen-fps` times
