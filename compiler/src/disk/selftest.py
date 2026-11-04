@@ -2271,6 +2271,48 @@ def check_basic():
     return f"{cpu.instructions} instructions"
 
 
+def check_chip8():
+    """/bin/chip8 under the kernel against tynix/chip8_ref.py: each of the three
+    test programs (tynix/chip8/*.ch8: arithmetic and flags, sprites and the
+    delay timer, BCD, store/load, call and return, BNNN, CXNN) run for 80
+    frames prints the same state and screen as the Python reference, and the
+    reference gives the values the programs' headers promise; a missing file
+    and an empty one are reported with status 1."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+    import chip8_ref                    # tynix/
+
+    image = os.path.join(TMP.name, "chip8.img")
+    make_disk.make(image, programs=["chip8"], new=True, size_mb=1, log=lambda _: None)
+    names = ("arith", "draw", "memory")
+    with FileSystem(image) as disk:
+        for name in names:
+            disk.put(f"/{name}.ch8", (root / "tynix" / "chip8" / f"{name}.ch8").read_bytes())
+        disk.put("/empty.ch8", b"# nothing\n")
+    keys = "".join(f"chip8 -t 80 < /{n}.ch8\n" for n in names)
+    keys += "chip8 /nosuch.ch8\necho status $?\nchip8 /empty.ch8\nchip8\nhalt\n"
+    cpu, text = driver.run_in_simulator(_kernel().rom, keys, 200_000_000, disk=image, steady_clock=True)
+    assert cpu.halted, text
+    state = {}
+    for name in names:
+        want = chip8_ref.run((root / "tynix" / "chip8" / f"{name}.ch8").read_text(), 80)
+        start = text.index(f"/> chip8 -t 80 < /{name}.ch8\n") + len(f"/> chip8 -t 80 < /{name}.ch8\n")
+        got = text[start:start + len(want)]
+        assert got == want, (name, got, want)
+        state[name] = want.splitlines()[1].split()
+    a, d, m = state["arith"], state["draw"], state["memory"]
+    assert a[:15] == "0C 0A 00 01 F0 20 00 40 80 FF 0F 03 0A 01 82".split() and a[15] == "01", a
+    assert d[4:6] == ["01", "3C"] and d[15] == "01", d                      # the erase set VF
+    assert m[:5] == "11 22 33 44 0A".split() and m[6] == "00", m             # V6 was skipped by BNNN
+    assert "chip8: cannot read /nosuch.ch8" in text and "status 1" in text
+    assert "chip8: /empty.ch8 has no program" in text and "usage: chip8 FILE" in text
+    return f"{cpu.instructions} instructions"
+
+
 CHECKS = [
     check_format,
     check_text_round_trip,
@@ -2297,6 +2339,7 @@ CHECKS = [
     check_scripting,
     check_environment,
     check_basic,
+    check_chip8,
     check_snapshot,
     check_claude,
 ]

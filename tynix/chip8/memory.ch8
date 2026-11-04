@@ -1,0 +1,28 @@
+# BCD, store/load, call/return, BNNN, CXNN: V0=11 V1=22 V2=33 V3=44 V4=0A
+607B   # V0 = 7B (123)
+A300   # I = 300
+F033   # BCD of V0 at I..I+2: 1 2 3
+F265   # V0..V2 = memory at I
+6011   # V0 = 11
+6122   # V1 = 22
+6233   # V2 = 33
+6344   # V3 = 44
+A320   # I = 320
+F355   # store V0..V3 at I
+6000   # V0 = 0
+6100   # V1 = 0
+6200   # V2 = 0
+6300   # V3 = 0
+F365   # load V0..V3 back: 11 22 33 44
+6400   # V4 = 0
+2232   # call sub (adds 5 to V4)
+2232   # call sub again
+6506   # V5 = 6
+B219   # BNNN: jump to NNN + V0 (V0 = 11), landing on `after`
+66FF   # (never) V6 = FF
+C70F   # V7 = random AND 0F
+C8FF   # V8 = random AND FF
+C9FF   # V9 = random AND FF
+1230   # end: jump to itself
+7405   # V4 += 5
+00EE   # return
