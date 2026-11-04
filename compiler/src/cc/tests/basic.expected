@@ -1,0 +1,34 @@
+sum of squares385 
+10 7 4 1 
+big
+not small
+abab    4       x
+6 two|
+0 1 10 11 20 21 
+1 hello2.5 
+7 a, b-3 
+1 
+abefcdef
+A97 12.54.25 
+1 1024 -3 4 9 -1 2.5 
+-1 0 -1 0 -1 7 2 
+abc     1       2 
+name? Ada42 
+done
+100 GOSUB 500 : GOSUB 500
+110 PRINT A$, LEN(A$), "x"
+120 DIM T(5), N$(3)
+600 PRINT "done" : END
+14 
+5 
+?DIVISION BY ZERO
+?TYPE MISMATCH
+?UNDEFINED LINE
+0 
+?SYNTAX ERROR
+1 2 3 
+?NEXT WITHOUT FOR
+?RETURN WITHOUT GOSUB
+?BAD SUBSCRIPT
+x
+?DIVISION BY ZERO IN 10

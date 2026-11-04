@@ -35,7 +35,7 @@ DEFAULT_IMAGE = ROOT / "tynix" / "disk.img"
 PROGRAMS = ["echo", "hello", "primes", "structs", "guess", "gfx_demo", "image_demo",
             "snake", "stackfall", "game_of_life", "grapher", "qr", "disk_notes", "ed", "edit",
             "more", "grep", "find", "tree", "du", "diff", "hexdump", "calc",
-            "visual_file_manager", "claude"]
+            "visual_file_manager", "claude", "basic"]
 SOURCES = {"sh": "shell"}               # /bin/sh is tynix/shell.c
 REGIONS = {"diff": 0x140000}            # RAM a program asks for (cc build --exe --region):
                                         # diff's table of 1001 x 1001 words does not fit in 1M
@@ -61,6 +61,7 @@ starts the shell, /bin/sh from tynix/shell.c).
   du /bin          disk KB of each folder (-a: files too)
   diff a.txt b.txt   what changed between two text files
   hexdump /readme.txt   the values in hex
+  basic /home/user/basic/fizzbuzz.bas   a BASIC program (basic alone: type lines, RUN, LIST)
   calc 0x1100000 + 256   integer calculator (calc alone: a line at a time)
   ed notes.txt < edits.txt   a file as a program's input (cat < f too)
   export X=1       a variable for the programs (echo $X; set: the shell's
@@ -113,6 +114,11 @@ def make_home(disk):
             disk.mkdir(folder)
     if disk.lookup("/home/user/Documents/welcome.txt") is None:
         disk.put("/home/user/Documents/welcome.txt", WELCOME.encode())
+    if disk.lookup("/home/user/basic") is None:
+        disk.mkdir("/home/user/basic")
+    for sample in sorted((OS_DIR / "basic").glob("*.bas")):     # BASIC programs to run: basic /home/user/basic/NAME
+        if disk.lookup(f"/home/user/basic/{sample.name}") is None:
+            disk.put(f"/home/user/basic/{sample.name}", sample.read_bytes())
 
 
 def make_profile(disk):

@@ -86,7 +86,7 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       26 checks (incl. scripting (the shell's language, pipes, #!/bin/sh), snapshot (primes, the kernel + disk), environment (export, $NAME, PATH, /etc/profile, setenv inherited), claude (tynix/bin/claude.c + the device, fake backend), batch (sh -c, run), abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/bin/ed.c, tynix/bin/edit.c, the nine tools)
+│   │   └── selftest.py       27 checks (incl. basic (/bin/basic: a file, the prompt, SAVE and LOAD, an error line and the status), scripting (the shell's language, pipes, #!/bin/sh), snapshot (primes, the kernel + disk), environment (export, $NAME, PATH, /etc/profile, setenv inherited), claude (tynix/bin/claude.c + the device, fake backend), batch (sh -c, run), abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/bin/ed.c, tynix/bin/edit.c, the nine tools)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), memory.asm (memcpy, memset), setjmp.asm,
 │   │                         interrupt.asm (vector stubs; a kernel's stack and task switch); include/sys/tynix.h (system calls, TEX2)
@@ -140,6 +140,7 @@ logisim-CPU-project-/
 │   │   ├── tree.c, du.c      a folder as a tree (-s sizes); disk KB of folders and files (-a)
 │   │   ├── diff.c, hexdump.c changed lines of two text files (LCS, Unix normal format); values in hex
 │   │   ├── calc.c            32-bit integer calculator (C precedence; no argument: a line at a time)
+│   │   ├── basic.c           a home-computer BASIC: numbered lines, RUN/LIST/SAVE/LOAD, strings, arrays, float numbers, the screen (PLOT, LINE, TEXT), `basic FILE` runs a file; samples in tynix/basic/*.bas
 │   │   ├── visual_file_manager.c  a two-pane yazi-like file manager on the RGB screen (j k h l, space select, y x p, u, r d a, ~ home, q)
 │   │   └── claude.c          talk to Claude through the Claude device (0x9C): chat, `claude QUESTION`, /commands; runs
 │   │                         Claude's commands (sh -c, stdin/stdout files, timeout kill) and writes its files

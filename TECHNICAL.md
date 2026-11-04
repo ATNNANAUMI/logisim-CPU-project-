@@ -1457,7 +1457,7 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 26 checks: `scripting` (the shell's language under the kernel:
+python compiler/src/disk/selftest.py  # 27 checks: `scripting` (the shell's language under the kernel:
                                       # a #!/bin/sh script, loops, break 2, functions, local, $( ), $(( )),
                                       # *, pipes of programs and built-ins, a writer ending with 141,
                                       # & on a pipeline, "> " lines, /tmp left empty), `snapshot` (primes.c and the kernel with a disk saved
@@ -2035,6 +2035,7 @@ With no disk, or no `/bin/sh`, the kernel says so and halts.
 | `tynix/bin/diff.c` | the lines that differ between two text files (11.3; 13.2K words) |
 | `tynix/bin/hexdump.c` | the values of files in hexadecimal (11.3; 11.6K words) |
 | `tynix/bin/calc.c` | a 32-bit integer calculator (11.3; 7.6K words) |
+| `tynix/bin/basic.c` | a BASIC interpreter (11.3): the language is described in the file's header; `basic FILE` runs a program (the samples are `tynix/basic/*.bas`, copied to `/home/user/basic/`), alone it is a prompt; `compiler/src/cc/tests/basic.c` runs the same source under gcc and tiny C |
 | `tynix/bin/visual_file_manager.c` | a two-pane file manager on the RGB screen, in the style of yazi (section 11.4; 22.8K words) |
 | `tynix/bin/claude.c` | `claude`: talk to Claude through the Claude device, which runs commands on the CPU for it (section 11.5; 13.5K words) |
 | `tynix/cpu_claude.md` | the Claude device's system prompt: the machine, the characters allowed, the tools, the Tynix commands, what not to run, the limits (11.5) |
@@ -2410,6 +2411,15 @@ holds text while it runs and is blank after.
 
 
 ### 11.3 The tools (`tynix/bin/more.c` ... `tynix/bin/calc.c`)
+
+(`tynix/bin/basic.c` is a ninth program, a BASIC; its header lists the language.
+Lines are interpreted from their text each time, `execute()` follows the
+`GOTO`/`GOSUB`/`NEXT`/`WEND` redirects of the statements, numbers are 32-bit
+floats and strings are malloc'd. Runtime errors print `?TEXT IN LINE` and
+return to the prompt (`longjmp`); `basic FILE` exits with status 1 on one.
+The `PLOT`, `LINE`, `CIRCLE`, `TEXT`, `CLS` statements and `INKEY$` use `gfx.h`
+and `key_pressed()`, and are compiled out under `-DBASIC_TEST`, which is how
+`compiler/src/cc/tests/basic.c` runs a whole session under gcc and tiny C.)
 
 Eight small programs for `/bin`, one file each, written like `ed.c`: a header
 comment (what, how built, usage), errors as `NAME: PATH: reason` (the

@@ -2225,6 +2225,52 @@ def check_snapshot():
     return ", ".join(notes)
 
 
+def check_basic():
+    """/bin/basic under the kernel: `basic FILE` runs the sample FizzBuzz and
+    exits; typed at the prompt it keeps numbered lines, RUN, LIST, INPUT, SAVE
+    and LOAD (a text file on the disk), and reports a runtime error with its
+    line; the status of a failing `basic FILE` is 1 ($? in the shell)."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+
+    image = os.path.join(TMP.name, "basic.img")
+    make_disk.make(image, programs=["basic"], new=True, size_mb=1, log=lambda _: None)
+    with FileSystem(image) as disk:
+        disk.put("/fizz.bas", (root / "tynix" / "basic" / "fizzbuzz.bas").read_bytes())
+        disk.put("/bad.bas", b"10 PRINT 1\n20 PRINT 1 / 0\n")
+    keys = ("basic /fizz.bas\n"
+            "basic /bad.bas\n"
+            "echo status $?\n"
+            "basic\n"
+            "10 INPUT N$ : PRINT \"hi \"; N$\n"
+            "20 PRINT LEN(N$) * 2\n"
+            "LIST\n"
+            "RUN\n"
+            "Ada\n"
+            "SAVE \"/t.bas\"\n"
+            "NEW\n"
+            "LIST\n"
+            "LOAD \"/t.bas\"\n"
+            "LIST\n"
+            "BYE\n"
+            "halt\n")
+    cpu, text = driver.run_in_simulator(_kernel().rom, keys, 200_000_000, disk=image)
+    assert cpu.halted, text
+    out = text[text.index("/> basic /fizz.bas"):]
+    assert "\n1 \n2 \nFizz\n4 \nBuzz\n" in out and "FizzBuzz\n" in out and out.count("Fizz") >= 10, out
+    assert "1 \n?DIVISION BY ZERO IN 20\n" in out and "status 1" in out, out
+    assert "10 INPUT N$ : PRINT \"hi \"; N$\n20 PRINT LEN(N$) * 2\n" in out, out
+    assert "hi Ada\n6 \n" in out, out
+    with FileSystem(image) as disk:
+        assert disk.get("/t.bas").decode() == '10 INPUT N$ : PRINT "hi "; N$\n20 PRINT LEN(N$) * 2\n'
+        assert disk.check() == [], disk.check()
+    return f"{cpu.instructions} instructions"
+
+
 CHECKS = [
     check_format,
     check_text_round_trip,
@@ -2250,6 +2296,7 @@ CHECKS = [
     check_batch,
     check_scripting,
     check_environment,
+    check_basic,
     check_snapshot,
     check_claude,
 ]
