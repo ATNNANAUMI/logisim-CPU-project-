@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # five self-check suites (assembler 24, simulator 55, C compiler 22, image tool 10, disk tool 28), then check_docs.py
+python run.py test                                   # five self-check suites (assembler 25, simulator 55, C compiler 22, image tool 10, disk tool 28), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
@@ -37,6 +37,7 @@ python cpu_sim/src/main.py --load-state run.state [--headless] [--disk copy.img]
 python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img [--claude-model haiku|sonnet|opus|fable] [--claude-system FILE]   # then `claude` in Tynix (pip install anthropic, a key on the PC)
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom [--seconds N]   # real circuit, headless
 python logisim/microcode/microcode.py [--list]       # CONTROL_SECTION as a 64K x 32 microcode ROM -> logisim/microcode/microcode.rom
+python logisim/microcode/datapath_page.py [-o datapath.html]   # the datapath as an HTML page: pick an instruction, step through its micro-steps (default compiler/ROM/datapath.html)
 python logisim/microcode/verify.py [--quick]         # that ROM against the circuit's gates, every IR/step/flags (needs javac; minutes)
 
 python compiler/src/cc run prog.c [--keys $'text\n'] [--stats] [--disk disk.img] [--claude-model NAME]   # C: build + run in the simulator

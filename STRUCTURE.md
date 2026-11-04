@@ -38,6 +38,7 @@ logisim-CPU-project-/
 │   ├── microcode/            CONTROL_SECTION as a 64K x 32 microcode ROM (not wired into CPU.circ yet; TECHNICAL 2.5)
 │   │   ├── microcode.py      the table (steps per instruction, bit layout) -> microcode.rom; --list prints it
 │   │   ├── microcode.rom     the generated image ("v2.0 raw")
+│   │   ├── datapath_page.py  the datapath as one HTML page: pick an instruction, step through its micro-steps (control lines, not values)
 │   │   ├── verify.py         runs CONTROL_SECTION's gates through Logisim for every IR/step/flags, compares with the ROM
 │   │   └── ControlSweep.java the sweep verify.py compiles and runs (needs javac + the Logisim jar)
 │   └── old_notes/            old notes: stack micro-steps, personal TODO
@@ -56,7 +57,7 @@ logisim-CPU-project-/
 │   │   ├── errors.py         AsmError (file:line: message), AsmErrors (batch)
 │   │   ├── disasm.py         disasm: a .rom or TEX2 .exe back to assembly that builds the same words (labels, CALL/RET, .string)
 │   │   ├── isa_page.py       the ISA as one HTML page (assembly_syntax.md 4 parsed, bit fields, micro-steps, decoder, encoder)
-│   │   ├── selftest.py       24 checks (incl. building every compiler/examples program, disasm round trips, isa_page)
+│   │   ├── selftest.py       25 checks (incl. building every compiler/examples program, disasm round trips, isa_page, datapath_page)
 │   │   └── asm_grammar.py    generates railroad-diagram HTML of the grammar (needs railroad-diagrams)
 │   ├── src/cc/               C compiler (run as `python compiler/src/cc <cmd>`); imports src/asm's modules
 │   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; build: --exe --region; run: --keys --steps --stats --trace)

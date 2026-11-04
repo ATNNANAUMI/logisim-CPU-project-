@@ -627,6 +627,29 @@ msg:    .string "hi\\n"
     return f"{runs} round trips"
 
 
+def check_datapath_page():
+    """logisim/microcode/datapath_page.py: every token of every step of every
+    instruction is one the page knows (a bus driver, a latch, or a control line
+    that only the text shows), each instruction has its two fetch steps and
+    the steps microcode.py lists, and the page embeds them all."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent / "logisim" / "microcode"))
+    import datapath_page as dp
+    import microcode
+    plain = {"BUS_OUT", "BUS_IN", "STEP_RST", "STEP0", "HALT_SET", "OP", "ALU", "(only", "if", "the", "flag", "test",
+             "holds;", "otherwise", "STEP_RST)"}
+    ins = dp.instructions()
+    names = [i["name"] for i in ins]
+    assert len(names) == len(set(names)) and {"ADD", "ADD imm", "LD", "STK CALL", "HALT", "RJF", "COMM"} <= {n.split(" ")[0] if n.startswith("COMM") else n for n in names}, names
+    for i in ins:
+        assert i["steps"][:2] == microcode.FETCH, i["name"]
+        for step in i["steps"]:
+            for token in step.split():
+                assert token in dp.DRIVES or token in dp.LATCHES or token in plain or token.startswith("STK="), (i["name"], token)
+    text = dp.page()
+    assert text.count("<script>") == 1 and '"name": "ADD"' in text and "__DATA__" not in text
+
+
 def check_isa_page():
     """isa_page.py: the page builds, has a row for every mnemonic of
     encoding.py (and section 4 has no row the assembler doesn't know), and
@@ -701,6 +724,7 @@ CHECKS = [
     check_examples_build,
     check_disasm,
     check_isa_page,
+    check_datapath_page,
 ]
 
 

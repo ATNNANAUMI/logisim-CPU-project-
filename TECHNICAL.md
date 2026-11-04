@@ -569,6 +569,11 @@ offset is added in 32 bits and the IAR keeps its low 25.
 
 ### 2.5 The control section as a microcode ROM (`logisim/microcode/`)
 
+`datapath_page.py` turns the same table into an HTML page: choose an instruction and
+step through its micro-steps, with the part that drives the bus lit orange and the
+parts that latch from it blue (control lines only; no values on the bus, which needs
+a micro-step executor, `PLAN.md` item 15, not written).
+
 A replacement for `CONTROL_SECTION`'s decoding gates, for a faster copy of
 the circuit; `CPU.circ` itself doesn't use it yet. `microcode.py` holds the
 table (one list of steps per instruction, read off the circuit) and writes
@@ -953,6 +958,7 @@ python compiler/src/asm link     prog.obj lib.obj    [-o prog.rom] [--map] [--li
 python compiler/src/asm build    prog.asm lib.asm    [-o prog.rom] [--map] [--lib lib.asm]
 python compiler/src/asm disasm   prog.rom|prog.exe   [-o prog.dis.asm] [--map prog.map] [--raw]
 python compiler/src/asm/isa_page.py                  [-o isa.html]
+python logisim/microcode/datapath_page.py            [-o datapath.html]   # the datapath, micro-step by micro-step
 ```
 
 `isa_page.py` (2026-11-03) writes the instruction set as one self-contained
@@ -1039,7 +1045,7 @@ problems of all files (bad source, unreadable file, broken `.obj`), as
 | `errors.py` | `AsmError` (one message with file and line) and `AsmErrors` (a batch) |
 | `disasm.py` | `disasm`: a `.rom` or TEX2 `.exe` back to assembly that builds the same words; `round_trip()` for the self-checks |
 | `isa_page.py` | writes the instruction set as one HTML page (`compiler/ROM/isa.html` unless `-o`): section 4 of `assembly_syntax.md` parsed, bit fields from words the assembler writes, flags, micro-steps from `logisim/microcode/microcode.py`, a decoder (`isa.py`'s rules, tables from `encoding.py`) and an encoder |
-| `selftest.py` | 24 checks for the assembler and linker |
+| `selftest.py` | 25 checks for the assembler and linker |
 | `asm_grammar.py` | writes railroad diagrams of the grammar to `asm_grammar.html` (needs `pip install railroad-diagrams`) |
 
 ### 4.3 Assembling (two passes)
@@ -1308,7 +1314,7 @@ Assembly is under `asm/` (`programs/`, `stdlib/`, `two_files/`, `tests/` for cir
 | `c/tests/benchmark.c` | C: twelve square roots (the old bit-by-bit `sqrt` as the reference, Quake III's inverse square root with two constants, one or two Newton steps or a residual correction, Newton's method from `y = x` or from two bit-based first guesses) timed with `clock()` over 20 000 inputs and checked against the reference: max absolute and relative error, how many results differ. `-D ONLY_ALGORITHM=n` runs one; `-D COUNT_ONLY` drops the timing so `--stats` gives that one's instruction count. Needs `--steps 600000000` with `cc run` |
 | `c/tests/sqrt_benchmark.c` | C: the library's `sqrt()` (Newton from a bit-based guess, then an exact rounding check) against the bit-by-bit one it replaced, 20 000 inputs 5 times: every result the same, about 1.4× faster. Needs `--steps 400000000` with `cc run` |
 | `c/graphics/video_player.c` | C: plays a video made by `compiler/src/img/video.py` (7.5) at its own speed, waiting on `clock()` (the timer); prints how many frames were late. Plays `c/graphics/videos/demo.h` (from `demo.mp4`, ffmpeg's moving test picture, 4 s); `-I . -D 'VIDEO="clip.h"'` plays `./clip.h` instead. Needs `--steps 2000000000` with `cc run` (waiting runs millions of instructions a second) |
-| `c/games/game_of_life.c` | C: Conway's Game of Life on the RGB screen, a 64×64 world that wraps around (2×2-pixel cells, only changed cells redrawn). First checks itself on well-known patterns (24 checks: still lifes, oscillators' periods, spaceships' moves, the diehard dying at 130, the glider gun), then shows seven scenes in turn: Gosper glider gun + eater, oscillators and still lifes, spaceships, R-pentomino, diehard, acorn, random soup. Keys `1`–`7` pick a scene, `n` next, `r` restart, space pause, `s` one step, `q` quit; the hex display shows the generation. `-D SCENE=n` starts at scene n, `-D FULL_TEST` also checks that the first three scenes repeat. 100 000–330 000 instructions a generation |
+| `c/games/game_of_life.c` | C: Conway's Game of Life on the RGB screen, a 64×64 world that wraps around (2×2-pixel cells, only changed cells redrawn). First checks itself on well-known patterns (25 checks: still lifes, oscillators' periods, spaceships' moves, the diehard dying at 130, the glider gun), then shows seven scenes in turn: Gosper glider gun + eater, oscillators and still lifes, spaceships, R-pentomino, diehard, acorn, random soup. Keys `1`–`7` pick a scene, `n` next, `r` restart, space pause, `s` one step, `q` quit; the hex display shows the generation. `-D SCENE=n` starts at scene n, `-D FULL_TEST` also checks that the first three scenes repeat. 100 000–330 000 instructions a generation |
 | `c/graphics/grapher.c` | C: a graphing calculator on the RGB screen. Type a function of x on the bottom line (`+ - * / ^`, implied products like `2x`, `\|x\|`, `sin cos tan sqrt ln log exp ...`, `pi`, `e`) and Enter: it is parsed into a small stack program and drawn, up to six functions in different colours, two pixels thick, over a grid with numbers on the axes; gaps where the value is not a number, jumps like tan's left unjoined. Commands `clear`, `reset`, `zoom f`, `in`, `out`, `move dx dy`, `view x0 x1 y0 y1`, `demo`, `help` (the list of what can be typed, also on the screen at the start). 100–200 ms a function in the simulator |
 | `c/graphics/qr.c` | C: a QR code encoder written from the standard, drawn on the RGB screen as big as it fits. Starts with this project's GitHub link; type any text and Enter for a new code (an empty line goes back to the link). Byte mode, versions 1–10, levels L/M/Q/H (`-D LEVEL=n`, M by default), Reed-Solomon over GF(256) with the blocks interleaved, and all eight masks scored by the standard's penalty rules (`-D MASK=n` forces one). `-D TEXT="..."` the first text, `-D DARK=c` the module colour. Every version and level decodes with `zbarimg` and matches `qrencode` module for module with the same mask. About 2.6 million instructions for the link (0.9 s in the simulator) |
 | `c/games/maze3d.c` | C: a raycaster: a seeded 8×8 maze walked in first-person 3D on the RGB screen (128 rays 2 pixels wide, 32-bit floats, only changed columns redrawn), a minimap, `W`/`S` walk, `A`/`D` turn, `Q`/`E` sidestep, `M` map, `R` new maze, `X` quits; the green door in the far corner ends it with the time; the self-check plays it (same keys, same screen; a player placed by the door walks out) |
@@ -1411,7 +1417,7 @@ repo.
 ### 7.3 Self-checks
 
 ```
-python compiler/src/asm/selftest.py   # 24 checks: encodings, the interrupt group, vectors and start-up code, values, strings, jumps,
+python compiler/src/asm/selftest.py   # 25 checks: encodings, the interrupt group, vectors and start-up code, values, strings, jumps,
                                       # CALL/RET, SAVE/RESTORE, linking, a program past
                                       # 64K words and the size limits, link errors
                                       # (RAM calls, unexported externs), warnings,
