@@ -320,6 +320,52 @@ def check_library_override():
     assert out == "ABC!", repr(out)
 
 
+def check_interrupts():
+    """Interrupts from C: the example sleeps with WAIT while a timer IRQ and
+    a key IRQ are served by a C handler; an unhandled FAULT (stack limit)
+    stops the CPU; a TRAP with a handler returns; a handler can redirect
+    the return."""
+    root = HERE.parent.parent
+    program, _ = driver.build([str(root / "examples" / "c" / "basics" / "interrupts.c")])
+    cpu, text = driver.run_in_simulator(program.rom, "abc", 5_000_000)
+    assert text == ("keys typed before the first tick: abc\ntick 1\ntick 2\ntick 3\n"
+                    "tick 4\ntick 5\n5 ticks, stack pointer back where it was: yes\n"), text
+    assert cpu.halted and cpu.ie == 0 and cpu.esp < 0x200
+
+    source = """
+#include <stdio.h>
+#include <cpu.h>
+static int traps;
+static unsigned on_trap(void) { traps++; return 0; }
+static unsigned on_fault(void)
+{
+    printf("fault at stack %u\\n", stack_pointer() > 0x1000000);
+    halt();
+    return 0;
+}
+static int deep(int n) { return n == 0 ? 0 : 1 + deep(n - 1); }
+int main(void)
+{
+    set_interrupt_handler(INT_TRAP, on_trap);
+    software_interrupt();
+    software_interrupt();
+    printf("traps %d\\n", traps);
+    set_interrupt_handler(INT_FAULT, on_fault);
+    set_stack_limit(stack_pointer() + 200);
+    printf("deep 10 = %d\\n", deep(10));
+    printf("deep 1000 = %d\\n", deep(1000));
+    printf("not reached\\n");
+    return 0;
+}
+"""
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "t.c").write_text(source)
+        program, _ = driver.build([str(Path(tmp) / "t.c")])
+    cpu, text = driver.run_in_simulator(program.rom, "", 5_000_000)
+    assert text == "traps 2\ndeep 10 = 10\nfault at stack 1\n", text
+    assert cpu.halted
+
+
 def check_names_the_assembler_reserves():
     """C names that are instruction or register names get a _X prefix."""
     out = output(r"""
@@ -443,6 +489,173 @@ def check_line_info():
         assert info.line_at(cpu.iar)[1] == 3
 
 
+def check_disasm():
+    """compiler/src/asm/disasm.py on C: every C example and every program of
+    tynix/ (its /bin), built as a ROM image (when it builds alone) and as a
+    program for the OS (TEX2, not the kernel), disassembled and linked again,
+    gives the same words (and relocations), with and without its .map."""
+    import disasm                       # compiler/src/asm (driver puts it on the path)
+    import linker
+    root = HERE.parent.parent.parent
+    sources = sorted((root / "compiler" / "examples" / "c").rglob("*.c")) + sorted((root / "tynix").rglob("*.c"))
+    runs = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        for src in sources:
+            for exe in (False, True):
+                if exe and src.name == "kernel.c":
+                    continue
+                try:
+                    program, _ = driver.build([str(src)], exe=exe)
+                except BuildError:
+                    assert not exe, f"{src.name} doesn't build --exe"
+                    continue                    # a program that needs the kernel's calls
+                out = tmp / (src.stem + (".exe" if exe else ".rom"))
+                if exe:
+                    out.write_bytes(driver.exe_bytes(program, 0x123456))
+                else:
+                    out.write_text(linker.format_raw(program.rom))
+                map_ = tmp / (src.stem + (".exe" if exe else "") + ".map")
+                map_.write_text(linker.format_map(program, out.name))
+                for m in (None, map_):
+                    problem = disasm.round_trip(out, m)
+                    assert problem is None, f"{src.relative_to(root)}: {problem}"
+                    runs += 1
+    return f"{runs} round trips"
+
+
+# A player for check_stackfall: the pieces as stackfall.c has them, and a
+# placement chosen by the usual heights/holes/bumps measure.
+STACKFALL_SHAPES = [(0,1,1,1,2,1,3,1),(1,0,2,0,1,1,2,1),(1,0,0,1,1,1,2,1),(1,0,2,0,0,1,1,1),
+          (0,0,1,0,1,1,2,1),(0,0,0,1,1,1,2,1),(2,0,0,1,1,1,2,1)]
+SF_W, SF_H = 10, 20
+
+def _sf_cells(p, r):
+    out = []
+    for i in range(4):
+        cx, cy = STACKFALL_SHAPES[p][2*i], STACKFALL_SHAPES[p][2*i+1]
+        if p != 1:
+            for _ in range(r):
+                cx, cy = (3 if p == 0 else 2) - cy, cx
+        out.append((cx, cy))
+    return out
+
+def _sf_fits(board, p, r, x, y):
+    for cx, cy in _sf_cells(p, r):
+        cx += x; cy += y
+        if cx < 0 or cx >= SF_W or cy >= SF_H: return False
+        if cy >= 0 and board[cy][cx]: return False
+    return True
+
+def _sf_evaluate(board):
+    heights = []
+    holes = 0
+    for x in range(SF_W):
+        h = 0
+        for y in range(SF_H):
+            if board[y][x]:
+                h = SF_H - y; break
+        heights.append(h)
+        seen = False
+        for y in range(SF_H):
+            if board[y][x]: seen = True
+            elif seen: holes += 1
+    full = sum(all(row) for row in board)
+    bump = sum(abs(heights[i] - heights[i+1]) for i in range(SF_W-1))
+    return -0.51 * sum(heights) + 0.76 * full - 0.36 * holes - 0.18 * bump
+
+def _sf_best_move(board, p):
+    best = None
+    for r in range(4 if p != 1 else 1):
+        for x in range(-3, SF_W):
+            if not _sf_fits(board, p, r, x, -1): continue
+            y = -1
+            while _sf_fits(board, p, r, x, y + 1): y += 1
+            b = [row[:] for row in board]
+            for cx, cy in _sf_cells(p, r):
+                if y + cy >= 0: b[y + cy][x + cx] = 1
+            s = _sf_evaluate(b)
+            if best is None or s > best[0]: best = (s, r, x)
+    return best
+
+
+def check_stackfall():
+    """compiler/examples/c/games/stackfall.c on the simulator, with a clock that
+    counts instructions (so the same run every time) and the first key typed
+    at once (so the same seed): a player that reads the board from RAM and
+    types its moves plays 40 pieces (rows cleared, the screen's pixels and
+    the score are always the same), then Q; and a board set up in RAM where one
+    piece clears a row and a block falling into the gap clears another: a
+    chain of 2 (the gravity twist)."""
+    import array
+    import hashlib
+    import sys
+    sys.path.append(str(driver.SIM_DIR))
+    from cpu import CPU                 # cpu_sim/src
+    from devices import Timer
+
+    program, _ = driver.build([str(HERE.parent.parent / "examples" / "c" / "games" / "stackfall.c")])
+    at = {s.name: s.address for s in program.symbols}
+
+    def machine():
+        cpu = CPU()
+        # 2000 instructions a ms; cpu.instructions moves on when run() returns,
+        # so the game is run in slices
+        cpu.bus.timer = Timer(clock=lambda: cpu.instructions / 2_000_000)
+        cpu.bus.timer.reset()
+        cpu.mem.load_rom(program.rom)
+        cpu.bus.keyboard.type("x")      # the key that starts it: at once
+        cpu.run(3_000_000)
+        return cpu
+
+    def read(cpu, name, i=0):
+        return cpu.mem.read(at[name] + i)
+
+    def board(cpu):
+        return [[read(cpu, "board", y * SF_W + x) != 0 for x in range(SF_W)] for y in range(SF_H)]
+
+    cpu = machine()
+    for _ in range(40):
+        if read(cpu, "over"):
+            break
+        _, r, x = _sf_best_move(board(cpu), read(cpu, "piece"))
+        cpu.bus.keyboard.type("w" * r)
+        cpu.run(100_000)
+        px = read(cpu, "px")
+        px = px - (1 << 32) if px & 0x80000000 else px
+        cpu.bus.keyboard.type(("a" * (px - x) if px > x else "d" * (x - px)) + " ")
+        cpu.run(1_000_000)
+    rows, score, chain = read(cpu, "rows"), read(cpu, "score"), read(cpu, "chain_best")
+    # the pixels, not the PNG: a PNG's bytes depend on the zlib that compressed it
+    screen = hashlib.sha1(array.array("H", cpu.bus.video.pixels).tobytes()).hexdigest()[:12]
+    cpu.bus.keyboard.type("q")
+    cpu.run(10_000_000)
+    text = cpu.bus.display.text
+    assert cpu.halted and text == f"Stackfall: score {score}, rows {rows}, level {1 + rows // 10}, longest chain {chain}\n", text
+    assert (rows, score, screen) == STACKFALL_RUN, (rows, score, screen)
+
+    # the chain: row 19 full but column 0, row 18 full but column 9, a block
+    # at row 17 column 0 with nothing under it; a bar stood up in column 9
+    # fills row 18, which clears, the block falls into row 19, which clears
+    cpu = machine()
+    for x in range(SF_W):
+        for y in range(SF_H):
+            filled = (y == 19 and x != 0) or (y == 18 and x != 9) or (y == 17 and x == 0)
+            cpu.mem.write(at["board"] + y * SF_W + x, 0xF800 if filled else 0)
+    for name, value in (("piece", 0), ("rot", 0), ("px", 3)):
+        cpu.mem.write(at[name], value)
+    cpu.bus.keyboard.type("wdddd ")
+    for _ in range(30):                 # in slices: the clock moves on between run()s
+        cpu.run(100_000)
+    assert (read(cpu, "rows"), read(cpu, "chain_best")) == (2, 2), (read(cpu, "rows"), read(cpu, "chain_best"))
+    b = board(cpu)
+    assert not any(b[19][1:9]) and b[19][9] and b[18][9] and b[17][9], b[17:]   # the bar's three cells, settled
+    return f"{rows} rows, score {score}; a chain of 2"
+
+
+STACKFALL_RUN = (5, 1626, "b82b1b6b2c93")       # rows, score, the screen: what the player above gets
+
+
 CHECKS = [
     check_preprocessor,
     check_errors,
@@ -455,11 +668,14 @@ CHECKS = [
     check_input,
     check_globals_reset,
     check_library_override,
+    check_interrupts,
     check_names_the_assembler_reserves,
     check_mixed_with_assembly,
     check_big_memory,
     check_command_line,
     check_line_info,
+    check_disasm,
+    check_stackfall,
     check_programs,
 ]
 

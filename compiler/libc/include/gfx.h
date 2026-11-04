@@ -35,6 +35,14 @@
  *                                  transparent pixels left out. Returns 0,
  *                                  or -1 if img is not an image
  *   GFX_IMAGE_WIDTH(img), GFX_IMAGE_HEIGHT(img)   its size
+ *   gfx_lost()                     1 once after the screen was taken away and
+ *                                  given back (Tynix: another program had the
+ *                                  foreground and drew on it), so a program that
+ *                                  remembers what it drew must draw it all
+ *                                  again; else 0 (always 0 outside Tynix)
+ *
+ * Under Tynix only the foreground program draws: a gfx_ call from one in the
+ * background waits until it is brought back (fg in the shell).
  *
  * If the screen is wired differently, change the GFX_ numbers below (and
  * VIDEO_* in cpu_sim/src/config.py for the simulator).
@@ -90,5 +98,8 @@ int gfx_char(int x, int y, int c, int fg, int bg);
 int gfx_text(int x, int y, const char *s, int fg, int bg);
 void gfx_bitmap(int x, int y, int w, int h, const int *pixels);
 int gfx_image(int x, int y, const unsigned int *img);
+int gfx_lost(void);
+
+extern void (*_gfx_hold)(void);     /* every gfx_ call runs it first when set (Tynix) */
 
 #endif

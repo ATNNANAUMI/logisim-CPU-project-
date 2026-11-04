@@ -28,7 +28,8 @@
  * Keys (the simulator window's keyboard): 1-7 a scene, n the next one,
  * r restart this one (a new soup for 7), space pause/continue, s one
  * generation while paused, q quit (back to the OS's shell when it was run
- * from there: os/shell.c).
+ * from there: tynix/shell.c). Under Tynix it waits while another program has
+ * the screen, and draws the whole world again when it is back in front.
  *
  *   -D SCENE=n        start with scene n (default 1)
  *   -D FULL_TEST      also check that scenes 1-3 repeat (27 checks, about
@@ -174,6 +175,17 @@ static void draw_row(const char *old, const char *new, int y)
     for (x = 0; x < width; x++)
         if (old[x] != new[x])
             draw_cell(x, y, new[x]);
+}
+
+/* the whole world again (under Tynix, after another program had the screen) */
+static void redraw(void)
+{
+    int x, y;
+    gfx_fill_rect(0, 0, GFX_WIDTH, GFX_HEIGHT, GFX_BLACK);
+    for (y = 0; y < height; y++)
+        for (x = 0; x < width; x++)
+            if (CELL_AT(cur, x, y))
+                draw_cell(x, y, 1);
 }
 
 /* an empty world of w x h cells (at most MAX x MAX) */
@@ -456,6 +468,10 @@ int main(void)
     start_scene(scene);
     died = 0;
     for (;;) {
+        if (_gfx_hold)
+            _gfx_hold();        /* Tynix: draw_cell writes to the device itself, so wait for the front here */
+        if (gfx_lost())
+            redraw();
         key = key_pressed();
         if (key == 'q')
             return 0;

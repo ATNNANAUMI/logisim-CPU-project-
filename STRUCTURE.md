@@ -5,7 +5,8 @@ Logisim-evolution 4.1.0, plus its toolchain: an assembler and linker written
 in Python, an assembly standard library, a C compiler ("tiny C") with its
 own C library, and a Python simulator that runs the same ROM images as the
 circuit. Python 3.10+, standard library only (`tkinter` for the simulator
-window). Detailed docs are in `TECHNICAL.md`. The assembly language
+window; the `anthropic` package only for the Claude device, imported when it
+is first used). Detailed docs are in `TECHNICAL.md`. The assembly language
 reference is `compiler/assembly_syntax.md`, the C one `compiler/c_language.md`.
 
 ## Pipeline
@@ -25,8 +26,11 @@ logisim-CPU-project-/
 ├── README.md                 short overview + quick start
 ├── TECHNICAL.md              full technical reference (ISA, circuit, sim, asm, stdlib, open questions, outdated list)
 ├── STRUCTURE.md              this file
+├── PLAN.md                   action plan for the next 20 features (2026-11-03): what, how, checks, follow-ups, verdicts
 ├── run.py                    single entry point: `python run.py [asm|sim|build|test|img] ...` (menu if no args)
-├── check_docs.py             checks the docs against the repo (paths exist, examples and TWEAKS listed); part of `run.py test`
+├── .github/workflows/test.yml   CI: `run.py test` on Python 3.10 and 3.13; difftest.py + fuzz.py (200, seed 1) against gcc
+├── check_docs.py             checks the docs against the repo (paths exist, examples and TWEAKS listed, every mnemonic in
+│                             assembly_syntax.md 4); part of `run.py test`
 │
 ├── logisim/
 │   ├── CPU.circ              THE CIRCUIT. Top-level circuit = "PC" (RGB Video fed by RGB_Display)
@@ -36,7 +40,7 @@ logisim-CPU-project-/
 │   │   ├── microcode.rom     the generated image ("v2.0 raw")
 │   │   ├── verify.py         runs CONTROL_SECTION's gates through Logisim for every IR/step/flags, compares with the ROM
 │   │   └── ControlSweep.java the sweep verify.py compiles and runs (needs javac + the Logisim jar)
-│   └── cpu datas/            old notes: stack micro-steps, personal TODO
+│   └── old_notes/            old notes: stack micro-steps, personal TODO
 │
 ├── compiler/
 │   ├── assembly_syntax.md    CURRENT assembly language reference
@@ -50,10 +54,12 @@ logisim-CPU-project-/
 │   │   ├── objfile.py        ObjectFile / Reloc (abs|rel, rom_only for CALL targets), saved as JSON (.obj)
 │   │   ├── linker.py         .obj files → ROM image; --lib: only the needed parts; checks externs/RAM calls; format_raw(), format_map()
 │   │   ├── errors.py         AsmError (file:line: message), AsmErrors (batch)
-│   │   ├── selftest.py       20 checks (incl. building every compiler/examples program)
+│   │   ├── disasm.py         disasm: a .rom or TEX2 .exe back to assembly that builds the same words (labels, CALL/RET, .string)
+│   │   ├── isa_page.py       the ISA as one HTML page (assembly_syntax.md 4 parsed, bit fields, micro-steps, decoder, encoder)
+│   │   ├── selftest.py       24 checks (incl. building every compiler/examples program, disasm round trips, isa_page)
 │   │   └── asm_grammar.py    generates railroad-diagram HTML of the grammar (needs railroad-diagrams)
 │   ├── src/cc/               C compiler (run as `python compiler/src/cc <cmd>`); imports src/asm's modules
-│   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; build: --exe; run: --keys --steps --stats --trace)
+│   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; build: --exe --region; run: --keys --steps --stats --trace)
 │   │   ├── lexer.py, preprocessor.py   tokens; #include/#define/#if, macro expansion (hide sets)
 │   │   ├── typesys.py        types (sizes in words), promotions, compatibility
 │   │   ├── nodes.py          syntax tree Node, Obj (variable/function)
@@ -61,9 +67,9 @@ logisim-CPU-project-/
 │   │   ├── regalloc.py       which locals get registers; which a call must keep
 │   │   ├── codegen.py        tree → assembly (Val/Addr model, calls, frames, switch tables)
 │   │   ├── peephole.py       clean-ups per function
-│   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0 (ROM or --exe), link, TEX1 .exe, run in simulator
+│   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0 (ROM or --exe), link, TEX2 .exe (+ relocations), libc/tynix/ for --exe, run in simulator
 │   │   ├── cerror.py         CError (file:line:col: error: ...)
-│   │   ├── selftest.py       17 checks (incl. every tests/ program against gcc's output)
+│   │   ├── selftest.py       20 checks (incl. interrupts from C, disasm of every C program, stackfall played, every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
 │   │                         fuzz.py: random programs, gcc vs tiny C
 │   ├── src/img/              PNG -> compressed image for gfx_image() (run as `python compiler/src/img pic.png`)
@@ -80,11 +86,14 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       16 checks (incl. the C library's files on the simulator against fs.py, stat, spawnv, os/shell.c, os/ed.c, os/edit.c)
+│   │   └── selftest.py       26 checks (incl. scripting (the shell's language, pipes, #!/bin/sh), snapshot (primes, the kernel + disk), environment (export, $NAME, PATH, /etc/profile, setenv inherited), claude (tynix/bin/claude.c + the device, fake backend), batch (sh -c, run), abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/bin/ed.c, tynix/bin/edit.c, the nine tools)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), memory.asm (memcpy, memset), setjmp.asm,
-│   │                         spawn.c + spawn.asm (spawnv: load a --exe program from the disk, run it, come back)
-│   ├── examples/             example programs, in folders by kind (asm/ and c/)
+│   │                         interrupt.asm (vector stubs; a kernel's stack and task switch); include/sys/tynix.h (system calls, TEX2)
+│   │   └── tynix/            the library of a program for the OS (--exe), replacing namesakes: sys.asm (TRAP), sys.c, fs.c, dir.c,
+│   │                         spawn.c (spawnv, spawn, spawn_io, waitpid, kill, ...), cpu.c (keys and wait_ms through the kernel, gfx hold),
+│   │                         env.c (getenv/setenv/unsetenv from the block's B_ENV; children inherit)
+│   ├── examples/             example programs, in folders by kind (asm/ and c/; README.md tells what each one shows)
 │   │   ├── asm/              assembly
 │   │   │   ├── programs/     hello, print_a-z, count_0-9, sum_1-10, abs_value, stack_reverse, echo (no stdlib); guess, untested (with stdlib)
 │   │   │   ├── stdlib/       stdlib.asm (standard library: I/O, strings, memory, math, conversion); stdlib_demo (every function but input),
@@ -96,8 +105,9 @@ logisim-CPU-project-/
 │   │   │                     diag16, diag17 (STK SET/GET wrap, NOT, MOD by 0, float opcodes, rounding),
 │   │   │                     diag18 (flags after OR/XOR, NOT as assembled now)
 │   │   └── c/                C
-│   │       ├── basics/       hello, primes (sieve + hex display), structs (structs, qsort, malloc)
-│   │       ├── games/        guess (keyboard input), snake (W/A/S/D, R restarts, Q quits),
+│   │       ├── basics/       hello, primes (sieve + hex display), structs (structs, qsort, malloc),
+│   │       │                 interrupts (WAIT, a timer IRQ and a key IRQ served by a C handler)
+│   │       ├── games/        guess (keyboard input), snake (W/A/S/D, R restarts, Q quits), stackfall (falling blocks, gravity chains),
 │   │       │                 game_of_life (64x64 torus, 7 scenes of well-known patterns, checks itself; keys 1-7 n r space s q)
 │   │       ├── graphics/     the RGB screen: gfx_demo; image_demo (gfx_image) with images/: mandelbrot, smiley (.png + the .h made from it);
 │   │       │                 video_player (plays a video.py .h on time with clock()) with videos/demo (.mp4 + .h);
@@ -105,19 +115,39 @@ logisim-CPU-project-/
 │   │       │                 qr (QR code encoder: the repo link, then any typed text; checked with zbarimg/qrencode)
 │   │       ├── tests/        circuit_test (self-checking, for the circuit); benchmark (twelve square roots, Quake III and Newton,
 │   │       │                 timed and checked against sqrt()); sqrt_benchmark (library sqrt vs the old bit-by-bit one)
-│   │       └── os/           programs for the disk and the OS: loader (runs /bin programs with spawnv), echo (build --exe),
+│   │       └── os/           programs for the disk and the OS: loader (build --exe; runs /bin programs with spawnv), echo (build --exe),
 │   │                         disk_notes (files on the disk: shows /notes.txt, adds typed lines; --disk FILE)
 │   └── ROM/                  build output (.obj/.rom/.map/.asm), git-ignored, created on first build;
 │                             ROM/libc/ caches the compiled C library
 │
-├── os/                       the OS, Tynix (simulator only), CP/M / DOS style: one program at a time
-│   ├── shell.c               the OS's ROM: checks the disk, prompts with the current directory; built-ins help ls
-│   │                         cd pwd cat echo rm mv cp mkdir rmdir df clear halt (> and >> to a file); any other
-│   │                         name runs /bin/NAME (or a path) with spawnv() and waits
-│   ├── ed.c                  a line editor for text files (a program for /bin: a, i, c, d, p, s, /find, w, q)
-│   ├── edit.c                a full-screen editor on the RGB screen (a program for /bin: arrows, ^S save, ^Q quit)
-│   ├── make_disk.py          os/disk.img (git-ignored): TFS1, ed and the C examples built --exe in /bin, /readme.txt
-│   └── run_with_video.sh     builds the shell and the disk, puts video_player in /bin (a clip.h argument picks the video), starts the simulator
+├── tynix/                    the OS, Tynix (simulator only), AmigaOS style: several programs at once, preemptive, no protection (README.md lists its files)
+│   ├── kernel.c              the OS's ROM: boots, starts /bin/sh; TEX2 loader (regions from 0x1200000, relocation; TEX1 alone
+│   │                         at 0x1100000), round robin on the timer (tickless), system calls (TRAP), the only fs.c,
+│   │                         keyboard and screen focus, NMI menu (1 kill, 2 continue, 3 background, 4 tasks), FAULT = 139
+│   ├── shell.c               /bin/sh: prompts with the current directory; built-ins help ls cd pwd cat echo rm mv cp
+│   │                         mkdir rmdir df clear halt jobs fg kill wait run/source/. set export env unset local alias
+│   │                         unalias type test [ true false read shift break continue return exit eval (> >> <);
+│   │                         any other name runs NAME from $PATH's folders (or a path; #!/bin/sh scripts too) and waits,
+│   │                         or not after &. A small POSIX sh: | (kernel pipes) ; && || ! if while until for case { } ( )
+│   │                         NAME() { }, $NAME ${..} $( ) $(( )) * ? [..] ~, # comments; a pipeline stage that is not a
+│   │                         program runs in sh -S STATE -c TEXT. sh FILE ARGS, sh -c TEXT; runs /etc/profile and
+│   │                         ~/.profile at start; Up/Down history, Tab completion, "> " for unfinished lines
+│   ├── bin/                  sources of the OS's own programs for /bin (built --exe by make_disk.py; see bin/README.md)
+│   │   ├── ed.c              a line editor for text files (a, i, c, d, p, s, /find, w, q)
+│   │   ├── edit.c            a full-screen editor on the RGB screen (arrows, ^S save, ^Q quit)
+│   │   ├── more.c            show files a page at a time (-n N; space, Enter, q)
+│   │   ├── grep.c, find.c    search the lines of files / folders; list paths by name
+│   │   ├── tree.c, du.c      a folder as a tree (-s sizes); disk KB of folders and files (-a)
+│   │   ├── diff.c, hexdump.c changed lines of two text files (LCS, Unix normal format); values in hex
+│   │   ├── calc.c            32-bit integer calculator (C precedence; no argument: a line at a time)
+│   │   ├── visual_file_manager.c  a two-pane yazi-like file manager on the RGB screen (j k h l, space select, y x p, u, r d a, ~ home, q)
+│   │   └── claude.c          talk to Claude through the Claude device (0x9C): chat, `claude QUESTION`, /commands; runs
+│   │                         Claude's commands (sh -c, stdin/stdout files, timeout kill) and writes its files
+│   ├── cpu_claude.md         the Claude device's system prompt (the machine, ASCII, tools, commands, what not to run)
+│   ├── claude_access.conf    PC paths Claude may read / write (read PATH, write PATH), besides claude/
+│   ├── claude/               Claude's folder on the PC (README.md committed, the rest git-ignored)
+│   ├── make_disk.py          tynix/disk.img (git-ignored): TFS1, /bin/sh, ed, the tools, claude and the C examples built --exe in /bin, /readme.txt, /home/user (Documents, Downloads, ...)
+│   └── run_with_video.sh     builds the kernel and the disk, puts video_player in /bin (a clip.h argument picks the video), starts the simulator
 │
 └── cpu_sim/
     ├── src/                  simulator (modules import each other by plain name: run as scripts)
@@ -125,16 +155,20 @@ logisim-CPU-project-/
     │   ├── isa.py            decode(), disassemble(), opcode tables
     │   ├── alu.py            int_op(), float_op() → (R0 value, flags)
     │   ├── memory.py         ROM/RAM banks, v2.0 raw loader
-    │   ├── devices.py        Display (0x5C; form feed clears it), Keyboard (0xF0, empty reads 0; `key_code()`: arrows 28–31, Ctrl+letter 1–26), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), Disk (0x8C seek/size, 0x8D data; mmap of a file), DeviceBus (+ hex display value, 0x3C; `send` = the selected output device's function)
+    │   ├── devices.py        Display (0x5C; form feed clears it), Keyboard (0xF0, empty reads 0; `key_code()`: arrows 28–31, Ctrl+letter 1–26), Timer (ms since reset, 0x7C), Video (RGB 0x6C, clear 0x6D), Disk (0x8C seek/size, 0x8D data; mmap of a file), DeviceBus (+ hex display value, 0x3C; `send` = the selected output device's function; `claude`)
+    │   ├── claude.py         the Claude device (0x9C): a worker thread calls the Claude API (anthropic SDK, imported on first use),
+    │   │                     the history, /commands, ASCII clean-up, tools (CPU: run_command, write_file; PC: read/list/write
+    │   │                     under tynix/claude_access.conf, screenshot), MODELS + prices; FakeBackend for the checks
     │   ├── cpu.py            CPU: step() (traced), run() (translated blocks + the _interpret() loop), reset(), forget_code(), stack ops, COMM
     │   ├── translate.py      code jumped to 50 times -> one Python function per block (registers as locals, lazy flags);
     │   │                     dispatcher(): an if-tree per bank calling blocks by name (pypy3 compiles it in); RAM code too
     │   │                     (every RAM store checks a map of translated words and drops RAM blocks it hits)
-    │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed)
+    │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed, save/load state)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
-    │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG --screen-fps N]`
+    │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG --screen-fps N --claude-model NAME --claude-system FILE --load-state F --save-state F]`
+    │   ├── snapshot.py       save/load the whole machine (a zip: state.json, ROM/RAM chunks, the screen); digest() for the checks
     │   ├── bench.py          speed check: nine example programs in run(), MHz first/best run + end-state digest
-    │   └── selftest.py       31 checks (incl. translated code against step() on random code)
+    │   └── selftest.py       52 checks (incl. snapshots, interrupts, translated code against step() on random code, the Claude device)
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)
@@ -163,8 +197,8 @@ The design follows the "But How Do It Know?" style: a single bus,
 ## ISA cheat sheet
 
 * 32-bit words. 16 registers `R0`–`R15`. 25-bit addresses, 16M words per
-  bank: bit 24 = RAM. ROM `0x0000000–0x0FFFFFF` (read-only), stack = RAM
-  `0x1000000–0x1003FFF`, linker data from `0x1004000`, end of RAM
+  bank: bit 24 = RAM. ROM `0x0000000–0x0FFFFFF` (read-only; the vectors are
+  its first 10 words), RAM linker data from `0x1000000`, then the stack, end of RAM
   `0x1FFFFFF`. The memory map lives in `linker.py` and `config.py` (and
   `malloc.c`/`stdlib.asm` write down the end of RAM). **The circuit still
   has the 16-bit map** (bit 16 = RAM, 64K words per bank) and can't run
@@ -176,7 +210,7 @@ The design follows the "But How Do It Know?" style: a single bus,
   `CMP`/`FCMP` write 0 to R0 and set the flags from `RA − RB`.
 * Confirmed on the circuit: the `A` flag (`RA > RB`) is signed, `SHR` is
   logical, `DIV` truncates and `MOD` keeps the dividend's sign, `INT`
-  (float→int) truncates toward zero, ESP/EBP wrap at 14 bits, the `A` flag
+  (float→int) truncates toward zero, ESP/EBP wrap at 14 bits (the simulator's are 24 since Phase 6), the `A` flag
   after `FCMP` is a float compare. `DIV` by 0 gives the dividend, `MOD` by 0
   gives 0 (`diag16`/`diag17`).
 * `NOT` inverts RB on the circuit since it was rewired on 2026-10-15
@@ -192,6 +226,12 @@ The design follows the "But How Do It Know?" style: a single bus,
   mnemonic) writes `RB × 2`; 8/9/A/E write 0; 5/B/C give `FFFFFFFF` with N and Z
   both on (an undriven bus?), which the simulator doesn't copy.
 * System ops: NOP LD ST DATA RJMP RJF RJNF CLF COMM ADDR JMRB STK ALD AST CPY HALT.
+  Group `0x2` (Phase 6; simulator only so far, TECHNICAL 1.8): RTI EI DI TRAP
+  WAIT GSP SSP GBP SBP SLIM. `HALT` is the shutdown (NMI or reset wakes it),
+  `WAIT` the idle sleep. Interrupts: vectors in ROM 0 reset, 2 NMI, 4 IRQ, 6 TRAP,
+  8 FAULT (stack limit), two saved words (the selected devices; IAR, flags, enable bit), a controller
+  at `0xAC`/`0xAD`, the timer period at `0x7C`; the linker adds the vectors and
+  a start-up code that sets ESP/EBP/limit (no fixed stack area).
   `CPY RA, RB` copies RA → RB. `ALD`/`AST` use R0 with `mem[RA+RB]`.
 * Jumps are relative to the **address of the offset word**. `RJF` = any
   listed flag on, `RJNF` = any listed flag off. Mask: C=8 A=4 N=2 Z=1.
@@ -211,9 +251,13 @@ The design follows the "But How Do It Know?" style: a single bus,
   Disk (simulator only, `--disk FILE`, 64 MB sparse if missing): `0x8C`
   `OUTDATA` = seek to a word, `INDATA` = size in words; `0x8D` `OUTDATA`/
   `INDATA` = write/read one word and move on. No disk: the ports are empty.
+  Claude (simulator only, Phase 8): `0x9C` `OUTDATA` = a char of the message,
+  0 sends it (0x18 new conversation, 0x03 stop, 0x16 hello); `INDATA` = the
+  reply's next char (0 none yet, 4 end of turn, 2 a tool frame for the CPU).
   Filesystem on it: TFS1 (`compiler/src/disk/fs.py`), made/edited by
-  `python compiler/src/disk`. Programs for the OS (`cc build --exe`) run
-  from RAM at `0x1100000`, loaded by C's `spawnv()`.
+  `python compiler/src/disk`. Programs for the OS (`cc build --exe`, TEX2)
+  run from RAM, each in its own region (from `0x1200000`) that Tynix's kernel
+  loads and relocates.
   Videos: `compiler/src/img/video.py` -> frames that `video_player.c` draws
   on time (about 350k instructions a 128×96 frame: python and pypy3 keep up at 12 fps).
 
@@ -259,12 +303,19 @@ The design follows the "But How Do It Know?" style: a single bus,
   can equal EOF: use `fread`/`feof`); `dirent.h`, `unistd.h` (mkdir, chdir, getcwd),
   `sys/statvfs.h` (free space), `sys/stat.h` (`stat`: type, text or binary, size);
   `fs.c` is linked only into programs that call `fopen`. Paths `/a/b` or relative.
-* Programs for the OS: `cc build --exe` links for RAM at `0x1100000` (code and
-  data together) and writes a TEX1 `.exe` (5-word header + words); `spawnv(path,
-  argv)` loads one from the disk, runs it with argc/argv and returns its exit
-  status (longjmp back). crt0 holds `_Exit` and `_heap_end` (the OS's heap stops
-  at `0x1100000` when `spawnv` is linked). Each program has its own libc copy.
-  `os/shell.c` is the shell that runs them (built-ins + `/bin/NAME`).
+* Programs for the OS: `cc build --exe` links at `0x1100000` (code, data, a 16K
+  stack) and writes a TEX2 `.exe` (8-word header + words + relocation offsets,
+  `include/sys/tynix.h`) with `compiler/libc/tynix/`'s files in place of their
+  namesakes: files, directories, keys, `spawnv`/`spawn`/`spawn_io`/`waitpid`/`kill`,
+  `wait_ms` are system calls (`TRAP`, R1 = number, R2..R5 arguments, R0 the
+  answer, negative = -errno). crt0 takes argc, argv and the heap's end
+  (`_heap_end`) from the block in R1 and exits by `TRAP`. The kernel
+  (`tynix/kernel.c`, a ROM program; `_loads_programs` keeps its heap below
+  `0x1100000`) runs them several at once; `tynix/shell.c` is `/bin/sh`.
+  `gfx_lost()`: redraw after another program had the screen. A child gets
+  the caller's stdout and stdin (files when the caller's are); `spawn_io` /
+  `SPAWN_IN(fd)` gives it a stdin file (`B_IN`, `isatty(0)` 0). The environment
+  (`B_ENV`, `environ`) is copied from the parent at every spawn.
 * Tests: `compiler/src/cc/tests/*.c` must print exactly gcc's output
   (`.expected`); `difftest.py` checks with gcc.
 
@@ -274,23 +325,28 @@ The design follows the "But How Do It Know?" style: a single bus,
 python run.py test
 python compiler/src/asm build prog.asm compiler/examples/asm/stdlib/stdlib.asm [--map]   # -> compiler/ROM/prog.rom
 python compiler/src/asm build prog.asm --lib compiler/examples/asm/stdlib/stdlib.asm       # only the stdlib functions used
+python compiler/src/asm disasm compiler/ROM/prog.rom [--map compiler/ROM/prog.map] [--raw]   # -> compiler/ROM/prog.dis.asm (also a .exe)
+python compiler/src/asm/isa_page.py [-o isa.html]                  # the ISA as one HTML page -> compiler/ROM/isa.html
 python cpu_sim/src/main.py compiler/ROM/prog.rom                       # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 --keys $'text\n'
 python cpu_sim/src/main.py compiler/ROM/prog.rom --disk disk.img            # with a disk (cc run --disk too)
+python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps N --save-state run.state   # snapshot at the end
+python cpu_sim/src/main.py --load-state run.state [--headless] [--disk copy.img]   # go on from it
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom   (jar: $LOGISIM_JAR or the Arch package path)
 python logisim/microcode/microcode.py [--list]                     # control section -> logisim/microcode/microcode.rom
 python logisim/microcode/verify.py [--quick]                        # that ROM against CONTROL_SECTION's gates (a few minutes)
 python compiler/src/cc run prog.c [--keys $'12\n'] [--stats]      # C: build + run in the simulator
 python compiler/src/cc build prog.c [more.c x.asm] [-o prog.rom]   # C: -> compiler/ROM/prog.rom (+ prog.asm)
-python compiler/src/cc build prog.c --exe                          # C: -> prog.exe, a program for the OS (disk put it)
+python compiler/src/cc build prog.c --exe [--region N]             # C: -> prog.exe, a program for the OS (TEX2; disk put it)
 python run.py build prog.c                                          # C or asm: build, then open the simulator
 python compiler/src/cc/tests/difftest.py [--update]                # C tests against gcc
 python compiler/src/img pic.png [--colors 16] [--size 64x]         # PNG -> pic.h for gfx_image(x, y, pic)
 python compiler/src/img/video.py clip.mp4 [--fps 10] [--seconds 5]  # video -> clip.h for video_player.c (needs ffmpeg)
 python compiler/src/disk format disk.img; python compiler/src/disk put disk.img notes.txt   # disk images (ls get cat rm mkdir mv df fsck)
-python os/make_disk.py; python compiler/src/cc build os/shell.c                 # the OS: os/disk.img with /bin, the shell's ROM
-python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img             # run it, type help
-os/run_with_video.sh [clip.h]                                                    # the same with video_player in /bin: type /bin/video_player
+python tynix/make_disk.py; python compiler/src/cc build tynix/kernel.c          # the OS: tynix/disk.img with /bin/sh and /bin, the kernel's ROM
+python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img         # run it, type help (primes &, jobs, fg N, kill N)
+python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img --claude-model haiku   # then type claude (needs pip install anthropic + a key)
+tynix/run_with_video.sh [clip.h]                                                 # the same with video_player in /bin: type /bin/video_player
 pypy3 compiler/src/cc run compiler/examples/c/graphics/video_player.c -I . -D 'VIDEO="clip.h"' --steps 2000000000
 pypy3 cpu_sim/src/bench.py [life sqrt ...]                          # simulator speed in MHz (python: --scale 0.1 by default)
 ```
@@ -319,5 +375,19 @@ pypy3 cpu_sim/src/bench.py [life sqrt ...]                          # simulator 
 * The circuit runs about 160 instructions a second: a C program for the
   circuit should avoid `printf` in loops (a float `printf` costs thousands of
   instructions). `compiler/examples/c/tests/circuit_test.c` takes about 15 000.
-* Outdated notes: `logisim/cpu datas/` (see TECHNICAL.md §9). The old
+* Tynix (Phase 7): a program for the OS shares the CPU, so a busy loop costs
+  the others; `key_pressed()` is a system call (~390 instructions). Two opens
+  of one file are kept in step by the kernel after each write, but writes to
+  the same place of a file are not merged. Interrupt handlers belong to the
+  kernel: `--exe` programs must not install their own. A TEX1 program runs
+  alone and its heap is not bounded. Only the foreground program draws;
+  programs that cache the screen must check `gfx_lost()`.
+* Claude (Phase 8): the device's history lives in the simulator (Python),
+  not the CPU; `cpu_sim/src/claude.py` imports `anthropic` only when used, so
+  never import it at module level. Its self-checks use `FakeBackend` (no
+  network). Prices and model names are one table (`MODELS`): they drift.
+  `claude` polls the device (no interrupt). A program Claude runs gets stdin
+  from a file: full-screen and key-polling programs would hang until the
+  timeout, and `tynix/cpu_claude.md` says not to run them.
+* Outdated notes: `logisim/old_notes/` (see TECHNICAL.md §9). The old
   hand-assembled programs were removed on 2026-10-06 (still in git history).

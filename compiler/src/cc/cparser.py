@@ -42,7 +42,7 @@ ASM_RESERVED = {
     "STK", "ALD", "AST", "CPY", "HALT", "ADD", "SUB", "MULT", "DIV", "SHL", "SHR",
     "NOT", "AND", "OR", "XOR", "MOD", "INC", "DEC", "NEG", "TEST", "CMP", "FADD",
     "FSUB", "FMULT", "FDIV", "FLOAT", "INT", "FNEG", "FCMP", "CALL", "RET", "SAVE",
-    "RESTORE",
+    "RESTORE", "RTI", "EI", "DI", "TRAP", "WAIT", "GSP", "SSP", "GBP", "SBP", "SLIM",
 }
 
 

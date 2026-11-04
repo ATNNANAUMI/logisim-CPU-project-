@@ -13,16 +13,16 @@ DOCS = ["README.md", "STRUCTURE.md", "TECHNICAL.md", "CLAUDE.md",
         "compiler/assembly_syntax.md", "compiler/c_language.md", "compiler/c_decisions.md",
         ".claude/skills/circuit-check/SKILL.md"]
 EXAMPLES = ROOT / "compiler" / "examples"
-OS = ROOT / "os"
+OS = ROOT / "tynix"
 
-# repo paths as the docs write them: compiler/..., cpu_sim/..., logisim/..., os/...
-# ("logisim/cpu datas/" has a space), .claude/..., run.py, *.md at the root
-PATH = re.compile(r"(?<![\w./-])((?:compiler|cpu_sim|logisim|os|\.claude)/"
-                  r"(?:cpu datas/?)?[\w./*-]*|run\.py|[A-Z]+\.md)")
+# repo paths as the docs write them: compiler/..., cpu_sim/..., logisim/..., tynix/...
+# .claude/..., run.py, *.md at the root
+PATH = re.compile(r"(?<![\w./-])((?:compiler|cpu_sim|logisim|tynix|\.claude)/"
+                  r"[\w./*-]*|run\.py|[A-Z]+\.md)")
 
 
 def generated_or_placeholder(path):
-    # compiler/ROM/ and disk images (os/disk.img) are git-ignored, made by scripts
+    # compiler/ROM/ and disk images (tynix/disk.img) are git-ignored, made by scripts
     return path.startswith("compiler/ROM/") or path.endswith(".img") or "NN" in path
 
 
@@ -52,7 +52,7 @@ def check_paths_exist():
     """Every repo path named in the docs exists (globs must match something).
     Build output, diagNN placeholders and paragraphs about removed files are
     skipped.  A `backticked` span that is an existing path counts as a whole,
-    so names with spaces (`logisim/cpu datas/TO DO.txt`) work."""
+    so names with spaces work."""
     missing = []
     for doc in DOCS:
         for start, lines in paragraphs((ROOT / doc).read_text()):
@@ -68,7 +68,7 @@ def check_paths_exist():
 
 
 def check_examples_listed():
-    """Every .asm and .c under compiler/examples/ and os/ is listed in TECHNICAL.md (5.2/5.3, 11)."""
+    """Every .asm and .c under compiler/examples/ and tynix/ is listed in TECHNICAL.md (5.2/5.3, 11)."""
     text = (ROOT / "TECHNICAL.md").read_text()
     sources = sorted(EXAMPLES.rglob("*.asm")) + sorted(EXAMPLES.rglob("*.c")) + sorted(OS.rglob("*.c"))
     unlisted = [str(p.relative_to(ROOT)) for p in sources
@@ -89,7 +89,20 @@ def check_tweaks_documented():
     assert not undocumented, "TWEAKS missing from TECHNICAL.md 3.4: " + ", ".join(undocumented)
 
 
-CHECKS = [check_paths_exist, check_examples_listed, check_tweaks_documented]
+def check_instructions_documented():
+    """Every mnemonic of compiler/src/asm/encoding.py (COMM and STK by
+    sub-operation, the aliases) has a row in compiler/assembly_syntax.md
+    section 4, and every row there names one (the tables isa_page.py reads)."""
+    sys.path.insert(0, str(ROOT / "compiler" / "src" / "asm"))
+    import isa_page
+    missing = isa_page.encoded() - isa_page.documented()
+    extra = isa_page.documented() - isa_page.encoded()
+    assert not missing, "instructions with no row in assembly_syntax.md 4: " + ", ".join(sorted(missing))
+    assert not extra, "rows in assembly_syntax.md 4 the assembler doesn't know: " + ", ".join(sorted(extra))
+
+
+CHECKS = [check_paths_exist, check_examples_listed, check_tweaks_documented,
+          check_instructions_documented]
 
 
 def main():

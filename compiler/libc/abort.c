@@ -1,4 +1,4 @@
-/* abort, __assert_fail, getenv, system */
+/* abort, __assert_fail, system (getenv is in env.c) */
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -12,12 +12,6 @@ void __assert_fail(const char *expr, const char *file, int line, const char *fun
 {
     fprintf(stderr, "%s:%d: %s: Assertion `%s' failed.\n", file, line, func, expr);
     abort();
-}
-
-char *getenv(const char *name)
-{
-    (void)name;
-    return 0;
 }
 
 int system(const char *command)

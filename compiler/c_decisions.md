@@ -240,6 +240,12 @@ The language itself is described in [`c_language.md`](c_language.md).
     `hello`: 4698/4811/4569 words before, 4905/4994/4776 after (+207 words),
     RAM 33 → 358 (the three `FILE`s of `file.c`). The program's `stderr`
     and the echo of keys it reads (`getchar.c`) stay on the display.
+    Since Phase 7 the program sends its stdout words to the kernel in groups
+    (`compiler/libc/tynix/sys.c`), so `_set_stdout(put, flush)` also gives
+    `stdout` a `flush` (2026-11-03): `fflush(stdout)` sends the group at once.
+    The shell calls it before it starts a program, because the program writes
+    to the same file itself; without it, `sh < script > out` put a script's
+    `echo` lines after the output of the programs that followed them.
 
 ### The full-screen editor (2026-10-29, OS roadmap Phase 5 B)
 
@@ -256,6 +262,215 @@ The language itself is described in [`c_language.md`](c_language.md).
     ends the shell's input. Guess: the circuit's keyboard may not buffer
     control codes (see TECHNICAL 8), so on the circuit only the arrow-less,
     printable part would work.
+
+51. **Interrupts (Phase 6).** The C library's handlers are ordinary C
+    functions, `unsigned fn(void)`, entered through a stub in
+    `interrupt.asm` that saves all 16 registers (the CPU saves only the
+    return word with the flags) and calls the function through a RAM slot.
+    The value it returns is 0, or the address RTI returns to: that is how the
+    shell's NMI handler kills a program without a way to change the saved
+    word from C. A handler runs with interrupts off. The vectors are fixed
+    ROM words that jump to `_nmi` `_irq` `_trap` `_fault` if a file has them;
+    `set_interrupt_handler` names all four, so linking one links them all.
+    A C name like `trap` or `wait` is fine in C (the compiler prefixes names
+    that are mnemonics), but the assembler reserved five more words:
+    `rti`, `ei`, `di`, `trap`, `wait`. One label in `echo.asm` was renamed.
+52. **No fixed stack area.** The linker reserves the stack (16K words) after
+    the program's data and a start-up code sets ESP, EBP and the stack limit;
+    `_end`, where malloc's heap starts, is the first word after it (the
+    linker defines it, `END_SOURCE` is gone). `setjmp`/`longjmp` and the
+    code generator's frame tricks needed no change: they only use
+    `STK CALL`/`GET`/`RET`, which work on any RAM index. A program for the OS
+    still shares the stack of the program that started it.
+53. **An interrupt saves the selected devices.** `COMM`'s OUTADDR and INADDR
+    are global: a handler that calls `irq_ack()` (an OUTADDR to `0xAC`) would
+    leave the program's next OUTDATA going to the controller instead of the
+    display, if it came between the program's OUTADDR and OUTDATA (the
+    compiler emits them back to back for every `putchar`, so a timer tick
+    would corrupt output now and then). The CPU pushes both selections with
+    the return word and RTI restores them (`test_trap_and_rti`).
+54. **The fault vector switches the stack limit off.** A handler that needs
+    stack to run (a C handler needs a few hundred words) would fault again
+    on its own first push otherwise. The OS (Phase 7) switches stacks in the
+    handler and sets the limit of the next task.
+
+### Multitasking: Tynix's kernel (2026-11-02, OS roadmap Phase 7)
+
+Decisions 36, 38, 40, 41 (a fixed load address, `spawnv` that loads over
+`0x1100000` and comes back by `longjmp`) and 43 (`_fs_forget` after each
+program) describe Phases 4–6 and are replaced by these; 37 (each program
+has its own library) still holds for everything but the disk.
+
+55. **Programs are relocated, not linked per slot (TEX2).** The linker
+    already resolved `abs` relocations; it now keeps their offsets, and
+    `--exe` writes them after the words. The kernel adds `load - base`.
+    Jumps are relative and need nothing. Fixed slots would have needed one
+    build per slot; a base register would have touched every address path
+    of the CPU. Region: first fit, 1M words unless the file asks
+    (`--region`): `diff`'s 1000 x 1000 table does not fit in 1M.
+56. **The filesystem lives only in the kernel** (Arthur's choice, Q1).
+    Each program's own `fs.c` kept a picture of the disk (the chain cache,
+    the allocation hint, the length in each open `FILE`) that another
+    program running at the same time makes wrong; interrupts off around each
+    seek/data pair would have fixed only the device, not those. Programs
+    now have `fopen` & co. as system calls on file numbers, with a 64-word
+    buffer in the program. The kernel closes a program's files when it
+    ends, which also answers Phase 6's wish ("files opened through the OS can
+    be closed properly").
+57. **The kernel is the ROM and the shell is `/bin/sh`** (Q13, asked after
+    the plan: the plan had them in one ROM). In one image, the kernel's real
+    `fopen` and the shell's system-call `fopen` clash by name, and a shell
+    calling `fs.c` directly as a preemptible task would need a lock in every
+    `fs.c` function. Cost: the OS needs a disk with `/bin/sh` to start.
+58. **One kernel stack, and kernel code never sleeps** (Q10, refined in
+    Q14). Every entry saves the 16 registers on the program's own stack
+    (inside the 64-word margin below its limit), then runs C on the
+    kernel's stack with interrupts off. A system call that must wait marks
+    the program blocked and returns; whoever ends the wait writes the answer
+    into the program's saved R0. So nothing in the kernel is re-entered
+    except by the NMI, and the switch is three words (`{esp, ebp, limit}`).
+    `interrupt.asm` does it for any kernel through `_int_kstack`,
+    `_int_cur`, `_int_next`: the hand-off's idea of a slot `int_finish`
+    checks.
+59. **Tickless** (Q3, after the Phase 6 fix that showed chunks of 4096
+    instructions halve the simulator's speed). The timer is on only with
+    two ready programs (10 ms slices) or a sleeper; one program alone runs
+    with it off, at full speed.
+60. **The keyboard stays in the device until the foreground program asks**
+    (Q4). The plan had a kernel buffer filled by the keyboard interrupt;
+    the device's FIFO already is one, and the self-checks type whole
+    sessions ahead (hundreds of keys) that a 64-key buffer would have
+    dropped. The interrupt only wakes a foreground program that waits.
+61. **Background drawing waits** (Q5) and **`gfx_lost()`** (Q6): every `gfx_`
+    call first runs `_gfx_hold` (0 in a ROM program, a check of the
+    foreground in a program for Tynix, a few instructions); a program that
+    caches the screen redraws when `gfx_lost()` says so. The kernel does
+    not clear the screen when the foreground changes: a picture left by a
+    program that ended stays, as before.
+62. **A kill during a system call waits for its end** (Q9): the NMI menu
+    marks it; the kernel entry it interrupted kills it on the way out.
+63. **Two opens of one file are kept in step by the kernel** (found by the
+    `spawn` self-check, which lost a line now and then: two copies of a
+    program appending to one log). Each kernel `FILE` keeps its own first
+    block and length; after every write the kernel saves the entry and
+    copies both into the others (`share()`). Writes to the same place are
+    not merged.
+64. **`fwrite` stops at a word of -1** (decision 48 again): the kernel
+    writes word by word and checks `ferror`, or `cp /bin/echo /e2` made a
+    program that would not load.
+65. **TEX1 still runs, alone, at `0x1100000`** (Q2): that megaword is kept
+    free; its old block points to a 5-word trampoline in the kernel's RAM
+    (`CPY R0, R2; DATA R1, 0; TRAP`). Its heap is not bounded (guess: no
+    TEX1 file is left on a disk made by `make_disk.py`).
+66. **No `bg` and no Ctrl-Z** (Q7: no Ctrl-Z): a program sent to the
+    background by the NMI menu keeps running, so there is nothing for `bg`
+    to resume; left for Phase 7b if suspending is wanted.
+67. **Fast path for `key_pressed()`.** The first system call walked the
+    16 task records three times (the timer, kills, the exclusive task):
+    1,335 instructions a call; with "changed" flags and an early answer
+    for `getkey` it is about 390, most of it the interrupt entry and exit.
+68. **The window keeps running while the CPU sleeps in `WAIT`.** The
+    kernel idles in `WAIT`, so `run()` returns short; the window took that
+    for a breakpoint and paused itself, and every key needed Run again.
+    Now a short run with `cpu.waiting` set is not a stop (a key, the timer
+    or the NMI wakes it); the trace path does the same. An idle OS shows a
+    low rate in the window for the same reason: a sleeping CPU runs no
+    instructions.
+69. **A RAM store drops only the translated blocks it changed.** Before, a
+    store to any word translated RAM code was made from dropped all RAM
+    blocks, so every program the kernel loaded threw away the shell's
+    translations too. `_word_blocks` maps each RAM word to its blocks; a
+    store re-checks those (`translate.still_there`) and drops the ones that
+    no longer match, so a program loaded again over identical words keeps
+    its code. Measured with pypy3: 307 -> 277 blocks translated in the
+    shell benchmark, speed within noise. `translate.HOT` (50) was also
+    measured at 20, 8 and 3: no consistent gain, a slower cold start, so
+    it stays.
+70. **The way out of an interrupt can take an NMI anywhere.** Abusing the
+    OS (2026-11-02): an NMI that landed in 12 of the 50 instructions of
+    `int_back` (after `_int_depth` was lowered, before the program's
+    limit was loaded) was an "outermost" entry on a stack it did not
+    own, and the kernel stopped with `stack overflow at 0x36c6`. About 2% of Esc presses
+    did it while a program polled the keyboard (snake, the editors,
+    the video player: a system call returns about every 400
+    instructions). Now `_int_depth` is stored last and the limit is the
+    last RAM word while the stacks change; the `abuse` check puts an NMI
+    at five places of that code. A hardware way to hold the NMI off would
+    still be better (open for the circuit).
+71. **A system call is not preemptible and an NMI waits for it** (decision
+    62). A write of 1M words to the display is 20M instructions (0.2-0.4 s
+    at 50-100 MHz), 2^31 words would be hours with the OS unreachable. Left
+    as it is: a program can also `DI` and spin, and only the NMI gets
+    out of that; a cap on `n` would give short writes that callers may not expect.
+72. **Region requests are bounded and names are characters.** A TEX2 header
+    asking for 0xFFFFFFFF words wrapped `at + words <= HIGH` and wedged the
+    shell: `want` over the RAM available is now ENOMEM, and the searches
+    compare `words <= HIGH - at`. A file name with a word above 0x10FFFF
+    (or negative) is refused (`EINVAL`) like a space or a control character,
+    because `fs.py` could not show it; `fs.py` shows such a name as U+FFFD
+    and `fsck` reports it.
+73. **Damaged disks and damaged pictures are errors, not tracebacks.**
+    800 disk images with random words overwritten in the superblock, the
+    FAT and the directories gave 622 Python errors and 22 hangs in
+    `fs.py`/`fsck`; now a word past the end, a read past a chain, a
+    superblock that does not fit the file, and a directory that points back
+    up are `FsError`s and `fsck` problems. The C library refuses such a
+    superblock too (`df` counted 2 billion blocks). `tree` on a directory
+    loop still runs until its stack ends (139). The PNG reader turns a short
+    or damaged file into `ValueError`, and refuses more than 2^26 pixels.
+
+Phase 8, Claude from the CPU's keyboard (2026-11-02):
+
+70. **A child gets its caller's stdout and stdin.** `spawn` with `out_fd` 1
+    used to give the child the display even when the caller's own stdout
+    was a file; now it gets the caller's (as in Unix), so `sh -c LINE >
+    file`, `run FILE > out` and `claude`'s commands catch what the program
+    they start prints. A program run with `>` that starts another (the file
+    manager opening `edit`) now hands it the file too: nothing does that
+    today.
+71. **stdin from a file: `SPAWN_IN(fd)` in the flags word** (the system
+    call's four registers were taken), the block's `B_IN`, and a hook in
+    `getchar.c` (`_stdin_get`): the line comes from fd 0, without echo, and
+    the file's end is `EOF`. Only `getchar`/`fgets`/`scanf` see it;
+    `key_pressed()`/`wait_key()` still read the keyboard, so a program that
+    polls keys is not fed by it (Claude is told not to run those). Chosen
+    over the simulator typing the input into the keyboard (option b of the
+    plan): typed keys and real ones would mix, and EOF would be a Ctrl-D
+    that some programs ignore.
+72. **`claude` polls the device** (no interrupt source; plan question 2):
+    `device_in` and a 10 ms `wait_ms` when nothing came, so it sleeps in
+    the kernel and the others run. A device interrupt would need a new
+    kind of wait in the kernel for one program.
+73. **`claude` kills the whole tree at the timeout** (`tasks()`, the
+    youngest first): `sh -c` starts the program as its own child, and
+    killing only the shell left the program running as the shell's job.
+    When `claude` itself is killed (Esc, 1), its command is left alone, as
+    the kernel does with any orphan (plan question 3a).
+74. **Keys typed while a reply comes are kept** (found by the self-check:
+    polling for Ctrl-X ate them): `claude` reads its own lines and starts
+    each with them; a `y`/`n` typed ahead answers `/approve`'s question.
+    `claude QUESTION` does not look at the keyboard, so what is typed meanwhile
+    stays for the shell.
+
+75. **The environment travels in the block, and the kernel copies it**
+    (2026-11-03, plan question 2a): `B_ENV` points at the program's list;
+    at a spawn the kernel copies the parent's strings into the child's
+    region below argv, as it copies argv, so the child owns its copy and the
+    parent may change or end meanwhile. `setenv`/`unsetenv` (`compiler/libc/tynix/env.c`)
+    point `B_ENV` at the program's new list, so the next spawn copies what
+    the program changed. Chosen over a file on the disk (`/etc/env`, option
+    b), which every program would read and two programs would race on. A
+    plain `environ = list` assignment is not seen by the kernel: the
+    program's children get what `setenv` last made. Two copies of `env.c`
+    (the ROM one and the Tynix one, the same lines but the `B_ENV` store)
+    because a shared file would have to reference `_tx_block`, which a ROM
+    program doesn't have, and `sys.c` can't reference `env.c` without
+    linking `malloc` into every program.
+76. **`fflush(stdout)` works when stdout is a file** (2026-11-03): the
+    shell's `sh < script > out` put a script's `echo` lines after the output
+    of the programs that followed, because the shell's own stdout kept its
+    64 words back until it ended. The shell now flushes before it starts a
+    program; see 49.
 
 ## Measured on the circuit while doing this
 

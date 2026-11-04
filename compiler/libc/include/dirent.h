@@ -8,7 +8,8 @@
  *
  * d_type is DT_DIR or DT_REG; d_size (not standard) is the length: chars
  * for a text file, words for a binary one or a directory. "." and ".." are
- * not listed. At most 4 directories are open at once.
+ * not listed. At most 16 directories are open at once (4 in a program for
+ * Tynix, 16 in all for the kernel).
  */
 #ifndef _DIRENT_H
 #define _DIRENT_H

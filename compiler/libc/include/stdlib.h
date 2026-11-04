@@ -21,7 +21,9 @@ void exit(int status);
 void _Exit(int status);
 void abort(void);
 int atexit(void (*func)(void));
-char *getenv(const char *name);
+char *getenv(const char *name);                 /* env.c: the environment (unistd.h's environ) */
+int setenv(const char *name, const char *value, int overwrite);   /* POSIX; 0, or -1 (EINVAL, ENOMEM) */
+int unsetenv(const char *name);
 int system(const char *command);
 
 int abs(int n);

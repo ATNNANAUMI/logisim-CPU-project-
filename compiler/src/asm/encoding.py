@@ -2,7 +2,8 @@
 
 An instruction word is   prefix << 12 | opcode << 8 | RA << 4 | RB
 
-The prefix picks the group: 0 system, 1 integer ALU, 3 float ALU. Adding 4
+The prefix picks the group: 0 system, 2 system (interrupts, stack registers),
+1 integer ALU, 3 float ALU. Adding 4
 (bit 14) turns on immediate mode for the ALU groups: 5 is integer with an
 immediate, 7 is float with an immediate.
 """
@@ -48,6 +49,18 @@ SYSTEM_OPS = {
     "AST":  (0xD, "ra_rb"),
     "CPY":  (0xE, "ra_rb"),
     "HALT": (0xF, "none"),
+    # Phase 6, the free group 0x2 (prefix 010): the group shows in the opcode
+    # (0x2n), so word(SYSTEM, 0x2n, ...) is 0x2n00 | RA << 4 | RB.
+    "RTI":  (0x20, "none"),     # return from an interrupt
+    "EI":   (0x21, "none"),     # interrupts on (after the next instruction)
+    "DI":   (0x22, "none"),     # interrupts off
+    "TRAP": (0x23, "none"),     # software interrupt, vector 6
+    "WAIT": (0x24, "none"),     # sleep until an interrupt
+    "GSP":  (0x25, "rb"),       # RB = ESP
+    "SSP":  (0x26, "rb"),       # ESP = RB
+    "GBP":  (0x27, "rb"),       # RB = EBP
+    "SBP":  (0x28, "rb"),       # EBP = RB
+    "SLIM": (0x29, "rb"),       # stack limit = RB
 }
 
 TWO_WORD_SHAPES = {"rb_value", "jump", "flagjump"}

@@ -133,7 +133,7 @@ def test_window_pacing():
         return
 
     class Screen:
-        dirty, cleared = set(), False
+        dirty, cleared, writes = set(), False, 0
 
     def program(draws):                 # draws(k): does chunk number k add pixels?
         video, calls, now = Screen(), [], [0.0]
@@ -143,6 +143,7 @@ def test_window_pacing():
             calls.append(count)
             if draws(len(calls)):
                 video.dirty |= {(len(calls), i) for i in range(3)}
+                video.writes += 3
             now[0] += 0.001
         return video, execute, calls, lambda: now[0]
 
@@ -154,6 +155,10 @@ def test_window_pacing():
     assert gui.settle(execute, video, clock, until=0.0105) is False and len(calls) == 11
     assert gui.settle(execute, video, clock, until=9.0, running=lambda: False) is False
     assert len(calls) == 11                                        # a stopped program is not run on
+    assert gui.hold_screen(True, False, 1.0, 0.9, 0.25) is True    # still drawing: keep the last picture
+    assert gui.hold_screen(True, True, 1.0, 0.9, 0.25) is False    # quiet: show it
+    assert gui.hold_screen(True, False, 1.0, 0.5, 0.25) is False   # held long enough: show it anyway
+    assert gui.hold_screen(False, False, 1.0, 0.9, 0.25) is False  # a stopped program: what is there is shown
     video, execute, calls, clock = program(lambda k: False)        # a clear in the middle counts as drawing
     inner = execute
     video.cleared = False
@@ -287,7 +292,8 @@ def test_key_codes():
     assert [key_code(k, "") for k in ("Up", "Down", "Left", "Right")] == [28, 29, 30, 31]
     assert key_code("d", "\x04") == 4 and key_code("s", "\x13") == 19 and key_code("z", "\x1a") == 26
     assert key_code("h", "\x08") == 8 and key_code("j", "\n") == 10 and key_code("m", "\r") == 10
-    for keysym, char in (("c", "\x03"), ("v", "\x16"), ("Tab", "\t"), ("Escape", "\x1b"),
+    assert key_code("Tab", "\t") == 9 and key_code("i", "\t") == 9
+    for keysym, char in (("c", "\x03"), ("v", "\x16"), ("ISO_Left_Tab", ""), ("Escape", "\x1b"),
                          ("Delete", "\x7f"), ("F1", ""), ("Home", ""), ("e", "\xe9")):
         assert key_code(keysym, char) is None, (keysym, char)
     # a program sees the arrow as 30, then 0 (empty buffer)
@@ -443,7 +449,8 @@ def test_run_matches_step():
         return (cpu.regs, cpu.iar, cpu.flags, cpu.esp, cpu.ebp, cpu.halted,
                 cpu.stopped, cpu.instructions, cpu.mem.ram, cpu.bus.display.text,
                 cpu.bus.hex_value, cpu.bus.video.pixels, cpu.bus.out_addr,
-                cpu.bus.in_addr, list(cpu.bus.keyboard.buffer))
+                cpu.bus.in_addr, list(cpu.bus.keyboard.buffer),
+                cpu.slimit, cpu.ie, cpu.in_nmi, cpu.inhibit, cpu.waiting, cpu.fault_pending)
 
     edges = [0, 1, 2, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF, 0xFFFFFFFE,
              0x3F800000, 0x7F800000, RAM, RAM | 0x3FFF, 0x3FFF,
@@ -457,10 +464,8 @@ def test_run_matches_step():
     from devices import Timer
     for cpu in (slow, fast, chunked):           # the same time for all three
         cpu.bus.timer = Timer(clock=lambda: 0.0)
-    saved = config.STOP_ON_STACK_WRAP
-    try:
+    if True:
         for seed in range(80):
-            config.STOP_ON_STACK_WRAP = seed % 2 == 1
             words = []
             for _ in range(400):
                 pick = rng.random()
@@ -483,8 +488,6 @@ def test_run_matches_step():
                 pass
             assert state(fast) == state(slow), f"run() differs from step(), seed {seed}"
             assert state(chunked) == state(slow), f"run() in pieces differs, seed {seed}"
-    finally:
-        config.STOP_ON_STACK_WRAP = saved
 
 
 def test_translated_code_matches_step():
@@ -501,7 +504,8 @@ def test_translated_code_matches_step():
         return (cpu.regs, cpu.iar, cpu.flags, cpu.esp, cpu.ebp, cpu.halted, cpu.stopped,
                 cpu.instructions, cpu.mem.ram, cpu.bus.display.text, cpu.bus.hex_value,
                 cpu.bus.video.pixels, cpu.bus.video.dirty, cpu.bus.video.used,
-                cpu.bus.out_addr, cpu.bus.in_addr, list(cpu.bus.keyboard.buffer))
+                cpu.bus.out_addr, cpu.bus.in_addr, list(cpu.bus.keyboard.buffer),
+                cpu.slimit, cpu.ie, cpu.in_nmi, cpu.inhibit, cpu.waiting, cpu.fault_pending)
 
     rng = random.Random(3)
     values = [0, 1, 2, 3, 7, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFF, 0xFFFFFFFE, 0x3F800000,
@@ -523,8 +527,11 @@ def test_translated_code_matches_step():
                              else RAM | 0x5000 + rng.randrange(60)])
             elif pick < 0.52:                                   # CPY LD ST ALD AST ADDR
                 code.append([rng.choice((0x0E, 0x0E, 0x01, 0x02, 0x0C, 0x0D, 0x09)) << 8 | ra << 4 | rb])
-            elif pick < 0.64:                                   # STK
+            elif pick < 0.60:                                   # STK
                 code.append([0x0B00 | rng.choice((0, 0, 1, 1, 2, 3, 4, 5, 6)) << 4 | rb])
+            elif pick < 0.64:                                   # RTI EI DI TRAP WAIT GSP SSP GBP SBP SLIM
+                op = rng.choice((0, 1, 1, 2, 2, 3, 4, 5, 5, 6, 7, 7, 8, 9, 9, 9))
+                code.append([0x2000 | op << 8 | (rb if op >= 5 else 0)])
             elif pick < 0.82:                                   # RJMP RJF RJNF (target later)
                 code.append([rng.choice((0x04, 0x05, 0x06, 0x06)) << 8 | rng.randrange(16), None])
             elif pick < 0.87:                                   # CALL-like DATA R0, x ; JMRB R0
@@ -560,8 +567,7 @@ def test_translated_code_matches_step():
             words += item
         return words
 
-    saved = (config.A_FLAG_SIGNED, config.SHR_ARITHMETIC, config.STOP_ON_STACK_WRAP,
-             translate.HOT)
+    saved = (config.A_FLAG_SIGNED, config.SHR_ARITHMETIC, translate.HOT)
     slow, fast, chunked = CPU(), CPU(), CPU()
     rom = slow.mem.rom
     for cpu in (slow, fast, chunked):
@@ -572,7 +578,6 @@ def test_translated_code_matches_step():
         for seed in range(40):
             config.A_FLAG_SIGNED = seed % 5 != 4
             config.SHR_ARITHMETIC = seed % 7 == 6
-            config.STOP_ON_STACK_WRAP = seed % 3 == 2
             words = program()
             rom[:len(words) + 8] = words + [0] * 8
             if seed % 4 == 3:                                   # some code at the top of ROM
@@ -598,8 +603,7 @@ def test_translated_code_matches_step():
             made += len(fast._code)
         assert made > 100, made
     finally:
-        (config.A_FLAG_SIGNED, config.SHR_ARITHMETIC, config.STOP_ON_STACK_WRAP,
-         translate.HOT) = saved
+        config.A_FLAG_SIGNED, config.SHR_ARITHMETIC, translate.HOT = saved
 
 
 def test_translated_code_follows_changes():
@@ -637,8 +641,336 @@ def test_translated_code_follows_changes():
             cpu.halted, cpu.iar = False, RAM
             cpu.run(1000) if fast else [cpu.step() for _ in range(1000)]
             assert cpu.halted and cpu.iar == RAM | 11 and cpu.regs[2] == 42, (fast, cpu.regs)
+        # a store drops only the blocks made from the word it changed: block A
+        # (words 0-2: DATA R1,5 ; HALT) and block B (10-12: ADD R1,#1 ; HALT)
+        cpu = CPU()
+        cpu.mem.ram[:13] = [0x0301, 5, 0x0F00] + [0] * 7 + [0x5010, 1, 0x0F00]
+        for start in (0, 10):
+            cpu.halted, cpu.iar = False, RAM | start
+            cpu.run(100)
+        a, b = RAM, RAM | 10
+        assert cpu.regs[0] == 6 and a in cpu._code and b in cpu._code
+        cpu._code_written(11)                       # a store of the value it had: both stay
+        assert a in cpu._code and b in cpu._code
+        cpu.mem.ram[11] = 7                         # ADD R1,#7 now
+        cpu._code_written(11)
+        assert a in cpu._code and b not in cpu._code and not cpu._ram_code[11]
+        cpu.halted, cpu.iar = False, RAM
+        cpu.run(100)                                # block A, kept: R1 = 5 again
+        cpu.halted, cpu.iar = False, RAM | 10
+        cpu.run(100)
+        assert cpu.regs[0] == 12, cpu.regs[0]       # the new word ran
     finally:
         translate.HOT = saved
+
+
+# ------------------------------------------------------------ interrupts
+RTI, EI, DI, TRAP, WAIT = 0x2000, 0x2100, 0x2200, 0x2300, 0x2400
+HALT, NOP = 0x0F00, 0x0000
+
+
+def GSP(rb): return 0x2500 | rb
+def SSP(rb): return 0x2600 | rb
+def SLIM(rb): return 0x2900 | rb
+def DATA(rb, value): return [0x0300 | rb, value]
+def ADDI(ra, value): return [0x5000 | ra << 4, value]          # R0 = Ra + value
+def OUT(device, value, scratch=(14, 15)):
+    """Send value to an output device: OUTADDR, then OUTDATA."""
+    a, b = scratch
+    return (DATA(a, device) + [0x0830 | a] + DATA(b, value) + [0x0820 | b])
+
+
+def build(*items):
+    """ROM words: items are words, lists of words, ("at", address), ("L", name),
+    ("RJMP", name). The vectors: reset at 0 (RJMP start), 2 NMI, 4 IRQ, 6 TRAP,
+    8 FAULT, each an RJMP to the label nmi / irq / trap / fault if there is one,
+    else RTI (2 words)."""
+    labels, words = {}, []
+    flat = []
+    for item in items:
+        flat.extend([item] if isinstance(item, (int, tuple)) else item)
+    for item in flat:
+        if isinstance(item, tuple) and item[0] == "L":
+            labels[item[1]] = len(words)
+        elif isinstance(item, tuple) and item[0] == "RJMP":
+            words += [0x0400, item]
+        else:
+            words.append(item)
+    out = []
+    for i, w in enumerate(words):
+        out.append(((labels[w[1]] - i) & 0xFFFFFFFF) if isinstance(w, tuple) else w)
+    # the sixteen words of vectors in front: the program starts at 10
+    head = []
+    for vector, name in ((0, "start"), (2, "nmi"), (4, "irq"), (6, "trap"), (8, "fault")):
+        if name in labels:
+            head += [0x0400, (10 + labels[name]) - (vector + 1)]
+        else:
+            head += [RTI, NOP]
+    return head + out
+
+
+def machine(rom, now=None, interrupted=True):
+    from devices import Timer
+    cpu = CPU()
+    cpu.mem.load_rom(rom)
+    if now is not None:
+        cpu.bus.timer = Timer(clock=lambda: now[0])
+    return cpu
+
+
+def both(rom, steps, check, now=None):
+    """Run the program once with step() and once with run() (translating
+    everything), and check both end the same."""
+    import translate
+    saved = translate.HOT
+    translate.HOT = 1
+    try:
+        a, b = machine(rom, now), machine(rom, now)
+        for _ in range(steps):
+            if a.step() is None:
+                break
+        b.run(steps)
+        for cpu in (a, b):
+            check(cpu)
+        assert (a.regs, a.iar, a.esp, a.ie, a.instructions) == \
+               (b.regs, b.iar, b.esp, b.ie, b.instructions), "run() differs from step()"
+    finally:
+        translate.HOT = saved
+
+
+def test_trap_and_rti():
+    # CMP sets the flags, TRAP calls the handler, which changes them and
+    # returns: the flags, the interrupt enable bit and the address come back
+    # (the program has selected the display; the handler selects another
+    # device, and the display is selected again after RTI)
+    rom = build(("L", "start"), DATA(1, 5), EI, NOP, [0x1F11], DATA(14, 0x5C), [0x0830 | 14],
+                [TRAP], [HALT],
+                ("L", "trap"), DATA(2, 7), ADDI(2, 1), [0x0E03], DATA(13, 0xAC), [0x0830 | 13],
+                [0x0810 | 13], [RTI])
+
+    def check(cpu):
+        assert cpu.regs[1] == 5 and cpu.regs[2] == 7 and cpu.regs[3] == 8, cpu.regs
+        assert cpu.flags == 1 and cpu.ie == 1 and cpu.esp == 0 and cpu.halted, cpu.flags
+        assert cpu.bus.out_addr == 0x5C and cpu.bus.in_addr == 0, "RTI left the handler's devices"
+
+    both(rom, 100, check)
+    cpu = machine(rom)
+    while cpu.iar != 6:
+        cpu.step()
+    devices, word = cpu.mem.ram[0], cpu.mem.ram[1]     # TRAP pushed two words
+    assert cpu.esp == 2 and cpu.ie == 0 and devices == 0x5C, (cpu.esp, hex(devices))
+    assert word & 0x1FFFFFF == 19 and word >> 27 & 1 and word >> 28 == 1, hex(word)
+
+
+def test_timer_interrupt_and_acknowledge():
+    # the timer period 10 ms, enable source 0, EI; the main loop counts in
+    # R3, the handler counts in R4 and acknowledges; the clock is moved by hand
+    rom = build(("L", "start"), OUT(0xAD, 1), OUT(0x7C, 10), EI,
+                ("L", "loop"), ADDI(3, 1), [0x0E03], ("RJMP", "loop"),
+                ("L", "irq"), ADDI(4, 1), [0x0E04], OUT(0xAC, 1), [RTI])
+    for fast in (False, True):
+        now = [100.0]
+        cpu = machine(rom, now)
+        cpu.run(60) if fast else [cpu.step() for _ in range(60)]        # the setup
+        for tick in range(4):
+            now[0] += 0.011
+            if fast:
+                cpu.run(3000)
+            else:
+                for _ in range(3000):
+                    cpu.step()
+        assert cpu.regs[4] == 4 and cpu.regs[3] > 100, (cpu.regs[3], cpu.regs[4])
+        assert cpu.bus.interrupts.pending == 0 and cpu.ie == 1
+
+
+def test_snapshot():
+    # snapshot.py: a program with timer interrupts, a key still in the buffer,
+    # text, a pixel, the hex display and RAM writes; saved after N steps, the
+    # snapshot loaded into a fresh CPU and both run M more steps: the same
+    # state (the clock counts instructions, so both see the same ticks)
+    import os
+    import tempfile
+    import snapshot
+    from devices import Timer
+    rom = build(("L", "start"), OUT(0xAD, 1), OUT(0x7C, 2), EI, OUT(0x5C, ord("h")),
+                OUT(0x6C, 0x05060000 | 0xF800), OUT(0x3C, 0xC0FFEE),
+                ("L", "loop"), ADDI(3, 1), [0x0E03],
+                DATA(5, RAM + 7), [0x0253], ("RJMP", "loop"),       # ST R5, R3
+                ("L", "irq"), ADDI(4, 1), [0x0E04], OUT(0xAC, 1), [RTI])
+
+    def fresh():
+        cpu = CPU()
+        cpu.bus.timer = Timer(clock=lambda: cpu.instructions / 10_000)    # 10 instructions a ms
+        cpu.bus.timer.reset()
+        return cpu
+
+    a = fresh()
+    a.mem.load_rom(rom)
+    a.bus.keyboard.type("zz")
+    for _ in range(1500):
+        a.step()
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "s.state")
+        snapshot.save(a, path, "made.rom")
+        b = fresh()
+        rom_path, warnings = snapshot.load(b, path)
+        assert rom_path.endswith("made.rom") and warnings == [], warnings
+        assert snapshot.digest(a) == snapshot.digest(b)
+        assert os.path.getsize(path) < 8000, os.path.getsize(path)     # two 16M-word banks, a few chunks
+    for cpu in (a, b):
+        for _ in range(3000):
+            cpu.step()
+    assert a.regs[4] > 20 and a.mem.ram[7] > 20, (a.regs[4], a.mem.ram[7])   # ticks taken, RAM written
+    assert snapshot.digest(a) == snapshot.digest(b), "the loaded CPU went another way"
+    assert b.bus.display.text == "h" and b.bus.hex_value == 0xC0FFEE and list(b.bus.keyboard.buffer) == [122, 122]
+
+
+def test_a_request_nobody_acknowledges_does_not_starve_the_program():
+    # a key raises source 1; the handler never acknowledges, so the IRQ line
+    # stays active: one instruction still runs after every RTI
+    rom = build(("L", "start"), OUT(0xAD, 2), EI,
+                ("L", "loop"), ADDI(3, 1), [0x0E03], ("RJMP", "loop"),
+                ("L", "irq"), ADDI(4, 1), [0x0E04], [RTI])
+    for fast in (False, True):
+        cpu = machine(rom)
+        cpu.bus.keyboard.type("x")
+        cpu.run(600) if fast else [cpu.step() for _ in range(600)]
+        assert cpu.regs[3] > 30 and cpu.regs[4] > 30, (cpu.regs[3], cpu.regs[4])
+        assert cpu.bus.interrupts.pending == 2         # still waiting, nobody asked it to stop
+
+
+def test_a_masked_interrupt_waits():
+    # the same program with DI: the request is pending, nothing is taken; EI takes it
+    rom = build(("L", "start"), OUT(0xAD, 2), DI, NOP, NOP, NOP, EI, NOP, NOP, [HALT],
+                ("L", "irq"), DATA(5, 99), OUT(0xAC, 2), [RTI])
+    cpu = machine(rom)
+    cpu.bus.keyboard.type("x")
+    cpu.run(60)
+    assert cpu.regs[5] == 99 and cpu.halted and cpu.bus.interrupts.pending == 0
+
+
+def test_nmi_is_not_masked_and_does_not_nest():
+    # NMI works with interrupts off; a second NMI waits for the first one's RTI
+    # and for one instruction after it
+    rom = build(("L", "start"), DI,
+                ("L", "loop"), NOP, ("RJMP", "loop"),
+                ("L", "nmi"), ADDI(5, 1), [0x0E05], NOP, NOP, [RTI])
+    cpu = machine(rom)
+    cpu.run(10)
+    cpu.nmi()
+    cpu.step()                                         # taken
+    assert cpu.in_nmi == 1 and cpu.ie == 0 and cpu.iar == 2
+    cpu.nmi()                                          # during the handler: it waits
+    for _ in range(5):                                 # RJMP, ADD, CPY, NOP, NOP
+        cpu.step()
+    assert cpu.regs[5] == 1 and cpu.in_nmi == 1
+    cpu.step()                                         # RTI
+    assert cpu.in_nmi == 0 and cpu.inhibit == 1
+    cpu.step()                                         # the one instruction that must run
+    assert cpu.regs[5] == 1 and cpu.in_nmi == 0
+    cpu.step()                                         # now the second NMI is taken
+    assert cpu.in_nmi == 1 and cpu.iar == 2
+    cpu.run(10)
+    assert cpu.regs[5] == 2 and cpu.in_nmi == 0
+
+
+def test_nmi_wakes_a_halt():
+    # HALT is the shutdown: nothing but NMI (or a reset) wakes it
+    rom = build(("L", "start"), EI, [HALT], DATA(1, 1), [HALT],
+                ("L", "nmi"), DATA(2, 2), [HALT])
+    cpu = machine(rom)
+    cpu.run(10)
+    assert cpu.halted and cpu.regs[2] == 0
+    cpu.bus.keyboard.type("x")                         # a key doesn't
+    assert cpu.run(10) == 0 and cpu.halted
+    cpu.nmi()
+    cpu.run(10)
+    assert cpu.regs[2] == 2 and cpu.halted
+
+
+def test_wait_sleeps_until_an_interrupt():
+    rom = build(("L", "start"), OUT(0xAD, 1), OUT(0x7C, 5), EI, WAIT, DATA(6, 1), [HALT],
+                ("L", "irq"), DATA(7, 1), OUT(0xAC, 1), [RTI])
+    for fast in (False, True):
+        now = [10.0]
+        cpu = machine(rom, now)
+        cpu.run(40) if fast else [cpu.step() for _ in range(40)]
+        assert cpu.waiting and cpu.regs[6] == 0 and not cpu.halted
+        assert 0 < cpu.idle_seconds() <= 0.005
+        assert (cpu.run(10) == 0) if fast else (cpu.step() is None)      # still asleep
+        now[0] += 0.006
+        cpu.run(40) if fast else [cpu.step() for _ in range(40)]
+        assert cpu.regs[7] == 1 and cpu.regs[6] == 1 and cpu.halted and not cpu.waiting
+
+
+def test_stack_limit_faults_before_the_push():
+    # SLIM 3: three PUSHes fit, the fourth is not executed and takes the fault vector
+    rom = build(("L", "start"), DATA(1, 3), SLIM(1), DATA(0, 0x11), [0x0B00], [0x0B00],
+                [0x0B00], ("L", "again"), [0x0B00], DATA(8, 1), [HALT],
+                ("L", "fault"), DATA(9, 1), [HALT])
+
+    # (3 pushes at 0,1,2; the fault pushes its two words at 3 and 4)
+    def check(cpu):
+        assert cpu.regs[9] == 1 and cpu.regs[8] == 0 and cpu.halted
+        assert cpu.mem.ram[:3] == [0x11, 0x11, 0x11] and cpu.esp == 5   # the fault pushed 2 words
+        pushed = cpu.mem.ram[4] & 0x1FFFFFF
+        assert cpu.mem.rom[pushed] == 0x0B00, hex(pushed)   # the PUSH that did not run
+
+    both(rom, 100, check)
+
+
+def test_ssp_gsp_move_the_stack_anywhere():
+    # the stack at RAM word 0x1234, read back with GSP / GBP, a frame there too
+    rom = build(("L", "start"), DATA(1, 0x1234), SSP(1), DATA(0, 0xAB), [0x0B00],
+                [0x2500 | 2], [0x0B20], [0x2700 | 3], DATA(4, 0x2000), [0x2800 | 4], [HALT])
+
+    def check(cpu):
+        assert cpu.mem.ram[0x1234] == 0xAB and cpu.regs[2] == 0x1235
+        assert cpu.regs[3] == 0x1235 and cpu.ebp == 0x2000 and cpu.esp == 0x1236
+
+    both(rom, 100, check)
+
+
+def test_interrupt_controller_priority():
+    from devices import InterruptController
+    c = InterruptController()
+    c.set_enable(0b110)
+    c.raise_(0)
+    assert not c.line and c.highest() == 0xFF            # source 0 is not enabled
+    c.raise_(2)
+    c.raise_(1)
+    assert c.line and c.highest() == 1                   # lower number first
+    assert c.status() == 0b111 | 1 << 8 | 0b110 << 16
+    c.acknowledge(0b010)
+    assert c.highest() == 2 and c.pending == 0b101
+    c.acknowledge(0xFF)
+    assert not c.line
+
+
+def test_the_stack_lives_anywhere_in_ram():
+    # ESP and EBP are 24 bits wide now: they don't wrap at 16K words
+    rom = build(("L", "start"), DATA(1, 0x00FFFFFE), SSP(1), DATA(0, 5), [0x0B00],
+                [0x0B10], [0x2500 | 2], [HALT])
+    cpu = machine(rom)
+    cpu.run(30)
+    assert cpu.regs[2] == 0x00FFFFFE and cpu.mem.ram[0x00FFFFFE] == 5
+
+
+def test_run_only_looks_for_interrupts_in_chunks_when_one_can_come():
+    # starting _run() costs: with the timer off and no enabled request latched,
+    # nothing can arrive during a run(), so it is one chunk (it was half the speed)
+    cpu = CPU()
+    assert cpu._chunk(1_000_000) == 1_000_000
+    cpu.bus.keyboard.type("x")                          # latched, but source 1 is not enabled
+    assert cpu._chunk(1_000_000) == 1_000_000
+    cpu.bus.interrupts.set_enable(2)                    # now it is a request
+    assert cpu._chunk(1_000_000) == config.INTERRUPT_CHUNK
+    cpu = CPU()
+    cpu.bus.timer.set_period(10)
+    assert cpu._chunk(1_000_000) == config.INTERRUPT_CHUNK
+    cpu = CPU()
+    cpu.nmi()
+    assert cpu._chunk(1_000_000) == config.INTERRUPT_CHUNK
 
 
 def test_run_stops_at_breakpoints():
@@ -647,6 +979,297 @@ def test_run_stops_at_breakpoints():
     assert cpu.run(100, stop_at={2}) == 1 and cpu.iar == 2     # stops before the ADD
     assert cpu.run(100, stop_at={2}) == 2 and cpu.iar == 2     # leaves it, comes back
     assert cpu.regs[0] == 2 and cpu.instructions == 3
+
+
+# ---------------------------------------------------------------- the Claude device (0x9C)
+# All with claude.FakeBackend: no network, no key, no cost.
+
+import os as _os
+import sys as _sys
+import tempfile as _tempfile
+import time as _time
+from pathlib import Path as _Path
+
+import claude
+
+
+def _device(script=(), tmp=None, **kwargs):
+    tmp = _Path(tmp or _tempfile.mkdtemp())
+    access = claude.Access(tmp / "claude", tmp / "access.conf")
+    dev = claude.ClaudeDevice(screenshot=kwargs.pop("screenshot", None),
+                              backend=claude.FakeBackend(script), access=access,
+                              system_file=tmp / "no_prompt.md")
+    return dev
+
+
+def _send(dev, text, end=0):
+    for c in text:
+        dev.write(ord(c))
+    if end is not None:
+        dev.write(end)
+
+
+def _turn(dev, answer_tool=None, limit=5.0):
+    """What the CPU reads up to EOT, as text; a tool frame is answered with
+    answer_tool(letter, fields) and shown as {letter|field|field}."""
+    got, start = [], _time.time()
+    while _time.time() - start < limit:
+        c = dev.read()
+        if c == 0:
+            _time.sleep(0.001)
+            continue
+        if c == claude.EOT:
+            return "".join(got)
+        if c == claude.STX:
+            frame = []
+            while (c := dev.read()) != claude.ETX:
+                if c:
+                    frame.append(chr(c))
+            letter, fields = frame[0], "".join(frame[1:]).split(chr(claude.US))
+            got.append("{" + letter + "|" + "|".join(fields) + "}")
+            _send(dev, answer_tool(letter, fields) if answer_tool else "ok")
+            continue
+        got.append(chr(c))
+    raise AssertionError("no EOT: " + "".join(got))
+
+
+def _roles(dev):
+    return [m["role"] for m in dev.history]
+
+
+def test_claude_streams_ascii_and_ends_the_turn():
+    dev = _device([claude.text_reply("Héllo “world” — ", "ok… \U0001F600\tend")])
+    _send(dev, "hi")
+    assert _turn(dev) == 'Hello "world" -- ok... ?    end'
+    assert _roles(dev) == ["user", "assistant"] and dev.history[0]["content"] == "hi"
+    req = dev.backend.requests[0]
+    assert req["model"] == "claude-haiku-5-5" and req["max_tokens"] == 100_000
+    assert req["output_config"] == {"effort": "low"} and req["cache_control"] == {"type": "ephemeral"}
+    assert "thinking" not in req and "tool_choice" not in req and "temperature" not in req
+    assert [t["name"] for t in req["tools"]] == ["run_command", "write_file", "read_host_file",
+                                                 "list_host_dir", "write_host_file", "screenshot"]
+    assert all(t["eager_input_streaming"] for t in req["tools"])
+    assert "plain ASCII" in req["system"][0]["text"]       # the fallback prompt: no file here
+    assert dev.read() == 0 and dev.state == "idle"
+
+
+def test_claude_errors_end_the_turn():
+    dev = _device([RuntimeError("overloaded")])
+    _send(dev, "hi")
+    assert _turn(dev) == "\n[claude: overloaded]\n"
+    saved = _sys.modules.get("anthropic")
+    _sys.modules["anthropic"] = None                      # import anthropic fails: no SDK
+    try:
+        dev.backend = None                                # the real backend, made on use
+        _send(dev, "again")
+        assert "the anthropic package is not installed" in _turn(dev)
+    finally:
+        if saved is None:
+            del _sys.modules["anthropic"]
+        else:
+            _sys.modules["anthropic"] = saved
+    dev.backend = claude.FakeBackend([([], [], "refusal"), claude.text_reply("fine")])
+    _send(dev, "x")
+    assert _turn(dev) == "\n[claude declined to answer]\n"
+    _send(dev, "y")
+    assert _turn(dev) == "fine"
+    roles = _roles(dev)                  # a valid history: the users stay, every turn answered
+    assert roles[-4:] == ["user", "assistant", "user", "assistant"], roles
+
+
+def test_claude_slash_commands_stay_in_the_simulator():
+    dev = _device()
+
+    def cmd(line):
+        _send(dev, line)
+        return _turn(dev)
+
+    assert "/model" in cmd("/help") and "/approve" in cmd("/help")
+    assert cmd("/model opus") .startswith("model claude-opus-5-5")
+    assert dev.settings["model"] == "claude-opus-5-5"
+    assert cmd("/model gpt") .startswith("unknown model gpt")
+    assert cmd("/model claude-haiku-5-5").startswith("model claude-haiku-5-5")
+    assert cmd("/effort high") == "effort high\n" and cmd("/effort huge").startswith("effort: one of")
+    assert cmd("/max 2048") == "max_tokens 2048\n" and cmd("/max 0").startswith("max: a number")
+    assert cmd("/max 999999").startswith("max: a number") and dev.settings["max_tokens"] == 2048
+    assert cmd("/tools off") == "tools off\n" and cmd("/approve on") == "approve on\n"
+    assert cmd("/timeout 5") == "timeout 5 s\n" and cmd("/timeout x").startswith("timeout: seconds")
+    assert cmd("/usage").startswith("0 requests") and cmd("/reload").startswith("read no_prompt.md")
+    assert "write" in cmd("/access") and cmd("/nope").startswith("unknown command /nope")
+    assert dev.backend.requests == [] and dev.history == []   # none of it reached Claude
+    dev.backend.script = [claude.text_reply("a"), claude.text_reply("b")]
+    _send(dev, "q")
+    _turn(dev)
+    req = dev.backend.requests[0]
+    assert req["tool_choice"] == {"type": "none"} and req["max_tokens"] == 2048
+    assert req["output_config"] == {"effort": "high"} and len(req["tools"]) == 6
+    assert cmd("/clear") == "new conversation\n" and dev.history == []
+    dev.write(claude.CAN)                                   # the CPU's /new: the same
+    assert dev.history == [] and dev.read() == 0
+
+
+def test_claude_runs_tools_on_the_cpu():
+    tool = claude.tool_reply
+    dev = _device([
+        tool("run_command", {"command": "ls /bin"}, "Looking."),
+        lambda req: claude.text_reply("seen: " + req["messages"][-1]["content"][0]["content"]),
+        tool("write_file", {"path": "/a.txt", "content": "xé\ty"}, tool_id="t2"),
+        claude.text_reply("written"),
+        tool("run_command", {"command": "a\nb"}, tool_id="t3"),
+        tool("run_command", {"cmd": "ls"}, tool_id="t4"),
+        claude.text_reply("gave up"),
+    ])
+    _send(dev, "go")
+    assert _turn(dev, lambda letter, f: "exit status 0\nsh echo") == \
+        "Looking.{r|30|ls /bin|}seen: exit status 0\nsh echo"
+    _send(dev, "write")
+    assert _turn(dev, lambda letter, f: "wrote 4 chars") == "{w|/a.txt|xe\ty}written"
+    _send(dev, "bad")                                       # bad inputs never reach the CPU
+    assert _turn(dev) == "gave up"
+    results = [m["content"][0] for m in dev.history if m["role"] == "user"
+               and isinstance(m["content"], list)]
+    assert [r.get("is_error", False) for r in results] == [False, False, True, True]
+    assert "one non-empty line" in results[2]["content"] and "INVALID_INPUT" in results[3]["content"]
+    assert "missing command" in results[3]["content"]
+    dev.settings.update(approve=True, timeout=7)            # /approve on: the letter asks first
+    dev.backend.script = [tool("run_command", {"command": "pwd", "input": "a\nb"}),
+                          claude.text_reply("ok")]
+    _send(dev, "again")
+    assert _turn(dev, lambda letter, f: "the user said no") == "{R|7|pwd|a\nb}ok"
+
+
+def test_claude_stop_new_conversation_and_hello():
+    dev = _device([claude.text_reply("first ", "second")])
+    dev.backend.gate = gate = __import__("threading").Event()
+    _send(dev, "talk")
+    start = _time.time()
+    while dev.read() == 0 and _time.time() - start < 5:     # "first " has come
+        _time.sleep(0.001)
+    dev.write(claude.ETX)                                   # Ctrl-X: stop it
+    gate.set()
+    rest = _turn(dev)
+    assert rest.endswith("\n[stopped]\n") and "second" not in rest, rest
+    assert dev.history[-1]["content"][0]["text"] == "first  [stopped by the user]"
+    # a program killed while its tool ran: the next one says hello (SYN)
+    dev.backend = claude.FakeBackend([claude.tool_reply("run_command", {"command": "spin"}),
+                                      claude.text_reply("after")])
+    _send(dev, "run it")
+    start = _time.time()
+    while dev.state != "tool" and _time.time() - start < 5:
+        _time.sleep(0.001)
+    assert dev.waiting_tool
+    dev.write(claude.SYN)
+    assert dev.read() == 0 and not dev.waiting_tool
+    last = dev.history[-1]["content"][0]
+    assert last["type"] == "tool_result" and last["is_error"] and "stopped" in last["content"]
+    _send(dev, "and now")
+    assert _turn(dev) == "after"
+    assert _roles(dev)[-4:] == ["assistant", "user", "user", "assistant"], _roles(dev)
+    dev.write(claude.CAN)
+    assert dev.history == []
+
+
+def test_claude_reads_only_the_permitted_pc_files():
+    tmp = _Path(_tempfile.mkdtemp())
+    (tmp / "docs").mkdir()
+    (tmp / "docs" / "spec.md").write_text("the spec")
+    (tmp / "secret.txt").write_text("no")
+    (tmp / "out").mkdir()
+    (tmp / "bin.dat").write_bytes(b"\0\1\2")
+    dev = _device(tmp=tmp)
+    access = dev.access
+    conf = tmp / "access.conf"
+    deny = claude.AccessError
+
+    def refused(call, *args):
+        try:
+            call(*args)
+        except deny as e:
+            return str(e)
+        raise AssertionError(f"allowed: {args}")
+
+    assert "not allowed" in refused(claude.read_host_file, access, str(tmp / "docs" / "spec.md"))
+    conf.write_text(f"# a comment\nread {tmp}/docs/\nwrite {tmp}/out/  # trailing\nread bin.dat\n")
+    assert claude.read_host_file(access, str(tmp / "docs" / "spec.md")) == "the spec"
+    assert "not allowed" in refused(claude.read_host_file, access, str(tmp / "secret.txt"))
+    assert "'..'" in refused(claude.read_host_file, access, str(tmp / "docs" / ".." / "secret.txt"))
+    assert "binary" in refused(claude.read_host_file, access, str(tmp / "bin.dat"))
+    assert claude.write_host_file(access, "notes/n.txt", "mine").startswith("wrote 4 chars")
+    assert (tmp / "claude" / "notes" / "n.txt").read_text() == "mine"   # relative: Claude's folder
+    assert claude.read_host_file(access, "notes/n.txt") == "mine"
+    assert "not allowed (write)" in refused(claude.write_host_file, access,
+                                            str(tmp / "docs" / "x.txt"), "x")
+    assert claude.write_host_file(access, str(tmp / "out" / "r.txt"), "r").startswith("wrote")
+    if hasattr(_os, "symlink"):                                 # a link out of the folder
+        _os.symlink(tmp / "secret.txt", tmp / "claude" / "link.txt")
+        assert "not allowed" in refused(claude.read_host_file, access, "link.txt")
+    listing = claude.list_host_dir(access, "")
+    assert f"read  {tmp}/docs" in listing and f"write {tmp}/out" in listing, listing
+    assert claude.list_host_dir(access, str(tmp / "docs")) == "spec.md  8"
+    conf.write_text("")                                         # edited while it runs
+    assert "not allowed" in refused(claude.read_host_file, access, str(tmp / "docs" / "spec.md"))
+    # through the device: the CPU only gets a line, the result goes to Claude
+    dev.backend.script = [claude.tool_reply("read_host_file", {"path": str(tmp / "secret.txt")}),
+                          lambda req: claude.text_reply(str(req["messages"][-1]["content"][0].get("is_error")))]
+    _send(dev, "read it")
+    assert _turn(dev).endswith("[refused: " + str(tmp / "secret.txt") +
+                               ": not allowed (read); the permitted paths are in "
+                               "tynix/claude_access.conf]\nTrue")
+
+
+def test_claude_screenshot_and_costs():
+    shots = []
+    dev = _device([claude.tool_reply("screenshot", {}), claude.text_reply("a red square")],
+                  screenshot=lambda: shots.append(1) or b"\x89PNG fake")
+    _send(dev, "look")
+    assert _turn(dev) == "\n[claude looks at the RGB screen]\na red square"
+    image = dev.history[-2]["content"][0]["content"][0]
+    assert image["type"] == "image" and image["source"]["media_type"] == "image/png"
+    assert image["source"]["data"] == "iVBORyBmYWtl" and shots == [1]
+    dev.reset_usage()
+    small = {"input_tokens": 50_000, "output_tokens": 50_000}  # $0.10 / $0.50 per M
+    assert abs(dev.price(small) - 0.03) < 1e-9 and abs(dev.price({"input_tokens": 10_000,
+               "cache_read_input_tokens": 50_000, "output_tokens": 2000}) - 0.0025) < 1e-9
+    big = {"input_tokens": 200_000, "output_tokens": 1000}      # past 100K: 0.50 / 2.50
+    assert abs(dev.price(big) - 0.1025) < 1e-9
+    dev.settings["model"] = "claude-opus-5-5"
+    assert abs(dev.price(big) - 0.82) < 1e-9
+    dev.settings["model"] = "claude-haiku-5-5"
+    dev.backend.usage = dict(big, cache_read_input_tokens=0, cache_creation_input_tokens=0)
+    dev.backend.script = [claude.text_reply("x"), claude.text_reply("y")]
+    _send(dev, "a")
+    assert "is 200000 tokens long" in _turn(dev)
+    _send(dev, "b")
+    assert _turn(dev) == "y"                                    # the warning comes once
+    assert dev.usage["requests"] == 2 and abs(dev.usage["dollars"] - 0.205) < 1e-9
+    try:
+        dev.configure("gpt-9")
+    except ValueError as e:
+        assert "unknown Claude model" in str(e)
+    else:
+        raise AssertionError("gpt-9 accepted")
+    dev.configure("sonnet")
+    assert dev.settings["model"] == "claude-sonnet-5-5"
+
+
+def test_claude_device_on_the_bus():
+    """OUTDATA/INDATA at 0x9C reach the device; a reset keeps the conversation."""
+    cpu = CPU()
+    cpu.bus.claude.backend = claude.FakeBackend([claude.text_reply("ok")])
+    cpu.bus.out_address(config.CLAUDE_ADDR)
+    cpu.bus.in_address(config.CLAUDE_ADDR)
+    for c in "hi":
+        cpu.bus.out_data(ord(c))
+    cpu.bus.out_data(0)
+    got, start = [], _time.time()
+    while claude.EOT not in got and _time.time() - start < 5:
+        c = cpu.bus.in_data()
+        if c:
+            got.append(c)
+    assert got == [ord("o"), ord("k"), claude.EOT]
+    assert cpu.bus.in_data() == 0
+    cpu.reset()
+    assert len(cpu.bus.claude.history) == 2
 
 
 def main():

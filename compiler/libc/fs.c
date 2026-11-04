@@ -25,7 +25,7 @@
 #define E_FLAGS 130
 #define SB_ROOT 6               /* superblock: the root's first block, length */
 #define SB_ROOT_LEN 7
-#define MAX_OPEN 8
+#define MAX_OPEN 32                 /* the Tynix kernel holds every program's */
 
 char _fs_cwd[_FS_PATH] = "/";
 
@@ -48,8 +48,8 @@ static void disk_write(unsigned addr, unsigned value)
     __builtin_out(DATA_PORT, value);
 }
 
-/* after a program run by spawnv() (with its own copy of this file) has
-   used the disk: what is remembered about it may be out of date */
+/* after a program with its own copy of this file (an old TEX1 program the
+   Tynix kernel ran) has used the disk: what is remembered may be out of date */
 void _fs_forget(void)
 {
     mounted = 0;
@@ -57,24 +57,25 @@ void _fs_forget(void)
     cache_first = 0;
 }
 
-/* a program run by spawnv() starts in its caller's directory */
-void _fs_inherit(const char *cwd)
-{
-    if (cwd && strlen(cwd) < _FS_PATH)
-        strcpy(_fs_cwd, cwd);
-}
-
 int _fs_mount(void)
 {
+    unsigned size;
     if (mounted)
         return 0;
-    if (__builtin_in(SEEK_PORT) == 0 || disk_read(0) != MAGIC
+    size = __builtin_in(SEEK_PORT);
+    if (size == 0 || disk_read(0) != MAGIC
             || disk_read(1) != 1 || disk_read(2) != _FS_BLOCK) {
         errno = ENODEV;         /* no disk, or not formatted */
         return -1;
     }
     blocks = disk_read(3);
     fat_start = disk_read(4);
+    /* a damaged superblock must not send df and the allocator through billions of blocks (fs.py checks the same) */
+    if (blocks < 4 || blocks > size / _FS_BLOCK || fat_start < 1
+            || fat_start + (blocks + _FS_BLOCK - 1) / _FS_BLOCK > blocks) {
+        errno = ENODEV;
+        return -1;
+    }
     mounted = 1;
     return 0;
 }
@@ -368,7 +369,7 @@ int _fs_parent(const char *path, _Node *dir, char *name)
         return -1;
     }
     for (c = name; *c; c++)
-        if (*c == ' ' || (unsigned)*c < 32) {
+        if (*c == ' ' || (unsigned)*c < 32 || (unsigned)*c > 0x10FFFF) {   /* not a character */
             errno = EINVAL;
             return -1;
         }
@@ -434,6 +435,64 @@ int _fs_empty(_Node *dir)
         if (_fs_word(dir->first, i * _FS_ENTRY + E_FLAGS) & _FS_USED)
             return 0;
     return 1;
+}
+
+/* ------------------------------------------------------------ reclaim */
+
+/* mark the blocks of one file (or directory) in use: the first `words`
+   words' worth of its chain, and cut the chain there (a program that was
+   killed while it wrote can have left more), then do the same for what a
+   directory holds */
+static void claim(unsigned *mark, unsigned first, unsigned words, int is_dir)
+{
+    unsigned need = (words + _FS_BLOCK - 1) / _FS_BLOCK, n, b = first, next, i, flags, len;
+    if (first == 0 || first >= blocks)
+        return;
+    if (need == 0)
+        need = 1;
+    for (n = 0; n < need && b != END && b != 0 && b < blocks && !mark[b]; n++) {
+        mark[b] = 1;
+        next = fat(b);
+        if (n + 1 == need && next != END)
+            set_fat(b, END);            /* the blocks after it are freed below */
+        b = next;
+    }
+    cache_first = 0;
+    if (!is_dir)
+        return;
+    for (i = 0; i < words / _FS_ENTRY; i++) {
+        flags = _fs_word(first, i * _FS_ENTRY + E_FLAGS);
+        if (!(flags & _FS_USED))
+            continue;
+        len = _fs_word(first, i * _FS_ENTRY + E_LENGTH);
+        claim(mark, _fs_word(first, i * _FS_ENTRY + E_FIRST),
+              flags & _FS_PACKED ? (len + 3) / 4 : len, flags & _FS_DIR);
+    }
+}
+
+int fs_reclaim(void)
+{
+    unsigned *mark, b, freed = 0;
+    if (_fs_mount())
+        return -1;
+    if ((mark = calloc(blocks, sizeof(unsigned))) == 0) {
+        errno = ENOSPC;
+        return -1;
+    }
+    for (b = 0; b < fat_start + (blocks + _FS_BLOCK - 1) / _FS_BLOCK; b++)
+        mark[b] = 1;                    /* the superblock and the FAT */
+    claim(mark, disk_read(SB_ROOT), disk_read(SB_ROOT_LEN), 1);
+    __builtin_out(SEEK_PORT, fat_start * _FS_BLOCK);
+    for (b = 0; b < blocks; b++)
+        if (__builtin_in(DATA_PORT) != 0 && !mark[b]) {
+            set_fat(b, 0);
+            freed++;
+            __builtin_out(SEEK_PORT, fat_start * _FS_BLOCK + b + 1);    /* the sweep goes on */
+        }
+    free(mark);
+    hint = 0;
+    cache_first = 0;
+    return freed;
 }
 
 /* ------------------------------------------------------------ open files */

@@ -1,6 +1,6 @@
 /* edit.c - a full-screen text editor on the RGB screen (a program for Tynix, in /bin)
  *
- *   python os/make_disk.py                 (builds it into /bin)
+ *   python tynix/make_disk.py              (builds it into /bin)
  *   (in the shell)   edit notes.txt
  *
  * The text shows on the 256 x 256 RGB screen, 42 columns by 31 lines, with a
@@ -357,6 +357,10 @@ int main(int argc, char **argv)
     blank_screen();
     message = "^G keys";
     while (!quit) {
+        if (gfx_lost()) {                       /* back in front after another program drew: all again */
+            blank_screen();
+            stale = 1;
+        }
         if ((k = key_pressed()) == 0) {         /* no key: redraw if something changed and a frame has passed */
             if (stale && (unsigned int)clock() - last >= FRAME_MS) {
                 refresh();

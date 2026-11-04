@@ -95,7 +95,21 @@ don't keep values in them across a `RET`.
 | `ALD RA, RB` | `R0 = mem[RA + RB]` | 1 | `0x0Cab` |
 | `AST RA, RB` | `mem[RA + RB] = R0` | 1 | `0x0Dab` |
 | `CPY RA, RB` | `RB = RA` | 1 | `0x0Eab` |
-| `HALT` | stop | 1 | `0x0F00` |
+| `HALT` | shutdown: stop (the simulator's RESUME, an NMI or a reset continues) | 1 | `0x0F00` |
+| `RTI` | return from an interrupt | 1 | `0x2000` |
+| `EI` | interrupts on (after the next instruction) | 1 | `0x2100` |
+| `DI` | interrupts off | 1 | `0x2200` |
+| `TRAP` | software interrupt (vector 6) | 1 | `0x2300` |
+| `WAIT` | sleep until an interrupt | 1 | `0x2400` |
+| `GSP RB` | `RB = esp` (a RAM index) | 1 | `0x250b` |
+| `SSP RB` | `esp = RB` | 1 | `0x260b` |
+| `GBP RB` | `RB = ebp` | 1 | `0x270b` |
+| `SBP RB` | `ebp = RB` | 1 | `0x280b` |
+| `SLIM RB` | stack limit `= RB`: a `PUSH`/`CALL` at or past it takes the fault vector | 1 | `0x290b` |
+
+The last ten are the Phase 6 instructions (TECHNICAL 1.8). Their mnemonics
+are reserved: a label can't be called `wait`, `ei`, `di`, `trap` or `rti` (C
+names are prefixed, so C programs are not affected).
 
 `a` and `b` stand for the register numbers.
 
@@ -205,21 +219,31 @@ label from another file without `.extern` is an error, which catches typos.
 ## 6. How the linker lays things out
 
 ```
-ROM  0x0000000 RJMP start           (2 words, added by the linker)
-     0x0000002 first file's ROM part
+ROM  0x0000000 the vectors, 2 words each: reset (RJMP to the start-up code), NMI,
+               IRQ, TRAP, FAULT (RJMP to _nmi _irq _trap _fault if a file has
+               them .global, else a default RTI; HALT for the fault)
+     0x000000A the start-up code (13 words): ESP = EBP = _stack_base, the stack
+               limit = _stack_limit, then RJMP start
+     0x0000017 first file's ROM part
                second file's ROM part
                ...                  (in the order given on the command line)
 
-RAM  0x1000000 - 0x1003FFF   stack (never touched by the linker)
-     0x1004000 first file's RAM part
+RAM  0x1000000 first file's RAM part
                second file's RAM part ...
+     _stack_base the stack (16K words), after all the data
+     _stack_limit = _end   the first free word after the stack (the C heap)
 ```
+
+There is no fixed stack area: the linker's start-up code says where the
+stack is. `_stack_base`, `_stack_limit` and `_end` are symbols the linker
+defines, usable with `.extern`.
 
 Exactly one file must define `.global start`. That's where the program begins.
 
 A C program built as a program for the OS (`cc build --exe`) is laid out
 the same way but all in RAM from `0x1100000`: the entry jump, the ROM parts,
-then the RAM parts (TECHNICAL 4.6).
+then the RAM parts, then its stack; the linker keeps the list of words that
+hold an address, so Tynix's kernel can move it anywhere in RAM (TECHNICAL 4.6).
 
 **Libraries.** A file given with `--lib` (section 10) is a library: only the
 functions the program uses go in. The assembler cuts each file into
@@ -407,6 +431,7 @@ is used exactly as written. Load the image in the simulator like any other ROM:
 ```
 python cpu_sim/src/main.py compiler/ROM/hello.rom
 python cpu_sim/src/main.py compiler/ROM/hello.rom --disk disk.img   # with a disk at 0x8C/0x8D (TECHNICAL §1.7)
+python cpu_sim/src/main.py compiler/ROM/hello.rom --claude-model sonnet   # the Claude device's model (0x9C, TECHNICAL §11.5)
 ```
 
 Or do the two steps separately, for example to keep a library assembled:
@@ -436,6 +461,20 @@ main.asm:12: unknown name 'prnt_newline' (a typo, or a missing .extern?)
 
 Object files (`.obj`) are JSON, so you can open one to see the words, labels
 and the relocations the linker will fill in.
+
+Turn a ROM image (or a program for the OS, `.exe`) back into assembly with
+`disasm`. What it writes builds exactly the same words again:
+
+```
+python compiler/src/asm disasm compiler/ROM/hello.rom                 # -> compiler/ROM/hello.dis.asm
+python compiler/src/asm disasm compiler/ROM/prog.rom --map compiler/ROM/prog.map   # the map's label names
+python compiler/src/asm build compiler/ROM/hello.dis.asm -o again.rom # the same words as hello.rom
+```
+
+Labels come from the `.map` when you give it, otherwise they are made up
+(`L_1e` for code at `0x1e`, `R_1000004` for RAM); a value that only looks
+like an address is marked `; guess`. `CALL` and `RET` are written as the
+pseudo-ops (`--raw`: as their instructions), chars ending in 0 as `.string`.
 
 Check the tools themselves with:
 

@@ -1,5 +1,7 @@
 # logisim-CPU-project
 
+[![test](https://github.com/ATNNANAUMI/logisim-CPU-project-/actions/workflows/test.yml/badge.svg)](https://github.com/ATNNANAUMI/logisim-CPU-project-/actions/workflows/test.yml)
+
 A 32-bit CPU built from logic gates in Logisim-evolution, with the tools to
 program it: an assembler and linker, a small standard library, a C compiler
 with a C library, and a Python simulator that runs the same ROM images as the
@@ -19,20 +21,56 @@ circuit.
 32-bit words, 16 registers (`R0`–`R15`), a 25-bit address bus where bit 24
 picks RAM (`0x1000000`–`0x1FFFFFF`) over ROM (`0x0000000`–`0x0FFFFFF`), 16M
 words each (the circuit itself still has the 16-bit version), four flags
-(`C A N Z`), a hardware stack in the first 16K words of RAM, integer and
+(`C A N Z`), a hardware stack that can sit anywhere in RAM (with a limit register), interrupts (IRQ with a timer and the keyboard, an NMI kill switch, TRAP; simulator only so far), integer and
 IEEE-754 float ALUs, and I/O through a single `COMM` instruction: a text
 display at `0x5C`, a hex number display at `0x3C` and a keyboard at `0xF0`
 (plus a 256×256 RGB screen at `0x6C`, drawn on from C with `gfx.h`, and a
 millisecond timer at `0x7C`, wiring planned, which C's `clock()` reads,
 and, in the simulator only, a disk kept in a file at `0x8C`/`0x8D`, with a
 filesystem that C's `fopen` reads and writes and `compiler/src/disk` edits
-from the PC, and programs that C's `spawnv` loads from it into RAM and runs;
-`os/shell.c` is a small OS for it: a command shell in ROM).
+from the PC; Tynix, `tynix/`, is a small OS for it: a preemptive multitasking
+kernel in ROM that loads several programs from the disk into RAM at once,
+with a Unix-like shell, `/bin/sh`; and a Claude device at `0x9C`, through
+which `claude` on Tynix talks to the Claude API on the PC and lets Claude run
+commands on the CPU).
 Every ALU result goes to **R0**.
+
+## Why there is a simulator
+
+The project started as the circuit. Programs then grew past what the circuit
+can run, so most of the work moved to a Python simulator, for two reasons:
+
+* **Speed.** The circuit in Logisim-evolution runs a few hundred instructions
+  a second (TECHNICAL.md gives 160 a second); the simulator runs
+  about 100 million under pypy3. The C compiler's test programs, the OS and
+  the video player (about 50 million instructions a second) are out of
+  reach for the circuit: one full RGB-screen picture is 0.5 to 1 million
+  instructions.
+* **Missing parts.** Several things exist only in the simulator because they
+  were never built from gates: the disk, the Claude device, the timer's
+  wiring, the interrupts (Phase 6), and the 24-bit banks (the circuit still
+  has 16-bit banks, so programs built now do not run on it;
+  [TECHNICAL.md](TECHNICAL.md) §2.4 and §2.6 list what is left to wire).
+
+The simulator was written from the ISA, so the circuit stays the ground truth:
+
+* the behaviours the ISA did not settle (the carry flag, the float special
+  cases, which input `NOT` inverts) were measured on the circuit with the
+  `diag` programs in `compiler/examples/asm/tests/`, and the simulator copies
+  what was measured (`TWEAKS` in `cpu_sim/src/config.py` marks each one
+  confirmed or guess);
+* `logisim/microcode/verify.py` checks the control table against the
+  circuit's gates, for every instruction, step and flag combination;
+* `logisim/run_rom.py` runs a ROM on the real circuit, headless (16-bit
+  builds only), and `compiler/examples/c/tests/circuit_test.c` checks the C
+  compiler's code that way.
 
 ## Requirements
 
 * Python 3.10+, standard library only
+* only for Tynix's `claude` (the Claude device): `pip install anthropic` and
+  an API key on the PC (`ANTHROPIC_API_KEY`, or `ant auth login`). What Claude
+  reads is sent to Anthropic's API
 * `tkinter` for the simulator window (Arch: `tk`, Debian/Ubuntu: `python3-tk`,
   Fedora: `python3-tkinter`)
 * Logisim-evolution 4.1.0 to open or run the circuit (not included)
@@ -44,6 +82,7 @@ Everything can be driven from `run.py` at the project root:
 ```
 python run.py                     # interactive menu
 python run.py test                # assembler, simulator, C compiler, image and disk tool self-checks, docs check
+                                  # (GitHub Actions runs it on every push and pull request: .github/workflows/test.yml)
 python run.py asm   prog.asm lib.asm            # -> compiler/ROM/prog.rom
 python run.py sim   compiler/ROM/prog.rom
 python run.py build prog.asm lib.asm            # assemble, then open the simulator
@@ -64,6 +103,8 @@ python compiler/src/asm build compiler/examples/asm/stdlib/stdlib_demo.asm \
 python cpu_sim/src/main.py compiler/ROM/demo.rom
 python cpu_sim/src/main.py compiler/ROM/demo.rom --headless --steps 2000000
 python cpu_sim/src/main.py compiler/ROM/demo.rom --disk disk.img     # with a disk (a file, created if missing)
+python cpu_sim/src/main.py compiler/ROM/demo.rom --headless --save-state run.state   # keep the whole machine
+python cpu_sim/src/main.py --load-state run.state                    # go on from it later (the window: save/load state)
 
 # run it on the real circuit, headless (finds an installed Logisim-evolution; --jar or $LOGISIM_JAR otherwise)
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/demo.rom
@@ -74,7 +115,7 @@ C programs go through the C compiler, which links the C library on its own:
 ```
 python compiler/src/cc run compiler/examples/c/basics/hello.c          # build + run in the simulator, print the display
 python compiler/src/cc build compiler/examples/c/basics/primes.c       # -> compiler/ROM/primes.rom (+ primes.asm to read)
-python compiler/src/cc build compiler/examples/c/os/echo.c --exe   # -> echo.exe, a program for the disk (see c/os/loader.c)
+python compiler/src/cc build compiler/examples/c/os/echo.c --exe   # -> echo.exe, a program for Tynix's /bin
 python run.py build compiler/examples/c/games/guess.c                 # build, then open the simulator window
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/primes.rom
 ```
@@ -90,13 +131,14 @@ pypy3 compiler/src/cc run compiler/examples/c/graphics/video_player.c -I . -D 'V
 python compiler/src/cc run compiler/examples/c/graphics/image_demo.c --screen out.png
 ```
 
-The OS, Tynix (simulator only): a shell in ROM that runs the programs on the disk:
+The OS, Tynix (simulator only): a kernel in ROM that runs the programs on the disk, several at once:
 
 ```
-python os/make_disk.py                          # os/disk.img: the C examples in /bin, built --exe
-python compiler/src/cc build os/shell.c
-python cpu_sim/src/main.py compiler/ROM/shell.rom --disk os/disk.img   # type help, ls /bin, primes, snake ...
-os/run_with_video.sh [clip.h]                   # the shell with video_player in /bin, in the window
+python tynix/make_disk.py                       # tynix/disk.img: /bin/sh and the C examples in /bin, built --exe
+python compiler/src/cc build tynix/kernel.c
+python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img   # type help, ls /bin, primes &, jobs, snake ...
+tynix/run_with_video.sh [clip.h]                # the OS with video_player in /bin, in the window
+python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img --claude-model haiku   # then type: claude
 ```
 
 ## A taste of the assembly
@@ -145,14 +187,16 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 | `compiler/src/disk/` | disk tool: makes and edits disk images (TFS1 filesystem) for the simulator's `--disk` |
 | `compiler/src/img/` | image converter: PNG -> compressed picture for `gfx_image()` (`gfx.h`); `video.py`: a video -> frames for `video_player.c` |
 | `compiler/libc/` | the C library: headers (`include/`), C and assembly sources |
-| `os/` | the OS, Tynix (simulator only): `shell.c`, a command shell in ROM that runs programs from the disk; `ed.c`, a line editor; `edit.c`, a full-screen editor on the RGB screen; `make_disk.py`, a disk with `ed`, `edit` and the C examples in `/bin` |
+| `tynix/` | the OS, Tynix (simulator only): `kernel.c`, the ROM (programs side by side, the filesystem, system calls); `shell.c`, the shell (`/bin/sh`); `bin/`, the sources of the OS's own programs (`ed`, `edit`, `more`, `grep`, `find`, `tree`, `du`, `diff`, `hexdump`, `calc`, `visual_file_manager` and `claude`, one `.c` each); Claude's system prompt `cpu_claude.md`, the PC paths it may use in `claude_access.conf` and its folder `claude/`; `make_disk.py`, a disk with these and the C examples in `/bin` |
 | `compiler/examples/` | example programs: `asm/` (programs, the standard library `stdlib/stdlib.asm`, `tests/` circuit diagnostics) and `c/` in folders by kind (`basics/`, `games/`, `graphics/`, `tests/`, `os/`) |
 | `compiler/ROM/` | build output for ROM images (ignored by git) |
 | `compiler/assembly_syntax.md` | full assembly language reference |
 | `compiler/c_language.md` | the C language and library reference |
 | `compiler/c_decisions.md` | the C compiler's design decisions, guesses and open questions |
-| `cpu_sim/src/` | Python simulator (core, a translator of hot code into Python, GUI, self-checks, `bench.py` speed check) |
+| `cpu_sim/src/` | Python simulator (core, a translator of hot code into Python, GUI, the Claude device `claude.py`, self-checks, `bench.py` speed check) |
 | `run.py` | one entry point for all of the above |
+| `.github/workflows/test.yml` | CI: `run.py test` on Python 3.10 and 3.13, and the C compiler against gcc |
+| `PLAN.md` | action plan for the next features (not built yet) |
 
 ## Documentation
 
@@ -162,7 +206,9 @@ is one 32-bit word (`sizeof(char) == 1`, `CHAR_BIT == 32`) and `double` is
 * [STRUCTURE.md](STRUCTURE.md) — a compact map of the project, written to be
   pasted into a chat with an AI assistant.
 * [compiler/assembly_syntax.md](compiler/assembly_syntax.md) — the assembly
-  language reference.
+  language reference; `python compiler/src/asm/isa_page.py` turns its
+  instruction tables into one HTML page with each word's bits, the circuit's
+  micro-steps, a decoder and an encoder (`compiler/ROM/isa.html`).
 * [compiler/c_language.md](compiler/c_language.md) — the C language (tiny C)
   and its library; [compiler/c_decisions.md](compiler/c_decisions.md) — why
   the C compiler works the way it does.

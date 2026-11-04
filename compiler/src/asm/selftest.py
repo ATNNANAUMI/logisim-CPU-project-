@@ -245,14 +245,20 @@ def check_linking():
     helper: RET
     """
     rom = build(main, lib).rom
-    # ROM: entry jump 0-1, main 2-14, lib from 15 (helper = 15).
-    # RAM: var 0x1004000-0x1004001, table 0x1004002.
-    assert rom[0:2] == [0x0400, 1]                    # RJMP start: 2 - 1
-    assert rom[2:4] == [0x0301, 0x1004001]            # DATA R1, var + 1
-    assert rom[5] == 11                               # CALL's return address
-    assert rom[9] == 15                               # CALL's target: helper
-    assert rom[12] == 15 - 12                         # RJMP helper, from its offset word at 12
-    assert rom[13:15] == [0x0302, 0x1004002]          # DATA R2, table
+    # ROM: vectors and start-up code 0-22, main 23-35, lib from 36 (helper = 36).
+    # RAM: var 0x1000000-0x1000001, table 0x1000002, then the stack (16K words).
+    h = linker.ROM_HEADER
+    assert h == 23
+    assert rom[0:2] == [0x0400, 9]                    # RJMP to the start-up code at 10
+    assert rom[10:17] == [0x0301, 5, 0x2601, 0x2801, 0x0301, 5 + 0x4000, 0x2901]
+    assert rom[19:21] == [0x0400, h - 20]             # RJMP start
+    assert rom[21:23] == [0x2000, 0x0F00]             # the default handlers: RTI, HALT
+    assert rom[2:10] == [0x0400, 21 - 3, 0x0400, 21 - 5, 0x0400, 21 - 7, 0x0400, 22 - 9]
+    assert rom[h:h + 2] == [0x0301, 0x1000001]        # DATA R1, var + 1
+    assert rom[h + 3] == 11 + 21                      # CALL's return address
+    assert rom[h + 7] == 15 + 21                      # CALL's target: helper
+    assert rom[h + 10] == 15 - 12                     # RJMP helper, from its offset word
+    assert rom[h + 11:h + 13] == [0x0302, 0x1000002]  # DATA R2, table
 
 
 def check_big_program():
@@ -271,20 +277,74 @@ def check_big_program():
     """
     program = build(main)
     rom = program.rom
-    far = 2 + 3 + 100000                              # entry jump, DATA + JMRB, pad
-    assert rom[2:4] == [0x0301, far] and rom[far:far + 2] == [0x0302, 0x1004000 + 200000]
-    assert program.ram_used == 200001
+    h = linker.ROM_HEADER
+    far = h + 3 + 100000                              # vectors, DATA + JMRB, pad
+    assert rom[h:h + 2] == [0x0301, far] and rom[far:far + 2] == [0x0302, 0x1000000 + 200000]
+    assert program.ram_used == 200001 + linker.STACK_WORDS
     expect_link_error(["        .global start\nstart:  HALT\nbig: .space 0xFFFFFF"],
                       "only 16777216 fit")
     expect_link_error(["        .global start\nstart:  HALT\n        .ram\nbig: .space 0xFFC001"],
-                      "fit above the stack")
+                      "RAM data and stack need")
 
 
 def check_entry_when_start_is_not_first():
     lib = "        .global f\nf:      RET\n"
     main = "        .global start\n        .extern f\nstart:  CALL f\n"
     rom = build(lib, main).rom
-    assert rom[0:2] == [0x0400, 7]                    # start = 2 + 6 = 8, 8 - 1
+    h = linker.ROM_HEADER
+    assert rom[19:21] == [0x0400, h + 6 - 20]         # start = h + 6 (after f), from the offset word at 20
+
+
+def check_interrupt_instructions():
+    """Phase 6: the instructions of group 0x2 (prefix 010)."""
+    assert words_of("RTI\nEI\nDI\nTRAP\nWAIT") == [0x2000, 0x2100, 0x2200, 0x2300, 0x2400]
+    assert words_of("GSP R3\nSSP R4\nGBP R5\nSBP R6\nSLIM R7") == \
+        [0x2503, 0x2604, 0x2705, 0x2806, 0x2907]
+    expect_error("        RTI R1", "RTI")
+    expect_error("        GSP", "GSP")
+
+
+def check_vectors_and_startup_code():
+    """The linker's vectors (0-9) and start-up code, and the handlers it finds."""
+    main = """
+            .global start, _irq, _fault
+            .ram
+    v:      .space 10
+            .rom
+    start:  HALT
+    _irq:   RTI
+    _fault: HALT
+    """
+    program = build(main)
+    rom, h = program.rom, linker.ROM_HEADER
+    addr = {sym.name: sym.address for sym in program.symbols}
+    assert rom[0:2] == [0x0400, 9]                                  # reset -> start-up code
+    assert rom[2:4] == [0x0400, 21 - 3]                             # NMI: the default RTI
+    assert rom[4:6] == [0x0400, addr["_irq"] - 5]                   # IRQ: _irq
+    assert rom[6:8] == [0x0400, 21 - 7]                             # TRAP: the default RTI
+    assert rom[8:10] == [0x0400, addr["_fault"] - 9]                # FAULT: _fault
+    assert rom[10:17] == [0x0301, 10, 0x2601, 0x2801, 0x0301, 10 + linker.STACK_WORDS, 0x2901]
+    assert addr["_stack_base"] == linker.RAM_BASE + 10
+    assert addr["_stack_limit"] == addr["_end"] == linker.RAM_BASE + 10 + linker.STACK_WORDS
+    assert rom[h:h + 3] == [0x0F00, 0x2000, 0x0F00]
+    assert linker.link([assemble(main, "m.asm")[0]], stack_words=100).ram_used == 110
+    expect_link_error(["        .global start, _irq\nstart: HALT\n        .ram\n_irq: .space 1"],
+                      "must be in ROM")
+    # a program for the OS has neither vectors nor start-up code
+    exe = linker.link([assemble("        .global start\nstart: HALT", "m.asm")[0]],
+                      base=linker.PROGRAM_BASE)
+    assert len(exe.rom) == 3 and exe.ram_used == 0 and exe.relocs == []
+    # its relocations: the words that hold an address (DATA, CALL), not the relative jumps;
+    # with exe_stack the stack follows its data
+    exe = linker.link([assemble("        .global start\nstart: DATA R1, v\n        CALL f\n"
+                                "        RJMP start\nf: RET\n        .ram\nv: .space 3", "m.asm")[0]],
+                      base=linker.PROGRAM_BASE, exe_stack=50)
+    words = {r: exe.rom[r] for r in exe.relocs}
+    v = linker.PROGRAM_BASE + len(exe.rom)
+    assert words[3] == v and exe.ram_used == 3 and exe.stack_words == 50, (exe.relocs, words)
+    assert all(linker.PROGRAM_BASE <= w < v + 3 for w in words.values()), words
+    addr = {sym.name: sym.address for sym in exe.symbols}
+    assert addr["_stack_base"] == v + 3 and addr["_end"] == v + 53
 
 
 def check_errors():
@@ -392,7 +452,7 @@ def check_library_parts():
     unused_lib = assemble(lib, "lib.asm")[0]
     tiny = linker.link([assemble("        .global start\nstart: HALT", "m.asm")[0], unused_lib],
                        [unused_lib])
-    assert len(tiny.rom) == 3 and len(alone.rom) > 3
+    assert len(tiny.rom) == linker.ROM_HEADER + 1 and len(alone.rom) > linker.ROM_HEADER + 1
 
 
 def linker_signed(v):
@@ -505,6 +565,117 @@ def check_examples_build():
     return f"{len(built)} built"
 
 
+def check_disasm():
+    """disasm.py: every assembly example (linked with stdlib.asm as a library
+    when it needs it), disassembled and assembled again, gives the same words,
+    with and without its .map, with CALL/RET folded and --raw; strings come
+    back as .string, a word the assembler writes otherwise (NOT R1 with RA 2)
+    as .word, and the CLI writes the file."""
+    import tempfile
+    import disasm
+    root = Path(__file__).resolve().parent.parent.parent / "examples" / "asm"
+    if not root.is_dir():
+        return "skipped, no examples folder"
+
+    def obj(path):
+        return assemble(path.read_text(encoding="utf-8-sig"), str(path))[0]
+
+    stdlib = root / "stdlib" / "stdlib.asm"
+    runs = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        for path in sorted(root.rglob("*.asm")):
+            if path.name in ("stdlib.asm", "lib.asm"):
+                continue
+            files = [obj(path)] + ([obj(root / "two_files" / "lib.asm")] if path.parent.name == "two_files" else [])
+            try:
+                program = linker.link(files)
+            except AsmErrors:
+                lib = obj(stdlib)
+                program = linker.link(files + [lib], [lib])
+            rom, map_ = tmp / (path.stem + ".rom"), tmp / (path.stem + ".map")
+            rom.write_text(linker.format_raw(program.rom))
+            map_.write_text(linker.format_map(program, rom.name))
+            for m in (None, map_):
+                for raw in (False, True):
+                    problem = disasm.round_trip(rom, m, raw)
+                    assert problem is None, problem
+                    runs += 1
+        # a hand-made image: a string, a call, NOT with RA != RB, a jump into an operand word
+        source = """.global start
+start:  DATA R1, msg
+        CALL f
+        RJF Z, start + 1
+        HALT
+f:      RET
+msg:    .string "hi\\n"
+"""
+        program = linker.link([assemble(source, "t.asm")[0]])
+        words = program.rom + [0x1612]                  # NOT with RA 1, RB 2: not what NOT R2 is
+        rom = tmp / "t.rom"
+        rom.write_text(linker.format_raw(words))
+        assert disasm.round_trip(rom) is None
+        text = disasm.disassemble_file(rom)
+        for want in ('.string "hi\\n"', "CALL L_", "        RET", ".word 0x1612", "DATA R1, L_",
+                     "RJF Z, start + 1"):
+            assert want in text, (want, text)
+        assert "        CALL " not in disasm.disassemble_file(rom, raw=True)
+        out = tmp / "t.dis.asm"
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert cli.main(["disasm", str(rom), "-o", str(out)]) == 0
+        assert out.read_text() == text
+    return f"{runs} round trips"
+
+
+def check_isa_page():
+    """isa_page.py: the page builds, has a row for every mnemonic of
+    encoding.py (and section 4 has no row the assembler doesn't know), and
+    its decoder's tables, run the way the page runs them, give isa.py's
+    decode() on all 65,536 words (name, groups, RA, RB)."""
+    import sys
+    import isa_page
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent / "cpu_sim" / "src"))
+    import isa                          # cpu_sim/src
+    import encoding as enc
+    assert isa_page.documented() == isa_page.encoded(), \
+        (isa_page.encoded() - isa_page.documented(), isa_page.documented() - isa_page.encoded())
+    tables = isa_page.decoder_tables()
+    for w in range(0x10000):
+        d = isa.decode(w)
+        name = d.name
+        if d.is_alu:
+            if d.is_float:
+                name = name if name in ("FLOAT", "INT") else "F" + name
+            else:
+                name = {"INC": "++", "DEC": "--"}.get(name, name)
+            if name not in enc.MNEMONICS:
+                name = None             # a word no mnemonic writes (float opcode 4, ...)
+        want = (name, d.is_alu, d.is_float, d.is_imm, d.ra, d.rb)
+        assert isa_page.page_decode(tables, w) == want, (hex(w), isa_page.page_decode(tables, w), want)
+    ins = isa_page.instructions()
+    groups = {i["group"] for i in ins}
+    assert len(ins) == len(isa_page.doc_rows()) and len(groups) == 3, groups
+    assert all(i["steps"] for i in ins if i["circuit"]) and not any(i["steps"] for i in ins if not i["circuit"])
+    rti = next(i for i in ins if i["name"] == "RTI")
+    assert not rti["circuit"] and rti["forms"][0]["example_words"] == [0x2000]
+    add = next(i for i in ins if i["name"] == "ADD")
+    assert [f["example_words"] for f in add["forms"]] == [[0x1012], [0x5010, 5]]
+    assert add["forms"][0]["ra"] == 0x10 and add["forms"][0]["rb"] == 0x1
+    not_ = next(i for i in ins if i["name"] == "NOT")
+    assert not_["forms"][0]["rb"] == 0x11      # NOT puts RB in both fields
+    rjf = next(i for i in ins if i["name"] == "RJF")
+    assert [c for c, _ in rjf["steps"]].count("taken") == 1
+    text = isa_page.page()
+    assert text.startswith("<!doctype html>") and "<title>ISA Reference</title>" in text
+    for name in enc.MNEMONICS - enc.PSEUDO_OPS - {"INC", "DEC"}:
+        assert json_name(name) in text, name
+    return f"{len(ins)} instructions, 65536 words decoded"
+
+
+def json_name(name):
+    return '"name": "' + name
+
+
 CHECKS = [
     check_isa_doc_words,
     check_abs_value_example,
@@ -518,6 +689,8 @@ CHECKS = [
     check_linking,
     check_big_program,
     check_entry_when_start_is_not_first,
+    check_interrupt_instructions,
+    check_vectors_and_startup_code,
     check_errors,
     check_warnings,
     check_link_errors,
@@ -526,6 +699,8 @@ CHECKS = [
     check_object_file_round_trip,
     check_command_line,
     check_examples_build,
+    check_disasm,
+    check_isa_page,
 ]
 
 

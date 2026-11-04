@@ -10,6 +10,7 @@ Layout (15 significant bits inside a 32-bit word, upper bits ignored):
      3..0  RB field
 
     000 ....  system      011 ....  float ALU
+    010 ....  system 2 (interrupts, ESP/EBP/limit; RTI EI DI TRAP WAIT GSP SSP GBP SBP SLIM)
     001 ....  int ALU     101 ....  int ALU, immediate
                           111 ....  float ALU, immediate
 """
@@ -25,6 +26,12 @@ SYS_OPS = {
     0x4: "RJMP", 0x5: "RJF", 0x6: "RJNF", 0x7: "CLF",
     0x8: "COMM", 0x9: "ADDR", 0xA: "JMRB", 0xB: "STK",
     0xC: "ALD", 0xD: "AST", 0xE: "CPY", 0xF: "HALT",
+}
+
+# Phase 6: system instructions with the FLOAT bit on (prefix 010, no ALU).
+INTERRUPT_OPS = {
+    0x0: "RTI", 0x1: "EI", 0x2: "DI", 0x3: "TRAP", 0x4: "WAIT",
+    0x5: "GSP", 0x6: "SSP", 0x7: "GBP", 0x8: "SBP", 0x9: "SLIM",
 }
 
 INT_OPS = {
@@ -84,6 +91,9 @@ def decode(word: int) -> Instr:
 
     if is_alu:
         name = (FLOAT_OPS if is_float else INT_OPS)[op]
+    elif is_float and op in INTERRUPT_OPS:
+        name = INTERRUPT_OPS[op]
+        is_imm = False
     else:
         name = SYS_OPS[op]
         is_float = is_imm = False
@@ -110,7 +120,7 @@ def disassemble(word: int, operand: int | None = None) -> str:
         return f"{tag}{ins.name} R{ins.ra},{b}"
 
     n = ins.name
-    if n in ("NOP", "CLF", "HALT"):
+    if n in ("NOP", "CLF", "HALT", "RTI", "EI", "DI", "TRAP", "WAIT"):
         return n
     if n in ("LD", "ST", "ALD", "AST", "CPY"):
         return f"{n} R{ins.ra},R{ins.rb}"
@@ -124,6 +134,6 @@ def disassemble(word: int, operand: int | None = None) -> str:
         return f"COMM {COMM_OPS[ins.ra & 3]},R{ins.rb}"
     if n == "STK":
         return f"STK {STK_OPS.get(ins.ra & 7, '???')},R{ins.rb}"
-    if n in ("ADDR", "JMRB"):
+    if n in ("ADDR", "JMRB", "GSP", "SSP", "GBP", "SBP", "SLIM"):
         return f"{n} R{ins.rb}"
     return n

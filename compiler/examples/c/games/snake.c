@@ -13,7 +13,8 @@
  * Grid: 16 x 14 cells, each 16 x 16 pixels, on the 256 x 256 screen. The top 32 pixels are
  * reserved for the score panel.
  * Controls: W/A/S/D. Press R to restart after game over, Q to quit (back to
- * the OS's shell when it was run from there: os/shell.c).
+ * the OS's shell when it was run from there: tynix/shell.c). Under Tynix the
+ * board is drawn again when it comes back to the foreground (gfx_lost()).
  */
 
 #define GRID_W 16
@@ -159,7 +160,10 @@ static void reset_game(void)
 
 static void read_input(void)
 {
-    int key = key_pressed();
+    int key;
+    if (gfx_lost())
+        draw_game();            /* Tynix: back in front after another program drew */
+    key = key_pressed();
 
     if (key >= 'A' && key <= 'Z')
         key += 'a' - 'A';

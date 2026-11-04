@@ -14,11 +14,27 @@ FILE *stdin = &in_file;
 FILE *stdout = &out_file;
 FILE *stderr = &err_file;
 
-/* crt0 of a program for the OS, with the word the shell passed in the block:
-   put (or 0) is where the program's stdout goes (spawn.c, spawnv_to) */
-void _set_stdout(int (*put)(int, FILE *))
+/* a program for Tynix whose stdout is a file (the shell's >): put is the
+   function that sends it there, flush sends what put kept back (so
+   fflush(stdout) works; compiler/libc/tynix/sys.c) */
+void _set_stdout(int (*put)(int, FILE *), int (*flush)(FILE *))
 {
     out_file.put = put;
+    out_file.flush = flush;
+}
+
+extern int (*_stdin_get)(void);         /* getchar.c */
+
+/* unistd.h: 1 for the keyboard and the display; 0 for stdout once a shell's
+   `>` gave the program a file (spawnv_to, spawn_to), and for stdin once it
+   was given one (SPAWN_IN), so a program can tell */
+int isatty(int fd)
+{
+    if (fd == 1)
+        return out_file.put == 0;
+    if (fd == 0)
+        return _stdin_get == 0;
+    return fd == 2;
 }
 
 int fputc(int c, FILE *stream)
