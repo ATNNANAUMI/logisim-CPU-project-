@@ -553,7 +553,7 @@ def check_spawn():
         heap_end = next(sym.address for sym in kernel.symbols if sym.name == "_heap_end")
         assert kernel.rom[heap_end] == linker.PROGRAM_BASE, hex(kernel.rom[heap_end])
         cpu, text = driver.run_in_simulator(kernel.rom, "spawner\nold\njobs\nhalt\n", 40_000_000,
-                                            disk=image)
+                                            disk=image, steady_clock=True)
     expect = ("Tynix shell: help lists the commands\n/> spawner\n"
               "1 0 2 /work: prog a (at 0x1400000)\n-> 2\n"
               "1 0 3 /work: prog b c (at 0x1400000)\n-> 43\n"
