@@ -469,7 +469,14 @@ A call costs about 20-30 instructions. Unsigned division by a variable
 calls a helper; signed division is one instruction.
 
 
-## 9. Checking the compiler
+## 9. Checking the compiler, and seeing what it does
+
+`python compiler/src/cc explore prog.c [-o prog.html]` writes a page with the
+C source, the code generator's assembly (the lines the peephole passes removed
+struck through and named: known values, stack reload, flags, jumps), the
+final assembly and the linked machine words; hover a line and everything it
+became lights up. It is made by recompiling with the passes switched on one at
+a time, so it needs no support in the compiler.
 
 ```
 python compiler/src/cc/selftest.py           # part of python run.py test

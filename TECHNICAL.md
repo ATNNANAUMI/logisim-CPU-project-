@@ -1441,7 +1441,7 @@ python cpu_sim/src/selftest.py        # 55 checks: snapshot (save, load, both ru
                                       # the LD trace note when RA == RB, the window's pacing (settle(), screen_due()), step_line (C line
                                       # stepping: line, breakpoint, halt, limit), isa.py against the assembler's
                                       # encoding.py tables (names, groups, one/two-word shapes)
-python compiler/src/cc/selftest.py    # 21 checks: maze3d (the same keys give the same screen; a player put by the door walks out), stackfall (a player reading RAM plays 40 pieces: rows, score,
+python compiler/src/cc/selftest.py    # 22 checks: explore (the compiler explorer page), maze3d (the same keys give the same screen; a player put by the door walks out), stackfall (a player reading RAM plays 40 pieces: rows, score,
                                       # the screen's pixels; a chain of 2 set up in RAM), disasm on every C example (ROM) and tynix/ program (.exe), interrupts from C (WAIT, timer and key IRQ, TRAP, the stack limit fault), preprocessor, error messages (several per run), warnings,
                                       # type sizes, exit/atexit, strtoul overflow limits, the 256 x 256 screen's edges (clipped, not
                                       # wrapped), keyboard input, globals
@@ -1768,6 +1768,7 @@ how the compiler works.
 
 ```
 python compiler/src/cc compile prog.c [-o prog.asm]                 # C -> assembly
+python compiler/src/cc explore prog.c [-o prog.html]                # the compiler explorer page (10.x)
 python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map] [--no-libc] [--lib x.asm] [--exe [--region WORDS]]
 python compiler/src/cc run   prog.c [...] [--keys TEXT] [--steps N] [--stats] [--trace] [--screen FILE.png] [--disk FILE] [--claude-model NAME] [--claude-system FILE]
         common options: -I dir, -D NAME[=value], -w (no warnings)
@@ -1798,6 +1799,7 @@ default of 1M (`make_disk.py` gives `diff` 1.25M).
 | `regalloc.py` | which locals live in registers, and which of them each call must keep |
 | `codegen.py` | syntax tree -> assembly text, one function at a time |
 | `peephole.py` | clean-ups on each function's instructions |
+| `explore.py` | the compiler explorer (`cc explore`): recompiles with `peephole.optimize` replaced by none, the first pass, the first two ... (the compiler is untouched), aligns the listings with `difflib` to name the pass that removed each line, links the C line, the assembly and the linked words (from the `.map`) by hover. Not shown: tokens, the syntax tree, per-line instruction counts |
 | `driver.py` | compiles files, caches and selects the C library, writes crt0, links (with `compiler/src/asm`'s assembler and linker), runs the simulator |
 | `selftest.py` | the self-checks (7.3) |
 | `tests/` | the test programs, their gcc outputs (`.expected`) and `difftest.py` |

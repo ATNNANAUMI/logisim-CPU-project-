@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # five self-check suites (assembler 24, simulator 55, C compiler 21, image tool 10, disk tool 28), then check_docs.py
+python run.py test                                   # five self-check suites (assembler 24, simulator 55, C compiler 22, image tool 10, disk tool 28), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
@@ -43,6 +43,7 @@ python compiler/src/cc run prog.c [--keys $'text\n'] [--stats] [--disk disk.img]
 python compiler/src/cc build prog.c [more.c x.asm] [-o name.rom] [--map] [--lib x.asm]   # C: links the C library itself
 python compiler/src/cc build prog.c --exe [--region N]   # a program for the OS: prog.exe (TEX2, relocatable), for `disk put`; the kernel runs it
 python compiler/src/cc compile prog.c [-o prog.asm]                   # C -> assembly only
+python compiler/src/cc explore prog.c [-o prog.html]                  # one HTML page: C, assembly before/after the peephole passes, machine words, linked by line
 python tynix/make_disk.py [IMG] [--new] [--size MB]                  # the OS's disk: tynix/disk.img, /bin/sh (shell.c) and the C examples built --exe in /bin
 tynix/run_with_video.sh [clip.h]                     # kernel + disk with video_player in /bin (a clip from img/video.py), opens the window
 python compiler/src/cc build tynix/kernel.c && python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img   # the OS (kernel, then /bin/sh)

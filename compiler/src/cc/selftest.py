@@ -711,6 +711,43 @@ def check_maze3d():
     return f"{won.instructions} instructions to the door"
 
 
+def check_explore():
+    """explore.py (the compiler explorer page) on two test programs: the last
+    stage is the compiler's real output, every listing is a list of its
+    stage's lines, the removed and the written lines add up (what is left of
+    the code generator's output plus what the passes wrote is the final
+    listing), the passes removed something, and the page holds every C line,
+    machine words and the hover links."""
+    import html
+    import explore
+
+    tests = HERE / "tests"
+    removed_total = 0
+    for name in ("arith.c", "arrays.c"):
+        path = str(tests / name)
+        texts = explore.stages(path)
+        assert texts[-1][1] == driver.compile_c(path), name
+        before, after = explore.annotate(texts)
+        assert [l for l, _ in before] == texts[0][1].splitlines(), name
+        assert [l for l, _ in after] == texts[-1][1].splitlines(), name
+        removed = sum(1 for _, by in before if by)
+        written = sum(1 for _, by in after if by)
+        assert len(before) - removed + written == len(after), (name, len(before), removed, written, len(after))
+        removed_total += removed
+        page = explore.render(path)
+        for line in Path(path).read_text().splitlines()[:12]:
+            assert html.escape(line) in page, line
+        assert page.count('data-line="') > 100 and "machine words" in page and "mouseover" in page, name
+        assert explore.machine_words(path), name
+    assert removed_total > 20, removed_total
+    try:
+        explore.render(str(tests / "nosuch.c"))
+    except (OSError, driver.BuildError, FileNotFoundError):
+        pass
+    else:
+        raise AssertionError("a missing file made a page")
+
+
 CHECKS = [
     check_preprocessor,
     check_errors,
@@ -732,6 +769,7 @@ CHECKS = [
     check_disasm,
     check_stackfall,
     check_maze3d,
+    check_explore,
     check_programs,
 ]
 

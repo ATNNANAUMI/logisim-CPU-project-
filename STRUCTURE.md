@@ -67,9 +67,10 @@ logisim-CPU-project-/
 │   │   ├── regalloc.py       which locals get registers; which a call must keep
 │   │   ├── codegen.py        tree → assembly (Val/Addr model, calls, frames, switch tables)
 │   │   ├── peephole.py       clean-ups per function
+│   │   ├── explore.py        `cc explore`: an HTML page of the C, the assembly before and after each peephole pass (found by recompiling with the passes switched on one at a time) and the machine words, linked by C line
 │   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0 (ROM or --exe), link, TEX2 .exe (+ relocations), libc/tynix/ for --exe, run in simulator
 │   │   ├── cerror.py         CError (file:line:col: error: ...)
-│   │   ├── selftest.py       21 checks (incl. interrupts from C, disasm of every C program, stackfall and maze3d played, every tests/ program against gcc's output)
+│   │   ├── selftest.py       22 checks (incl. explore, interrupts from C, disasm of every C program, stackfall and maze3d played, every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
 │   │                         fuzz.py: random programs, gcc vs tiny C
 │   ├── src/img/              PNG -> compressed image for gfx_image() (run as `python compiler/src/img pic.png`)
