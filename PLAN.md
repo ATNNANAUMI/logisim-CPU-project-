@@ -2,9 +2,36 @@
 
 Written 2026-11-03 on branch `os` (at `d1938af`, after Phase 8), from the
 ranked list of 100 ideas brainstormed that day. Chosen by rank: 1–7, 10–12,
-21, 27, 30, 32, 36, 37, 39, 44, 45, 66. Nothing here is built yet; this file
-says what each one would do, how, what it touches, how it is checked, what
+21, 27, 30, 32, 36, 37, 39, 44, 45, 66. The status after 2026-11-05 is in the
+next section; the rest of this file is the plan as written, and says what each one would do, how, what it touches, how it is checked, what
 follows from it, and whether it is worth it.
+
+## Status (2026-11-05)
+
+Built (each with a self-check): 1 CI, 3 `<`, 4 environment variables, 5 history
+and Tab, 6 pipes (with `;`, `&&`, `||`, `if`, `while`, `for`, `case`,
+functions), 11 snapshots, 12 disassembler, 13 ISA page, 17 BASIC, 19 CHIP-8,
+20 a falling-block game (`stackfall`). Built in part:
+
+* 2 `machine_view.py`: `frames()`, `heap()`, `regions()` and `resolve_address()`;
+  no `tasks()` (it needs the kernel's debug table `_dbg_tasks`, not written).
+* 7 memory viewer extras: go-to, float and text columns, label names, changed
+  words; no bookmarks.
+* 8 call stack: the chain, the lines and three argument words; no variables and
+  the prologue shows the caller's frame.
+* 9 heap and 10 memory map: the blocks and RAM's parts for a ROM program; no
+  allocation timeline, no per-task view under Tynix.
+* 14 compiler explorer: C, assembly before and after each pass, machine words;
+  no tokens, syntax tree or per-line instruction counts.
+* 15 datapath: an HTML page driven by the microcode table (control lines); no
+  `micro.py`, so no values on the bus and no tab in the window.
+* 16 mouse: the device, the window, `--mouse`, `paint.c`; no kernel system
+  call (a background program can read it too) and no use in the file manager
+  or `edit`.
+* 18 raycaster (`maze3d`): flat colours, a seeded maze; no best-time file, no
+  maze files, no textures or mouse-look.
+
+Not started: 21 the tutorial series.
 
 Every item follows the repo's rules: standard-library Python, the doc rows in
 `CLAUDE.md` ("Keeping the docs in sync"), `python run.py test` green before a

@@ -7,8 +7,8 @@ Programs to read, build and run. Every file starts with a header that says what 
 | folder | files | what they show |
 | --- | --- | --- |
 | `basics/` | `hello`, `primes`, `structs`, `interrupts` | the smallest program; a sieve and the hex display; structs, `qsort`, `malloc`; timer and keyboard interrupts |
-| `games/` | `snake`, `stackfall`, `game_of_life`, `guess` | games on the RGB screen and the keyboard |
-| `graphics/` | `gfx_demo`, `grapher`, `image_demo`, `qr`, `video_player` (+ `images/`, `videos/`) | the RGB screen: shapes and text, a graphing calculator, compressed pictures, QR codes, video |
+| `games/` | `snake`, `stackfall`, `maze3d` (a 3D maze), `game_of_life`, `guess` | games on the RGB screen and the keyboard |
+| `graphics/` | `gfx_demo`, `grapher`, `paint`, `image_demo`, `qr`, `video_player` (+ `images/`, `videos/`) | the RGB screen: shapes and text, a graphing calculator, a mouse paint program (`paint`), compressed pictures, QR codes, video |
 | `os/` | `disk_notes`, `echo`, `loader` | programs that use the disk and the OS (`make_disk.py` puts `echo` and `disk_notes` in `/bin`) |
 | `tests/` | `circuit_test`, `benchmark`, `sqrt_benchmark` | checks of the compiler's code on the real circuit; speed measurements |
 
