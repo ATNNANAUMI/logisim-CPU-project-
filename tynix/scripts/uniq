@@ -1,0 +1,36 @@
+#!/bin/sh
+# uniq [-c] [FILE]    drop a line that repeats the one before it (stdin with no file)
+#
+# -c puts the number of repeats in front of each line. Like Unix uniq it only
+# sees lines next to each other, so sort first to join the same lines. Leading
+# spaces and tabs of a line are lost: `read` takes them off.
+count=
+if [ "$1" = -c ]; then
+    count=1
+    shift
+fi
+squeeze() {
+    local prev= n=0 line
+    while read -r line || [ -n "$line" ]; do
+        if [ $n -gt 0 ] && [ "$line" = "$prev" ]; then
+            n=$((n + 1))
+            continue
+        fi
+        if [ $n -gt 0 ]; then
+            if [ -n "$count" ]; then echo "$n $prev"; else echo "$prev"; fi
+        fi
+        prev=$line
+        n=1
+    done
+    if [ $n -gt 0 ]; then
+        if [ -n "$count" ]; then echo "$n $prev"; else echo "$prev"; fi
+    fi
+}
+if [ $# -eq 0 ]; then
+    squeeze
+elif [ -f "$1" ]; then
+    squeeze < "$1"
+else
+    echo "uniq: $1: not a file"
+    exit 1
+fi

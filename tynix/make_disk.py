@@ -61,6 +61,8 @@ starts the shell, /bin/sh from tynix/shell.c).
   du /bin          disk KB of each folder (-a: files too)
   diff a.txt b.txt   what changed between two text files
   hexdump /readme.txt   the values in hex
+  backup FILE  restore  trash FILE  untrash  wc head tail nl uniq touch cleantmp changed
+                   shell scripts in /home/user/bin (tynix/scripts/): each has its usage in its first lines
   basic /home/user/basic/fizzbuzz.bas   a BASIC program (basic alone: type lines, RUN, LIST)
   chip8 /home/user/chip8/draw.ch8   run a CHIP-8 program (hex text; 1234/QWER/ASDF/ZXCV, ` quits)
   calc 0x1100000 + 256   integer calculator (calc alone: a line at a time)
@@ -118,6 +120,11 @@ def make_home(disk):
         disk.put("/home/user/Documents/welcome.txt", WELCOME.encode())
     if disk.lookup("/home/user/basic") is None:
         disk.mkdir("/home/user/basic")
+    if disk.lookup("/home/user/bin") is None:                  # on $PATH (/etc/profile): the shell scripts
+        disk.mkdir("/home/user/bin")
+    for script in sorted((OS_DIR / "scripts").iterdir()):       # kept when there, they are the user's to change
+        if script.is_file() and disk.lookup(f"/home/user/bin/{script.name}") is None:
+            disk.put(f"/home/user/bin/{script.name}", script.read_bytes())
     if disk.lookup("/home/user/chip8") is None:
         disk.mkdir("/home/user/chip8")
     for sample in sorted((OS_DIR / "chip8").glob("*.ch8")):     # CHIP-8 programs (hex text): chip8 /home/user/chip8/NAME

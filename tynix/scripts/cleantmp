@@ -1,0 +1,37 @@
+#!/bin/sh
+# cleantmp [-n]    delete the files and empty folders in /tmp; -n only lists them
+#
+# The shells running leave their state in /tmp in files whose names start
+# with a dot; those are left alone (a * pattern does not match them), so this
+# is safe while jobs are running. A folder that still has such files is kept.
+dry=
+[ "$1" = -n ] && dry=1
+removed=0
+clean() {
+    local f
+    for f in "$1"/*; do
+        if [ -d "$f" ]; then
+            clean "$f"
+            empty=1
+            for g in "$f"/*; do
+                [ -e "$g" ] && empty=
+            done
+            if [ -z "$empty" ]; then
+                :
+            elif [ -n "$dry" ]; then
+                echo "would remove $f/"
+            else
+                rmdir "$f" && removed=$((removed + 1))
+            fi
+        elif [ -f "$f" ]; then
+            if [ -n "$dry" ]; then
+                echo "would remove $f"
+            else
+                rm "$f" && removed=$((removed + 1))
+            fi
+        fi
+    done
+}
+clean /tmp
+[ -z "$dry" ] && echo "removed $removed items from /tmp"
+exit 0

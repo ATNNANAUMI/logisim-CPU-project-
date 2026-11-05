@@ -88,7 +88,7 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       28 checks (incl. chip8 (/bin/chip8 against tynix/chip8_ref.py on three programs), basic (/bin/basic: a file, the prompt, SAVE and LOAD, an error line and the status), scripting (the shell's language, pipes, #!/bin/sh), snapshot (primes, the kernel + disk), environment (export, $NAME, PATH, /etc/profile, setenv inherited), claude (tynix/bin/claude.c + the device, fake backend), batch (sh -c, run), abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/bin/ed.c, tynix/bin/edit.c, the nine tools)
+│   │   └── selftest.py       29 checks (incl. chip8 (/bin/chip8 against tynix/chip8_ref.py on three programs), basic (/bin/basic: a file, the prompt, SAVE and LOAD, an error line and the status), scripting (the shell's language, pipes, #!/bin/sh), snapshot (primes, the kernel + disk), environment (export, $NAME, PATH, /etc/profile, setenv inherited), claude (tynix/bin/claude.c + the device, fake backend), batch (sh -c, run), abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/bin/ed.c, tynix/bin/edit.c, the nine tools)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), memory.asm (memcpy, memset), setjmp.asm,
 │   │                         interrupt.asm (vector stubs; a kernel's stack and task switch); include/sys/tynix.h (system calls, TEX2)
@@ -151,6 +151,7 @@ logisim-CPU-project-/
 │   ├── claude_access.conf    PC paths Claude may read / write (read PATH, write PATH), besides claude/
 │   ├── claude/               Claude's folder on the PC (README.md committed, the rest git-ignored)
 │   ├── make_disk.py          tynix/disk.img (git-ignored): TFS1, /bin/sh, ed, the tools, claude and the C examples built --exe in /bin, /readme.txt, /home/user (Documents, Downloads, ...)
+│   ├── scripts/              shell scripts for /home/user/bin (backup restore trash untrash wc head tail nl uniq touch cleantmp changed)
 │   ├── chip8_ref.py          a CHIP-8 reference interpreter in Python (the self-check compares /bin/chip8 with it); chip8/*.ch8 are the test programs
 │   ├── basic/                sample BASIC programs (fizzbuzz, primes, hello, spiral), copied to /home/user/basic
 │   └── run_with_video.sh     builds the kernel and the disk, puts video_player in /bin (a clip.h argument picks the video), starts the simulator

@@ -1,0 +1,22 @@
+#!/bin/sh
+# nl [FILE]    number the lines (stdin with no file): "     1  text"
+#
+# Empty lines are numbered too. Leading spaces and tabs of a line are lost:
+# `read` takes them off.
+number() {
+    local n=0 line s
+    while read -r line || [ -n "$line" ]; do
+        n=$((n + 1))
+        s=$n
+        while [ ${#s} -lt 6 ]; do s=" $s"; done
+        echo "$s  $line"
+    done
+}
+if [ $# -eq 0 ]; then
+    number
+elif [ -f "$1" ]; then
+    number < "$1"
+else
+    echo "nl: $1: not a file"
+    exit 1
+fi

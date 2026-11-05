@@ -1,0 +1,42 @@
+#!/bin/sh
+# restore [-l] [NAME...]    bring files back from the backup folder (see backup)
+#
+# NAME is the file's own name (without its folder). Each file goes back where
+# it was backed up from, replacing what is there now; a folder that is gone is
+# made again. With no name (or -l) it lists the backups: NAME and the path it
+# came from. $BACKUP_DIR is the folder (default /home/user/backup).
+B=${BACKUP_DIR:-/home/user/backup}
+mkp() {
+    local rest=${1#/} acc= part
+    while [ -n "$rest" ]; do
+        part=${rest%%/*}
+        acc=$acc/$part
+        [ -d "$acc" ] || mkdir "$acc" || return 1
+        case $rest in */*) rest=${rest#*/} ;; *) rest= ;; esac
+    done
+}
+if [ $# -eq 0 ] || [ "$1" = -l ]; then
+    n=0
+    for f in "$B"/*; do
+        case $f in *.path) continue ;; esac
+        [ -f "$f" ] || continue
+        read p < "$f.path"
+        echo "${f##*/}  ->  $p"
+        n=$((n + 1))
+    done
+    [ $n -eq 0 ] && echo "no backups in $B"
+    exit 0
+fi
+status=0
+for name in "$@"; do
+    if [ ! -f "$B/$name" ] || [ ! -f "$B/$name.path" ]; then
+        echo "restore: $name: no such backup"
+        status=1
+        continue
+    fi
+    read p < "$B/$name.path"
+    dir=${p%/*}
+    [ -n "$dir" ] || dir=/
+    mkp "$dir" && cp "$B/$name" "$p" && echo "restored $p" || status=1
+done
+exit $status

@@ -1900,6 +1900,7 @@ SCRIPT_KEYS = ("/s.sh 'a b' c d; echo \"status $?\"\n"
                "fi\n"
                "echo 'a\n"
                "b'\n"
+               "p=/a/b/c.txt; echo ${p##*/} ${p%/*} ${p#/} ${p%%/*}.x ${p%.txt} ${p#nomatch} ${p%*.c} \"${q%x}\"\n"
                "ls /tmp\n"
                "halt\n")
 
@@ -1964,6 +1965,8 @@ continued
 > b'
 a
 b
+/> p=/a/b/c.txt; echo ${p##*/} ${p%/*} ${p#/} ${p%%/*}.x ${p%.txt} ${p#nomatch} ${p%*.c} "${q%x}"
+c.txt /a/b a/b/c.txt .x /a/b/c /a/b/c.txt /a/b/c.txt 
 /> ls /tmp
 /> halt
 CPU halted
@@ -2313,6 +2316,146 @@ def check_chip8():
     return f"{cpu.instructions} instructions"
 
 
+SCRIPTS_KEYS = (
+    "cd /home/user\n"
+    "echo hi > rel.txt\n"
+    "backup rel.txt /lines.txt /nosuch\n"
+    "restore\n"
+    "rm rel.txt; restore rel.txt; cat rel.txt\n"
+    "trash /home/user/rel.txt /lines.txt; untrash\n"
+    "untrash lines.txt; untrash lines.txt; untrash\n"
+    "wc /lines.txt; wc -l /lines.txt /rep.txt; wc -w < /lines.txt\n"
+    "head -n 3 /lines.txt; head /rep.txt | head -n 2\n"
+    "tail -n 3 /lines.txt; tail -n 2 /rep.txt; tail -n 500 /rep.txt\n"
+    "nl /rep.txt\n"
+    "uniq /rep.txt; uniq -c /rep.txt; cat /rep.txt | uniq -c\n"
+    "changed /d1 /d2; echo status $?\n"
+    "changed /d1 /d1; echo status $?\n"
+    "touch /t1.txt /t1.txt; wc /t1.txt\n"
+    "touch /tmp/x1; mkdir /tmp/sub; touch /tmp/sub/y; cleantmp -n; cleantmp\n"
+    "halt\n")
+
+
+def check_scripts():
+    """The shell scripts of tynix/scripts/ (put in /home/user/bin by
+    make_disk): backup and restore (a file back where it was, from a folder
+    that is made again), trash and untrash (the same, a second name kept, a
+    name taken from the list), wc, head, tail, nl, uniq (with -c, from a file
+    and from a pipe), changed (two folders: a file that differs, a name only
+    in one, the status), touch and cleantmp (a dry run, then the real one,
+    nothing left in /tmp); and the disk is consistent after."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+
+    image = os.path.join(TMP.name, "scripts.img")
+    make_disk.make(image, programs=["diff"], new=True, size_mb=4, log=lambda _: None, home=True)
+    with FileSystem(image) as disk:
+        disk.put("/lines.txt", b"one\ntwo two\n\nthree three three\nfour\nfive\nsix\nseven\neight\nnine\nten\neleven\ntwelve\n")
+        disk.put("/rep.txt", b"a\na\nb\na\na\na\nc\n")
+        for d in ("/d1", "/d2", "/d1/sub", "/d2/sub"):
+            disk.mkdir(d)
+        disk.put("/d1/a.txt", b"same\nx\n")
+        disk.put("/d2/a.txt", b"same\nx\n")
+        disk.put("/d1/sub/b.txt", b"p\nq\n")
+        disk.put("/d2/sub/b.txt", b"p\nr\n")
+        disk.put("/d1/c.txt", b"only\n")
+    cpu, text = driver.run_in_simulator(_kernel().rom, SCRIPTS_KEYS, 400_000_000, disk=image, steady_clock=True)
+    assert cpu.halted, text
+    got = text[text.index("/> cd /home/user"):]
+    assert got == SCRIPTS_OUTPUT, got
+    with FileSystem(image) as disk:
+        assert disk.check() == [], disk.check()
+        assert [n.name for n in disk.entries(disk.lookup("/tmp"))] == []
+    return f"{cpu.instructions} instructions"
+
+
+SCRIPTS_OUTPUT = """\
+/> cd /home/user
+/home/user> echo hi > rel.txt
+/home/user> backup rel.txt /lines.txt /nosuch
+backed up /home/user/rel.txt
+backed up /lines.txt
+backup: /nosuch: not a file
+[backup: exit status 1]
+/home/user> restore
+lines.txt  ->  /lines.txt
+rel.txt  ->  /home/user/rel.txt
+/home/user> rm rel.txt; restore rel.txt; cat rel.txt
+restored /home/user/rel.txt
+hi
+/home/user> trash /home/user/rel.txt /lines.txt; untrash
+trashed /home/user/rel.txt
+trashed /lines.txt
+lines.txt  ->  /lines.txt
+rel.txt  ->  /home/user/rel.txt
+/home/user> untrash lines.txt; untrash lines.txt; untrash
+restored /lines.txt
+untrash: lines.txt: not in the trash
+[untrash: exit status 1]
+rel.txt  ->  /home/user/rel.txt
+/home/user> wc /lines.txt; wc -l /lines.txt /rep.txt; wc -w < /lines.txt
+13 15 80 /lines.txt
+13 /lines.txt
+7 /rep.txt
+20 total
+15
+/home/user> head -n 3 /lines.txt; head /rep.txt | head -n 2
+one
+two two
+
+a
+a
+/home/user> tail -n 3 /lines.txt; tail -n 2 /rep.txt; tail -n 500 /rep.txt
+ten
+eleven
+twelve
+a
+c
+tail: at most 100 lines
+[tail: exit status 2]
+/home/user> nl /rep.txt
+     1  a
+     2  a
+     3  b
+     4  a
+     5  a
+     6  a
+     7  c
+/home/user> uniq /rep.txt; uniq -c /rep.txt; cat /rep.txt | uniq -c
+a
+b
+a
+c
+2 a
+1 b
+3 a
+1 c
+2 a
+1 b
+3 a
+1 c
+/home/user> changed /d1 /d2; echo status $?
+only in /d1: c.txt
+differs: /d1/sub/b.txt
+[changed: exit status 1]
+status 1
+/home/user> changed /d1 /d1; echo status $?
+status 0
+/home/user> touch /t1.txt /t1.txt; wc /t1.txt
+0 0 0 /t1.txt
+/home/user> touch /tmp/x1; mkdir /tmp/sub; touch /tmp/sub/y; cleantmp -n; cleantmp
+would remove /tmp/sub/y
+would remove /tmp/x1
+removed 3 items from /tmp
+/home/user> halt
+CPU halted
+"""
+
+
 CHECKS = [
     check_format,
     check_text_round_trip,
@@ -2339,6 +2482,7 @@ CHECKS = [
     check_scripting,
     check_environment,
     check_basic,
+    check_scripts,
     check_chip8,
     check_snapshot,
     check_claude,

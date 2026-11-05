@@ -1464,7 +1464,7 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 28 checks: `scripting` (the shell's language under the kernel:
+python compiler/src/disk/selftest.py  # 29 checks: `scripting` (the shell's language under the kernel:
                                       # a #!/bin/sh script, loops, break 2, functions, local, $( ), $(( )),
                                       # *, pipes of programs and built-ins, a writer ending with 141,
                                       # & on a pipeline, "> " lines, /tmp left empty), `snapshot` (primes.c and the kernel with a disk saved
@@ -2044,6 +2044,7 @@ With no disk, or no `/bin/sh`, the kernel says so and halts.
 | `tynix/bin/diff.c` | the lines that differ between two text files (11.3; 13.2K words) |
 | `tynix/bin/hexdump.c` | the values of files in hexadecimal (11.3; 11.6K words) |
 | `tynix/bin/calc.c` | a 32-bit integer calculator (11.3; 7.6K words) |
+| `tynix/scripts/*` | shell scripts, written in the shell's own language, that `make_disk.py` puts in `/home/user/bin` when it is not there already: `backup`/`restore` (copy to `/home/user/backup`, which remembers each file's path), `trash`/`untrash` (`/home/user/trash`), `wc`, `head`, `tail`, `nl`, `uniq` (limits of doing it with `read`: leading blanks of a line are lost), `touch`, `cleantmp`, `changed DIR1 DIR2`; they use `${NAME#pat}`-style trimming, added to the shell for them; `check_scripts` runs them |
 | `tynix/bin/chip8.c` | a CHIP-8 interpreter (11.3): programs are hex text (`tynix/chip8/*.ch8`, copied to `/home/user/chip8/`), a frame is CYCLES instructions then one timer tick at 60 Hz from `clock()`, keys count as held for 9 frames after a press (no key-up on this keyboard), `-t FRAMES` reads a program from stdin and prints the state and screen, which `check_chip8` compares with `tynix/chip8_ref.py` (a Python interpreter of the same machine) |
 | `tynix/bin/basic.c` | a BASIC interpreter (11.3): the language is described in the file's header; `basic FILE` runs a program (the samples are `tynix/basic/*.bas`, copied to `/home/user/basic/`), alone it is a prompt; `compiler/src/cc/tests/basic.c` runs the same source under gcc and tiny C |
 | `tynix/bin/visual_file_manager.c` | a two-pane file manager on the RGB screen, in the style of yazi (section 11.4; 22.8K words) |

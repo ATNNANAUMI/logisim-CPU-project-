@@ -7,6 +7,8 @@ The OS (simulator only). Reference: TECHNICAL §11.
 | `kernel.c` | the ROM: boots, loads programs, switches between them, system calls |
 | `shell.c` | `/bin/sh`, the shell |
 | `bin/` | sources of the OS's own programs for `/bin` (editors, tools, file manager, `claude`); see [`bin/README.md`](bin/README.md) |
+| `scripts/` | shell scripts that `make_disk.py` puts in `/home/user/bin` (on `PATH`): `backup` `restore` `trash` `untrash` `wc` `head` `tail` `nl` `uniq` `touch` `cleantmp` `changed`; usage is in each file's first lines |
+| `basic/`, `chip8/` | sample BASIC programs and CHIP-8 test programs, copied to `/home/user/basic` and `/home/user/chip8` |
 | `make_disk.py` | builds `disk.img` with `/bin/sh`, `bin/*` and the C examples built `--exe` |
 | `run_with_video.sh` | builds everything, puts `video_player` in `/bin` and opens the window |
 | `cpu_claude.md` | Claude's system prompt (what it knows about the machine) |
@@ -21,7 +23,7 @@ Run it: `python compiler/src/cc build tynix/kernel.c`, `python tynix/make_disk.p
 The shell speaks a small POSIX sh (TECHNICAL §11, "The language"): `|` `;`
 `&&` `||` `!`, `if`/`while`/`until`/`for`/`case`, `{ }` and `( )`,
 functions with `local` and `return`, `$( )`, `$(( ))`, `${NAME:-default}`,
-`* ? [..]` file names, `~`, `#` comments, `test`/`[ ]`, `read`, aliases.
+`${NAME#pat} ${NAME%pat}` (and the doubled forms) to cut a path apart, `* ? [..]` file names, `~`, `#` comments, `test`/`[ ]`, `read`, aliases.
 
 A script is a text file. Write one at the prompt with `cat > FILE` (Ctrl-D
 ends it), with `ed`/`edit`, or on the PC with `python compiler/src/disk put

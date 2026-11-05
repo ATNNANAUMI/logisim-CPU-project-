@@ -1,0 +1,36 @@
+#!/bin/sh
+# backup FILE...    copy files into the backup folder, remembering where they came from
+#
+# The folder is $BACKUP_DIR (default /home/user/backup). Each file is copied to
+# BACKUPDIR/NAME and its full path is written to BACKUPDIR/NAME.path, so
+# `restore NAME` can put it back. A second backup of a file with the same name
+# replaces the first (the newest backup wins). Only files, not folders. A path
+# is made absolute by putting $PWD in front, so give paths without .. or . in
+# them. `restore` with no name lists what is saved.
+B=${BACKUP_DIR:-/home/user/backup}
+if [ $# -eq 0 ]; then
+    echo "usage: backup FILE..."
+    exit 2
+fi
+mkp() {
+    local rest=${1#/} acc= part
+    while [ -n "$rest" ]; do
+        part=${rest%%/*}
+        acc=$acc/$part
+        [ -d "$acc" ] || mkdir "$acc" || return 1
+        case $rest in */*) rest=${rest#*/} ;; *) rest= ;; esac
+    done
+}
+mkp "$B" || exit 1
+status=0
+for f in "$@"; do
+    if [ ! -f "$f" ]; then
+        echo "backup: $f: not a file"
+        status=1
+        continue
+    fi
+    case $f in /*) full=$f ;; *) full=$PWD/$f ;; esac
+    name=${f##*/}
+    cp "$f" "$B/$name" && echo "$full" > "$B/$name.path" && echo "backed up $full" || status=1
+done
+exit $status

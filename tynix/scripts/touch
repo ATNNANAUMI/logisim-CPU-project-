@@ -1,0 +1,17 @@
+#!/bin/sh
+# touch FILE...    make an empty file when there is none (a file there is left alone)
+#
+# The disk keeps no times, so unlike Unix touch it changes nothing for a file
+# that exists.
+if [ $# -eq 0 ]; then
+    echo "usage: touch FILE..."
+    exit 2
+fi
+status=0
+for f in "$@"; do
+    if [ -d "$f" ]; then
+        continue
+    fi
+    [ -e "$f" ] || : > "$f" || { echo "touch: $f: cannot make it"; status=1; }
+done
+exit $status
