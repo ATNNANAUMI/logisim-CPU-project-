@@ -9,6 +9,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import alu as alu
 import config as config
+import machine_view
 from cpu import CPU
 from debuginfo import DebugInfo, step_line, step_out
 from devices import Video, key_code
@@ -120,6 +121,10 @@ class MemoryPane(ttk.Frame):
         self.page = 0
         self.follow = tk.BooleanVar(value=(bank == "rom"))
         self.disasm = tk.BooleanVar(value=(bank == "rom"))
+        self.show_float = tk.BooleanVar(value=False)
+        self.show_text = tk.BooleanVar(value=False)
+        self.get_info = lambda: None            # the window gives the .map's DebugInfo
+        self.last = {}                          # page -> its words at the last redraw (changed ones are coloured)
 
         bar = ttk.Frame(self)
         bar.pack(fill="x", padx=4, pady=4)
@@ -132,6 +137,10 @@ class MemoryPane(ttk.Frame):
         ttk.Button(bar, text="go", width=3, command=self.jump_to).pack(side="left")
         ttk.Checkbutton(bar, text="follow IAR", variable=self.follow).pack(side="left", padx=8)
         ttk.Checkbutton(bar, text="disassemble", variable=self.disasm,
+                        command=self.render).pack(side="left")
+        ttk.Checkbutton(bar, text="float", variable=self.show_float,
+                        command=self.render).pack(side="left")
+        ttk.Checkbutton(bar, text="text", variable=self.show_text,
                         command=self.render).pack(side="left")
         ttk.Button(bar, text="clear bp", width=8,
                    command=self.clear_breakpoints).pack(side="left", padx=4)
@@ -147,6 +156,7 @@ class MemoryPane(ttk.Frame):
         self.text.configure(yscrollcommand=scroll.set, state="disabled")
         self.text.tag_configure("current", background="#ffe08a")
         self.text.tag_configure("breakpoint", background="#ffbcbc")
+        self.text.tag_configure("changed", background="#b7e4b0")
         self.text.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=(0, 4))
         scroll.pack(side="right", fill="y", pady=(0, 4))
 
@@ -166,15 +176,20 @@ class MemoryPane(ttk.Frame):
         self.render()
 
     def jump_to(self, _event=None) -> None:
-        raw = self.goto.get().strip().replace("0x", "")
-        if not raw:
+        text = self.goto.get().strip()
+        if not text:
             return
         try:
-            addr = int(raw, 16)
-        except ValueError:
+            addr = machine_view.resolve_address(text, self.cpu, self.get_info())
+        except ValueError as problem:
+            self.range_label.configure(text=str(problem))
             return
+        self.show_address(addr)
+
+    def show_address(self, address: int) -> None:
+        """Page to the one holding address (a RAM index or a full address)."""
         self.follow.set(False)
-        self.page = (addr & config.BANK_MASK) // PAGE_WORDS
+        self.page = (address & config.BANK_MASK) // PAGE_WORDS
         self.render()
 
     def follow_iar(self) -> None:
@@ -233,9 +248,20 @@ class MemoryPane(ttk.Frame):
         marked = []
 
         skip_next = False
+        info = self.get_info()
+        names = {}
+        if info is not None:
+            for name, address in info.symbols.items():
+                names.setdefault(address, name)
+        before = self.last.get(self.page)
+        changed = []
+        now = list(self.words[start:end])
+        self.last = {self.page: now}               # only the page on screen is kept
         for offset, index in enumerate(range(start, end)):
             word = self.words[index]
             addr = self.base | index
+            if before is not None and before[offset] != word:
+                changed.append(offset + 1)
             if addr == iar:
                 current = offset + 1
             mark = " "
@@ -252,14 +278,23 @@ class MemoryPane(ttk.Frame):
                                                         index + 1 < len(self.words)) else None
                     skip_next = ins.takes_operand
                     text = disassemble(word, operand)
-                lines.append(f"{mark} 0x{addr:07X}  {word:08X}  {text}")
+                line = f"{mark} 0x{addr:07X}  {word:08X}  {text}"
             else:
-                lines.append(f"{mark} 0x{addr:07X}  {word:08X}  "
-                             f"{self._signed(word):>12d}  {self._ascii(word)}")
+                line = (f"{mark} 0x{addr:07X}  {word:08X}  "
+                        f"{self._signed(word):>12d}  {self._ascii(word)}")
+            if self.show_float.get():
+                line += f"  {alu.bits_to_float(word):<12.6g}"
+            if self.show_text.get():
+                line += "  " + "".join(self._ascii(word >> s) for s in (0, 8, 16, 24))
+            if addr in names:
+                line += f"  <{names[addr]}>"
+            lines.append(line)
 
         self.text.configure(state="normal")
         self.text.delete("1.0", "end")
         self.text.insert("1.0", "\n".join(lines))
+        for line in changed:
+            self.text.tag_add("changed", f"{line}.0", f"{line}.end")
         for line in marked:
             self.text.tag_add("breakpoint", f"{line}.0", f"{line}.end")
         if current:
@@ -407,6 +442,99 @@ class SourcePane(ttk.Frame):
                 self.text.see(f"{here[1]}.0")
 
 
+class StackPane(ttk.Frame):
+    """The call chain of the running program, innermost first (machine_view.frames).
+    Click a frame: its C file is shown and the RAM pane goes to its EBP."""
+
+    def __init__(self, master, window):
+        super().__init__(master)
+        self.window = window
+        self.chain = []
+        self.text = tk.Text(self, font=MONO, wrap="none", height=24, width=54, state="disabled")
+        self.text.tag_configure("top", background="#ffe08a")
+        self.text.bind("<Button-1>", self.pick)
+        self.text.pack(fill="both", expand=True, padx=4, pady=4)
+
+    def render(self) -> None:
+        self.chain = machine_view.frames(self.window.cpu, self.window.info)
+        rows = []
+        for i, (name, _pc, line, ebp, args) in enumerate(self.chain):
+            where = f"{os.path.basename(line[0])}:{line[1]}" if line else "(no C line)"
+            rows.append(f"#{i:<2} {name:<16} {where:<22} ebp {ebp:#x}  args {args[0]:#x} {args[1]:#x} {args[2]:#x}")
+        text = "\n".join(rows) or ("no call chain: this ROM has no .map" if not self.window.info else "")
+        self.text.configure(state="normal")
+        self.text.delete("1.0", "end")
+        self.text.insert("1.0", text)
+        if rows:
+            self.text.tag_add("top", "1.0", "1.end")
+        self.text.configure(state="disabled")
+
+    def pick(self, event) -> None:
+        row = int(self.text.index(f"@{event.x},{event.y}").split(".")[0]) - 1
+        if not 0 <= row < len(self.chain):
+            return
+        _name, _pc, line, ebp, _args = self.chain[row]
+        if line:
+            self.window.source_pane.show(line[0])
+        self.window.ram_pane.show_address(ebp)
+
+
+class _BarPane(ttk.Frame):
+    """A canvas with a line of text above it; subclasses draw in render()."""
+
+    def __init__(self, master, window):
+        super().__init__(master)
+        self.window = window
+        self.label = ttk.Label(self, font=MONO, justify="left", anchor="w")
+        self.label.pack(fill="x", padx=6, pady=4)
+        self.canvas = tk.Canvas(self, height=300, highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+
+
+class HeapPane(_BarPane):
+    """malloc's blocks as a bar: used red, free green, a damaged header yellow
+    (machine_view.heap), with the totals."""
+
+    def render(self) -> None:
+        blocks, damaged = machine_view.heap(self.window.cpu, self.window.info)
+        c, w = self.canvas, max(self.canvas.winfo_width(), 100)
+        c.delete("all")
+        total = sum(b[1] for b in blocks) or 1
+        used = sum(b[1] for b in blocks if b[2])
+        free = [b[1] for b in blocks if not b[2]]
+        x = 0.0
+        for _addr, size, is_used in blocks:
+            step = max(size / total * w, 2.0)
+            c.create_rectangle(x, 10, x + step, 70, fill="#d9534f" if is_used else "#5cb85c", outline="#333")
+            x += step
+        if damaged is not None:
+            c.create_rectangle(x, 10, x + 20, 70, fill="#f0ad4e")
+            c.create_text(x, 90, anchor="w", text=f"heap damaged at {damaged:#x}", font=MONO)
+        frag = 1 - max(free) / sum(free) if free and sum(free) else 0.0
+        self.label.configure(text=(
+            f"{len(blocks)} blocks, {used} words used, {sum(free)} free, largest free {max(free, default=0)}, "
+            f"fragmentation {frag:.0%}" if blocks else "no heap yet (malloc has not run), or no .map"))
+
+
+class MapPane(_BarPane):
+    """RAM in its parts (machine_view.regions): data, stack, heap, free; each
+    row has a minimum height and its real size as text, since the scale is not linear."""
+
+    def render(self) -> None:
+        parts = machine_view.regions(self.window.cpu, self.window.info)
+        c = self.canvas
+        c.delete("all")
+        colors = {"data": "#8fb8de", "stack": "#f0ad4e", "heap": "#d9534f", "free": "#dddddd"}
+        y = 4
+        for name, start, end in parts:
+            c.create_rectangle(10, y, 180, y + 48, fill=colors.get(name, "#fff"), outline="#333")
+            c.create_text(190, y + 24, anchor="w", font=MONO,
+                          text=f"{name:<6} {start:#x}-{end - 1:#x}  {end - start} words")
+            y += 54
+        esp = self.window.cpu.esp
+        self.label.configure(text=f"ESP index {esp}" if parts else "no map: no memory picture")
+
+
 class SimulatorWindow(tk.Tk):
     def __init__(self, cpu: CPU, rom_path: str | None = None, screen_fps: int = SCREEN_FPS):
         super().__init__()
@@ -458,6 +586,11 @@ class SimulatorWindow(tk.Tk):
         middle.add(self.rom_pane, text="ROM")
         middle.add(self.ram_pane, text="RAM")
         middle.add(self.source_pane, text="C source")
+        for pane in (self.rom_pane, self.ram_pane):
+            pane.get_info = lambda: self.info
+        self.view_panes = [StackPane(middle, self), HeapPane(middle, self), MapPane(middle, self)]
+        for pane, name in zip(self.view_panes, ("Stack", "Heap", "Map")):
+            middle.add(pane, text=name)
         self.source_pane.set_info(self.info)
         if self.info and self.info.lines:
             middle.select(self.source_pane)
@@ -614,6 +747,14 @@ class SimulatorWindow(tk.Tk):
         size = self.screen_zoom * max(video.width, video.height) + 8
         screen_box.configure(width=size, height=size)
         screen_box.bind("<Configure>", self._fit_screen)
+        self.screen_label.bind("<Motion>", self._mouse_moved)
+        self.screen_label.bind("<Leave>", lambda _e: setattr(self.cpu.bus.mouse, "inside", False))
+        for number, name in enumerate((1, 3, 2)):          # Tk buttons 1 left, 2 middle, 3 right
+            self.screen_label.bind(f"<ButtonPress-{name}>", lambda e, n=number: self._mouse_button(e, n, True))
+            self.screen_label.bind(f"<ButtonRelease-{name}>", lambda e, n=number: self._mouse_button(e, n, False))
+        self.screen_label.bind("<Button-4>", lambda _e: self.cpu.bus.mouse.wheel(True))     # X11 wheel
+        self.screen_label.bind("<Button-5>", lambda _e: self.cpu.bus.mouse.wheel(False))
+        self.screen_label.bind("<MouseWheel>", lambda e: self.cpu.bus.mouse.wheel(e.delta > 0))
         self._screen_shown = False
         self.display = tk.Text(box, font=MONO, height=16, wrap="char",
                                background="#101010", foreground="#c8ffc8",
@@ -1012,6 +1153,17 @@ class SimulatorWindow(tk.Tk):
                 pane.follow_iar()
                 pane.render()
             self.source_pane.render()
+            for pane in self.view_panes:
+                if pane.winfo_ismapped():                  # only the tab being looked at
+                    pane.render()
+
+    def _mouse_moved(self, event) -> None:
+        """The pointer over the screen picture, in screen pixels (the picture is zoomed)."""
+        self.cpu.bus.mouse.move(event.x // self.screen_zoom, event.y // self.screen_zoom)
+
+    def _mouse_button(self, event, number: int, down: bool) -> None:
+        self._mouse_moved(event)
+        self.cpu.bus.mouse.button(number, down)
 
     def _fit_screen(self, event) -> None:
         """Zoom the RGB screen by the largest whole factor that fits its tab."""

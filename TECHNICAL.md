@@ -230,6 +230,8 @@ nothing; `INDATA` with no input device leaves `RB` unchanged.
 | `0x8C` | disk seek (*simulator only*) | `OUTDATA` sets the disk's word position; `INDATA` reads the disk's size in words |
 | `0x8D` | disk data (*simulator only*) | `OUTDATA` writes the word at the position, `INDATA` reads it; both move the position on by one. Past the end, reads give 0 and writes are dropped |
 | `0x9C` | Claude (*simulator only*) | a terminal to the Claude API, on the PC (11.5). `OUTDATA`: a char of the message; `0` sends it; `0x18` a new conversation; `0x03` stops the reply; `0x16` a program starts using it. `INDATA`: the next char of the reply, `0` none yet, `4` the end of the turn, `2` a tool for the CPU (a letter, fields split by `0x1F`, then `0x03`; the CPU answers with the result and `0`) |
+| `0xBC` | Mouse state (*simulator only*) | `INDATA`: x in bits 31–24, y in 23–16 (screen pixels), the buttons in 2–0 (1 left, 2 right, 4 middle), 8 when the pointer is over the RGB screen |
+| `0xBD` | Mouse events (*simulator only*) | `INDATA`: the next press, release or wheel step of a queue of 64 (0 when empty): x, y as above, the kind in bits 15–8 (1 press, 2 release, 3 wheel up, 4 wheel down), the buttons after it in 2–0. A button or wheel event raises `IRQ_MOUSE` (bit 4 of the controller), motion does not |
 
 `0x6C`/`0x6D` were chosen on 2026-10-11; `0x6C` was built on the circuit
 (`RGB_Display`, section 2.2) on 2026-10-22. The numbers are `VIDEO_*` in
@@ -567,6 +569,11 @@ offset is added in 32 bits and the IAR keeps its low 25.
 
 ### 2.5 The control section as a microcode ROM (`logisim/microcode/`)
 
+`datapath_page.py` turns the same table into an HTML page: choose an instruction and
+step through its micro-steps, with the part that drives the bus lit orange and the
+parts that latch from it blue (control lines only; no values on the bus, which needs
+a micro-step executor, `PLAN.md` item 15, not written).
+
 A replacement for `CONTROL_SECTION`'s decoding gates, for a faster copy of
 the circuit; `CPU.circ` itself doesn't use it yet. `microcode.py` holds the
 table (one list of steps per instruction, read off the circuit) and writes
@@ -686,15 +693,16 @@ modules import each other by plain name, so run them as scripts
 | `isa.py` | opcode tables, `decode(word) -> Instr`, `disassemble(word, operand)`. `Instr.takes_operand` says whether a literal word follows |
 | `alu.py` | `int_op(name, a, b)` and `float_op(name, a, b)`, each returning `(R0 value, flag nibble)`; float32 ↔ bits helpers |
 | `memory.py` | `Memory` with two 16M-word banks (Python lists, 128 MB each, kept out of the cycle collector's sight with `gc.freeze()`: it walked their 32M items, 66 ms a time), `read`/`write` (ROM writes return `False`), stack helpers, and `parse_logisim` / `load_image` for v2.0 raw files |
-| `devices.py` | `Display` (lines of text; `\n` new line, `\r` back to the start of the line (what follows overwrites it), `\b` deletes, `\f` clears it all, so headless output shows only what came after the last `\f`), `Keyboard` (a deque; empty reads 0), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; the selected input and output addresses, and `hex_value`, the last word sent to the hex display; `OUTADDR` looks the output device up once and keeps its function in `send`, and putting another device in `display`, `video` or `disk` rewires it; `claude`, the device at `0x9C`) |
+| `devices.py` | `Display` (lines of text; `\n` new line, `\r` back to the start of the line (what follows overwrites it), `\b` deletes, `\f` clears it all, so headless output shows only what came after the last `\f`), `Keyboard` (a deque; empty reads 0), `Mouse` (`0xBC`/`0xBD`), `Timer` (milliseconds since reset at `0x7C`, from the computer's clock; `pause()`/`resume()`, which the window calls), `Video` (128×128 RGB565 pixels from `0x6C`, cleared by `0x6D`; `png()` for `--screen`), `Disk` (`0x8C`/`0x8D`, a file mapped with `mmap`), `DeviceBus` (`attach_disk(path)`; the selected input and output addresses, and `hex_value`, the last word sent to the hex display; `OUTADDR` looks the output device up once and keeps its function in `send`, and putting another device in `display`, `video` or `disk` rewires it; `claude`, the device at `0x9C`) |
 | `claude.py` | the Claude device (`0x9C`, 11.5): `ClaudeDevice` (the protocol, the worker thread, the history, the slash commands, the costs), `Access` (the PC paths of `tynix/claude_access.conf`), the tools, `AnthropicBackend` (the `anthropic` SDK, imported on first use) and `FakeBackend` (the self-checks) |
 | `cpu.py` | `CPU`: registers, IAR, flags, ESP/EBP, breakpoints, `step()`, `run()` (translated blocks, and the `_interpret()` loop), `reset()`, `resume()`, `forget_code()` |
 | `translate.py` | turns code that runs often into Python functions for `run()` (3.2): `translate()` (one block), `dispatcher()` (the loop that runs them) |
 | `gui.py` | the Tk window |
 | `debuginfo.py` | reads a `.map` (labels, C source lines): `function_at`, `line_at`, and `step_line` / `step_out` for the window's C stepping |
+| `machine_view.py` | the call chain (`frames`: stack[EBP] is the caller's EBP, stack[EBP-1] the return address), malloc's blocks (`heap`: a header word, negative when used) and RAM's parts (`regions`), all read through the `.map` (`DebugInfo.symbols`); the window's Stack, Heap and Map tabs draw them |
 | `main.py` | command line, `build_cpu`, headless runner |
 | `snapshot.py` | `save(cpu, path)` / `load(cpu, path, disk=None)`: the whole machine in a file (3.3, "Snapshots"); `digest(cpu)` for the checks |
-| `selftest.py` | 52 checks on the core and the Claude device |
+| `selftest.py` | 55 checks on the core and the Claude device |
 | `bench.py` | the simulator's speed on nine example programs (3.3) |
 
 ### 3.2 Execution model
@@ -790,6 +798,9 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
 * `--screen-fps N`: the window draws the RGB screen at most N times a second
   while a program runs (default 30; 0 = at every tick). See "How the window
   paces itself" below
+* `--mouse "X,Y,B@STEP;..."` (headless): put the pointer at X,Y with buttons B
+  (1 left, 2 right, 4 middle) once STEP instructions have run; the window sends
+  the real pointer over the screen tab (`Motion`, buttons, the wheel).
 * `--claude-model NAME`: the Claude device's model (`0x9C`, 11.5): `haiku`
   (the default, `claude-haiku-5-5`), `sonnet`, `opus`, `fable` or one of
   their ids; anything else is refused. `/model` changes it later
@@ -808,7 +819,11 @@ python cpu_sim/src/main.py [rom] [--ram RAM_IMAGE] [--headless] [--steps N] [--t
   (idle, answering, tool) and dollars so far, instruction count, measured
   rate, run state)
 * middle: ROM and RAM tabs, 256 words per page, with optional disassembly and
-  "follow IAR"; and a C source tab (below)
+  "follow IAR"; the go-to box takes a hex address, a label from the `.map`,
+  a register (`R3`, `ESP`) or a sum like `ESP-4` (`machine_view.resolve_address`);
+  optional float and text (4 packed characters) columns; label names at
+  their addresses; words changed since the last redraw in green; and a C
+  source tab (below). Not done: bookmarks
 * right: the display (`0x5C`) and the RGB screen (`0x6C`, a tab that comes
   forward when a program first draws; redrawn from the pixels that changed,
   or as one PPM picture when more than 400 did, at most `--screen-fps` times
@@ -888,6 +903,16 @@ the end (lines in a deeper frame, EBP above the current one, don't count),
 *out* runs until the function returns. The line table is read by
 `debuginfo.py`.
 
+Three more tabs read the machine through `machine_view.py` and redraw only
+while they are the visible tab. **Stack** lists the call chain, innermost
+first (function, C file and line, EBP, three argument words); a click shows
+that frame's file and its RAM page. **Heap** draws malloc's blocks (used red,
+free green, a damaged header yellow) with the totals and a fragmentation
+figure. **Map** lists RAM's parts (data, stack, heap, free) with their real
+sizes. All three need the `.map`. Not done: the prologue between a `CALL` and
+`STK CALL` shows the caller's frame; no per-task view under Tynix (needs the
+kernel's debug table, `PLAN.md` item 2).
+
 The keyboard field is read-only: every key goes straight into the buffer
 (Enter as `0x0A`, Backspace as `0x08`, Tab as `0x09`, printable ASCII as itself, the arrows as 28–31, Ctrl+letter as 1–26; `key_code()` in `devices.py`; Shift-Tab stays with the window).
 Pasting types the clipboard one key at a time. The field shows the keys still
@@ -933,6 +958,7 @@ python compiler/src/asm link     prog.obj lib.obj    [-o prog.rom] [--map] [--li
 python compiler/src/asm build    prog.asm lib.asm    [-o prog.rom] [--map] [--lib lib.asm]
 python compiler/src/asm disasm   prog.rom|prog.exe   [-o prog.dis.asm] [--map prog.map] [--raw]
 python compiler/src/asm/isa_page.py                  [-o isa.html]
+python logisim/microcode/datapath_page.py            [-o datapath.html]   # the datapath, micro-step by micro-step
 ```
 
 `isa_page.py` (2026-11-03) writes the instruction set as one self-contained
@@ -1019,7 +1045,7 @@ problems of all files (bad source, unreadable file, broken `.obj`), as
 | `errors.py` | `AsmError` (one message with file and line) and `AsmErrors` (a batch) |
 | `disasm.py` | `disasm`: a `.rom` or TEX2 `.exe` back to assembly that builds the same words; `round_trip()` for the self-checks |
 | `isa_page.py` | writes the instruction set as one HTML page (`compiler/ROM/isa.html` unless `-o`): section 4 of `assembly_syntax.md` parsed, bit fields from words the assembler writes, flags, micro-steps from `logisim/microcode/microcode.py`, a decoder (`isa.py`'s rules, tables from `encoding.py`) and an encoder |
-| `selftest.py` | 24 checks for the assembler and linker |
+| `selftest.py` | 25 checks for the assembler and linker |
 | `asm_grammar.py` | writes railroad diagrams of the grammar to `asm_grammar.html` (needs `pip install railroad-diagrams`) |
 
 ### 4.3 Assembling (two passes)
@@ -1280,6 +1306,7 @@ Assembly is under `asm/` (`programs/`, `stdlib/`, `two_files/`, `tests/` for cir
 | `c/basics/hello.c` | C: `printf("hello, world\n")` |
 | `c/basics/primes.c` | C: a sieve, `printf` with a width, the hex display (`cpu.h`) |
 | `c/basics/interrupts.c` | C: the CPU's interrupts (simulator only): `main` sleeps with `wait_for_interrupt()` while a C handler serves a 100 ms timer IRQ and the keyboard IRQ (`irq_enable`, `irq_ack`, `timer_interrupt_every`, `set_interrupt_handler`); prints the keys typed (`--keys abc`), five ticks, and that the stack pointer came back. Takes half a second of real time |
+| `c/graphics/paint.c` | C: draw with the mouse (`0xBC`/`0xBD`, `cpu.h`'s `mouse_state`): left draws, right erases, the top strip picks a colour, middle quits; headless it takes `--mouse` scripts (the self-check `test_mouse_device` plays one) |
 | `c/graphics/gfx_demo.c` | C: the RGB screen with `gfx.h`: gradient, text, shapes, a sine wave (`--screen` saves the picture) |
 | `c/graphics/image_demo.c` | C: compressed pictures with `gfx_image` (7.4): a 256×256 Mandelbrot picture and a transparent 16×16 sprite from `c/graphics/images/` (the PNGs and the `.h` files made from them), clipped at the edges |
 | `c/basics/structs.c` | C: an array of structs, `qsort`, `malloc`, `printf("%.2f")` |
@@ -1287,9 +1314,10 @@ Assembly is under `asm/` (`programs/`, `stdlib/`, `two_files/`, `tests/` for cir
 | `c/tests/benchmark.c` | C: twelve square roots (the old bit-by-bit `sqrt` as the reference, Quake III's inverse square root with two constants, one or two Newton steps or a residual correction, Newton's method from `y = x` or from two bit-based first guesses) timed with `clock()` over 20 000 inputs and checked against the reference: max absolute and relative error, how many results differ. `-D ONLY_ALGORITHM=n` runs one; `-D COUNT_ONLY` drops the timing so `--stats` gives that one's instruction count. Needs `--steps 600000000` with `cc run` |
 | `c/tests/sqrt_benchmark.c` | C: the library's `sqrt()` (Newton from a bit-based guess, then an exact rounding check) against the bit-by-bit one it replaced, 20 000 inputs 5 times: every result the same, about 1.4× faster. Needs `--steps 400000000` with `cc run` |
 | `c/graphics/video_player.c` | C: plays a video made by `compiler/src/img/video.py` (7.5) at its own speed, waiting on `clock()` (the timer); prints how many frames were late. Plays `c/graphics/videos/demo.h` (from `demo.mp4`, ffmpeg's moving test picture, 4 s); `-I . -D 'VIDEO="clip.h"'` plays `./clip.h` instead. Needs `--steps 2000000000` with `cc run` (waiting runs millions of instructions a second) |
-| `c/games/game_of_life.c` | C: Conway's Game of Life on the RGB screen, a 64×64 world that wraps around (2×2-pixel cells, only changed cells redrawn). First checks itself on well-known patterns (24 checks: still lifes, oscillators' periods, spaceships' moves, the diehard dying at 130, the glider gun), then shows seven scenes in turn: Gosper glider gun + eater, oscillators and still lifes, spaceships, R-pentomino, diehard, acorn, random soup. Keys `1`–`7` pick a scene, `n` next, `r` restart, space pause, `s` one step, `q` quit; the hex display shows the generation. `-D SCENE=n` starts at scene n, `-D FULL_TEST` also checks that the first three scenes repeat. 100 000–330 000 instructions a generation |
+| `c/games/game_of_life.c` | C: Conway's Game of Life on the RGB screen, a 64×64 world that wraps around (2×2-pixel cells, only changed cells redrawn). First checks itself on well-known patterns (25 checks: still lifes, oscillators' periods, spaceships' moves, the diehard dying at 130, the glider gun), then shows seven scenes in turn: Gosper glider gun + eater, oscillators and still lifes, spaceships, R-pentomino, diehard, acorn, random soup. Keys `1`–`7` pick a scene, `n` next, `r` restart, space pause, `s` one step, `q` quit; the hex display shows the generation. `-D SCENE=n` starts at scene n, `-D FULL_TEST` also checks that the first three scenes repeat. 100 000–330 000 instructions a generation |
 | `c/graphics/grapher.c` | C: a graphing calculator on the RGB screen. Type a function of x on the bottom line (`+ - * / ^`, implied products like `2x`, `\|x\|`, `sin cos tan sqrt ln log exp ...`, `pi`, `e`) and Enter: it is parsed into a small stack program and drawn, up to six functions in different colours, two pixels thick, over a grid with numbers on the axes; gaps where the value is not a number, jumps like tan's left unjoined. Commands `clear`, `reset`, `zoom f`, `in`, `out`, `move dx dy`, `view x0 x1 y0 y1`, `demo`, `help` (the list of what can be typed, also on the screen at the start). 100–200 ms a function in the simulator |
 | `c/graphics/qr.c` | C: a QR code encoder written from the standard, drawn on the RGB screen as big as it fits. Starts with this project's GitHub link; type any text and Enter for a new code (an empty line goes back to the link). Byte mode, versions 1–10, levels L/M/Q/H (`-D LEVEL=n`, M by default), Reed-Solomon over GF(256) with the blocks interleaved, and all eight masks scored by the standard's penalty rules (`-D MASK=n` forces one). `-D TEXT="..."` the first text, `-D DARK=c` the module colour. Every version and level decodes with `zbarimg` and matches `qrencode` module for module with the same mask. About 2.6 million instructions for the link (0.9 s in the simulator) |
+| `c/games/maze3d.c` | C: a raycaster: a seeded 8×8 maze walked in first-person 3D on the RGB screen (128 rays 2 pixels wide, 32-bit floats, only changed columns redrawn), a minimap, `W`/`S` walk, `A`/`D` turn, `Q`/`E` sidestep, `M` map, `R` new maze, `X` quits; the green door in the far corner ends it with the time; the self-check plays it (same keys, same screen; a player placed by the door walks out) |
 | `c/games/stackfall.c` | C: Stackfall, a falling-block puzzle of our own on the RGB screen: a 10×20 well, pieces falling on `clock()` (faster every 10 rows), `A`/`D` move, `W` turns, `S` drops a row, space to the bottom, `P` pauses, `Q` quits, `R` again; the twist is gravity chains (after a clear every block with nothing under it falls, and the rows that fills clear as the next step of a chain, which multiplies the score); only changed cells are drawn, `gfx_lost()` redraws; prints the score at the end |
 | `c/games/snake.c` | C: Snake on the RGB screen, a 16×14 grid of 8×8 cells under a score panel; `W`/`A`/`S`/`D` steer, `R` restarts after a game over, `Q` quits (`key_pressed()`, `wait_ms()`) |
 | `c/os/loader.c` | C: runs programs from the disk: type a name and arguments, it runs `/bin/<name>` with `spawnv()` and shows the exit status; an empty line lists `/bin`. The first step towards the OS's shell, `tynix/shell.c` (11); since Phase 7 a program for the OS itself (`--exe`, run from Tynix's shell) |
@@ -1389,7 +1417,7 @@ repo.
 ### 7.3 Self-checks
 
 ```
-python compiler/src/asm/selftest.py   # 24 checks: encodings, the interrupt group, vectors and start-up code, values, strings, jumps,
+python compiler/src/asm/selftest.py   # 25 checks: encodings, the interrupt group, vectors and start-up code, values, strings, jumps,
                                       # CALL/RET, SAVE/RESTORE, linking, a program past
                                       # 64K words and the size limits, link errors
                                       # (RAM calls, unexported externs), warnings,
@@ -1398,7 +1426,7 @@ python compiler/src/asm/selftest.py   # 24 checks: encodings, the interrupt grou
                                       # back to the same words, map or not, --raw),
                                       # isa_page (its decoder against isa.py on all
                                       # 65,536 words, a row for every mnemonic)
-python cpu_sim/src/selftest.py        # 52 checks: snapshot (save, load, both run on the same), the Claude device with a fake backend (ASCII, the request's
+python cpu_sim/src/selftest.py        # 55 checks: snapshot (save, load, both run on the same), the Claude device with a fake backend (ASCII, the request's
                                       # model/effort/max_tokens/caching/tools, errors and no SDK,
                                       # refusal, every slash command, tool frames, bad tool
                                       # input, /approve, Ctrl-X, a new program (SYN) during a
@@ -1419,7 +1447,7 @@ python cpu_sim/src/selftest.py        # 52 checks: snapshot (save, load, both ru
                                       # the LD trace note when RA == RB, the window's pacing (settle(), screen_due()), step_line (C line
                                       # stepping: line, breakpoint, halt, limit), isa.py against the assembler's
                                       # encoding.py tables (names, groups, one/two-word shapes)
-python compiler/src/cc/selftest.py    # 20 checks: stackfall (a player reading RAM plays 40 pieces: rows, score,
+python compiler/src/cc/selftest.py    # 22 checks: explore (the compiler explorer page), maze3d (the same keys give the same screen; a player put by the door walks out), stackfall (a player reading RAM plays 40 pieces: rows, score,
                                       # the screen's pixels; a chain of 2 set up in RAM), disasm on every C example (ROM) and tynix/ program (.exe), interrupts from C (WAIT, timer and key IRQ, TRAP, the stack limit fault), preprocessor, error messages (several per run), warnings,
                                       # type sizes, exit/atexit, strtoul overflow limits, the 256 x 256 screen's edges (clipped, not
                                       # wrapped), keyboard input, globals
@@ -1436,7 +1464,7 @@ python compiler/src/img/selftest.py   # 10 checks: gamma codes, encode/decode ro
                                       # and video.py: frames land on the screen as it says,
                                       # PNG folder via the CLI, video_player.c on the
                                       # simulator, a 1 s video through ffmpeg (if installed)
-python compiler/src/disk/selftest.py  # 26 checks: `scripting` (the shell's language under the kernel:
+python compiler/src/disk/selftest.py  # 28 checks: `scripting` (the shell's language under the kernel:
                                       # a #!/bin/sh script, loops, break 2, functions, local, $( ), $(( )),
                                       # *, pipes of programs and built-ins, a writer ending with 141,
                                       # & on a pipeline, "> " lines, /tmp left empty), `snapshot` (primes.c and the kernel with a disk saved
@@ -1746,6 +1774,7 @@ how the compiler works.
 
 ```
 python compiler/src/cc compile prog.c [-o prog.asm]                 # C -> assembly
+python compiler/src/cc explore prog.c [-o prog.html]                # the compiler explorer page (10.x)
 python compiler/src/cc build prog.c [more.c x.asm y.obj] [-o prog.rom] [--map] [--no-libc] [--lib x.asm] [--exe [--region WORDS]]
 python compiler/src/cc run   prog.c [...] [--keys TEXT] [--steps N] [--stats] [--trace] [--screen FILE.png] [--disk FILE] [--claude-model NAME] [--claude-system FILE]
         common options: -I dir, -D NAME[=value], -w (no warnings)
@@ -1776,6 +1805,7 @@ default of 1M (`make_disk.py` gives `diff` 1.25M).
 | `regalloc.py` | which locals live in registers, and which of them each call must keep |
 | `codegen.py` | syntax tree -> assembly text, one function at a time |
 | `peephole.py` | clean-ups on each function's instructions |
+| `explore.py` | the compiler explorer (`cc explore`): recompiles with `peephole.optimize` replaced by none, the first pass, the first two ... (the compiler is untouched), aligns the listings with `difflib` to name the pass that removed each line, links the C line, the assembly and the linked words (from the `.map`) by hover. Not shown: tokens, the syntax tree, per-line instruction counts |
 | `driver.py` | compiles files, caches and selects the C library, writes crt0, links (with `compiler/src/asm`'s assembler and linker), runs the simulator |
 | `selftest.py` | the self-checks (7.3) |
 | `tests/` | the test programs, their gcc outputs (`.expected`) and `difftest.py` |
@@ -2014,6 +2044,8 @@ With no disk, or no `/bin/sh`, the kernel says so and halts.
 | `tynix/bin/diff.c` | the lines that differ between two text files (11.3; 13.2K words) |
 | `tynix/bin/hexdump.c` | the values of files in hexadecimal (11.3; 11.6K words) |
 | `tynix/bin/calc.c` | a 32-bit integer calculator (11.3; 7.6K words) |
+| `tynix/bin/chip8.c` | a CHIP-8 interpreter (11.3): programs are hex text (`tynix/chip8/*.ch8`, copied to `/home/user/chip8/`), a frame is CYCLES instructions then one timer tick at 60 Hz from `clock()`, keys count as held for 9 frames after a press (no key-up on this keyboard), `-t FRAMES` reads a program from stdin and prints the state and screen, which `check_chip8` compares with `tynix/chip8_ref.py` (a Python interpreter of the same machine) |
+| `tynix/bin/basic.c` | a BASIC interpreter (11.3): the language is described in the file's header; `basic FILE` runs a program (the samples are `tynix/basic/*.bas`, copied to `/home/user/basic/`), alone it is a prompt; `compiler/src/cc/tests/basic.c` runs the same source under gcc and tiny C |
 | `tynix/bin/visual_file_manager.c` | a two-pane file manager on the RGB screen, in the style of yazi (section 11.4; 22.8K words) |
 | `tynix/bin/claude.c` | `claude`: talk to Claude through the Claude device, which runs commands on the CPU for it (section 11.5; 13.5K words) |
 | `tynix/cpu_claude.md` | the Claude device's system prompt: the machine, the characters allowed, the tools, the Tynix commands, what not to run, the limits (11.5) |
@@ -2389,6 +2421,15 @@ holds text while it runs and is blank after.
 
 
 ### 11.3 The tools (`tynix/bin/more.c` ... `tynix/bin/calc.c`)
+
+(`tynix/bin/basic.c` is a ninth program, a BASIC; its header lists the language.
+Lines are interpreted from their text each time, `execute()` follows the
+`GOTO`/`GOSUB`/`NEXT`/`WEND` redirects of the statements, numbers are 32-bit
+floats and strings are malloc'd. Runtime errors print `?TEXT IN LINE` and
+return to the prompt (`longjmp`); `basic FILE` exits with status 1 on one.
+The `PLOT`, `LINE`, `CIRCLE`, `TEXT`, `CLS` statements and `INKEY$` use `gfx.h`
+and `key_pressed()`, and are compiled out under `-DBASIC_TEST`, which is how
+`compiler/src/cc/tests/basic.c` runs a whole session under gcc and tiny C.)
 
 Eight small programs for `/bin`, one file each, written like `ed.c`: a header
 comment (what, how built, usage), errors as `NAME: PATH: reason` (the

@@ -38,6 +38,7 @@ logisim-CPU-project-/
 │   ├── microcode/            CONTROL_SECTION as a 64K x 32 microcode ROM (not wired into CPU.circ yet; TECHNICAL 2.5)
 │   │   ├── microcode.py      the table (steps per instruction, bit layout) -> microcode.rom; --list prints it
 │   │   ├── microcode.rom     the generated image ("v2.0 raw")
+│   │   ├── datapath_page.py  the datapath as one HTML page: pick an instruction, step through its micro-steps (control lines, not values)
 │   │   ├── verify.py         runs CONTROL_SECTION's gates through Logisim for every IR/step/flags, compares with the ROM
 │   │   └── ControlSweep.java the sweep verify.py compiles and runs (needs javac + the Logisim jar)
 │   └── old_notes/            old notes: stack micro-steps, personal TODO
@@ -56,7 +57,7 @@ logisim-CPU-project-/
 │   │   ├── errors.py         AsmError (file:line: message), AsmErrors (batch)
 │   │   ├── disasm.py         disasm: a .rom or TEX2 .exe back to assembly that builds the same words (labels, CALL/RET, .string)
 │   │   ├── isa_page.py       the ISA as one HTML page (assembly_syntax.md 4 parsed, bit fields, micro-steps, decoder, encoder)
-│   │   ├── selftest.py       24 checks (incl. building every compiler/examples program, disasm round trips, isa_page)
+│   │   ├── selftest.py       25 checks (incl. building every compiler/examples program, disasm round trips, isa_page, datapath_page)
 │   │   └── asm_grammar.py    generates railroad-diagram HTML of the grammar (needs railroad-diagrams)
 │   ├── src/cc/               C compiler (run as `python compiler/src/cc <cmd>`); imports src/asm's modules
 │   │   ├── __main__.py       CLI: compile | build | run  (-o, --map, -I, -D, -w, --no-libc; build: --exe --region; run: --keys --steps --stats --trace)
@@ -67,9 +68,10 @@ logisim-CPU-project-/
 │   │   ├── regalloc.py       which locals get registers; which a call must keep
 │   │   ├── codegen.py        tree → assembly (Val/Addr model, calls, frames, switch tables)
 │   │   ├── peephole.py       clean-ups per function
+│   │   ├── explore.py        `cc explore`: an HTML page of the C, the assembly before and after each peephole pass (found by recompiling with the passes switched on one at a time) and the machine words, linked by C line
 │   │   ├── driver.py         build pipeline: compile, library cache/selection, crt0 (ROM or --exe), link, TEX2 .exe (+ relocations), libc/tynix/ for --exe, run in simulator
 │   │   ├── cerror.py         CError (file:line:col: error: ...)
-│   │   ├── selftest.py       20 checks (incl. interrupts from C, disasm of every C program, stackfall played, every tests/ program against gcc's output)
+│   │   ├── selftest.py       22 checks (incl. explore, interrupts from C, disasm of every C program, stackfall and maze3d played, every tests/ program against gcc's output)
 │   │   └── tests/            *.c + *.expected (gcc's output); difftest.py compares with gcc (--update);
 │   │                         fuzz.py: random programs, gcc vs tiny C
 │   ├── src/img/              PNG -> compressed image for gfx_image() (run as `python compiler/src/img pic.png`)
@@ -86,7 +88,7 @@ logisim-CPU-project-/
 │   │   ├── __main__.py       CLI: format (--size MB), ls, put (--binary), get, cat, rm, mkdir, rmdir, mv, df
 │   │   ├── fs.py             THE FORMAT, TFS1 (docstring): superblock, FAT of 256-word blocks, directories =
 │   │   │                     files of 132-word entries (127-char names), text packed 4 chars a word
-│   │   └── selftest.py       26 checks (incl. scripting (the shell's language, pipes, #!/bin/sh), snapshot (primes, the kernel + disk), environment (export, $NAME, PATH, /etc/profile, setenv inherited), claude (tynix/bin/claude.c + the device, fake backend), batch (sh -c, run), abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/bin/ed.c, tynix/bin/edit.c, the nine tools)
+│   │   └── selftest.py       28 checks (incl. chip8 (/bin/chip8 against tynix/chip8_ref.py on three programs), basic (/bin/basic: a file, the prompt, SAVE and LOAD, an error line and the status), scripting (the shell's language, pipes, #!/bin/sh), snapshot (primes, the kernel + disk), environment (export, $NAME, PATH, /etc/profile, setenv inherited), claude (tynix/bin/claude.c + the device, fake backend), batch (sh -c, run), abuse (NMI in the interrupt exit, a huge region, bad file names), fs_reclaim, the NMI kill, the C library's files on the simulator against fs.py, stat, spawnv + TEX1, multitask (the kernel: two programs at once, kill, fault, background keys, shared log), tynix/shell.c, tynix/bin/ed.c, tynix/bin/edit.c, the nine tools)
 │   ├── libc/                 the C library: include/*.h, *.c (stdio, string, stdlib, malloc, math, gfx, gfx_image, ...),
 │   │                         local.h (library-internal), runtime.asm (_pow2, _udiv, _umod), memory.asm (memcpy, memset), setjmp.asm,
 │   │                         interrupt.asm (vector stubs; a kernel's stack and task switch); include/sys/tynix.h (system calls, TEX2)
@@ -107,9 +109,9 @@ logisim-CPU-project-/
 │   │   └── c/                C
 │   │       ├── basics/       hello, primes (sieve + hex display), structs (structs, qsort, malloc),
 │   │       │                 interrupts (WAIT, a timer IRQ and a key IRQ served by a C handler)
-│   │       ├── games/        guess (keyboard input), snake (W/A/S/D, R restarts, Q quits), stackfall (falling blocks, gravity chains),
+│   │       ├── games/        guess (keyboard input), snake (W/A/S/D, R restarts, Q quits), stackfall (falling blocks, gravity chains), maze3d (a raycaster: a 3D maze),
 │   │       │                 game_of_life (64x64 torus, 7 scenes of well-known patterns, checks itself; keys 1-7 n r space s q)
-│   │       ├── graphics/     the RGB screen: gfx_demo; image_demo (gfx_image) with images/: mandelbrot, smiley (.png + the .h made from it);
+│   │       ├── graphics/     the RGB screen: gfx_demo; paint (mouse); image_demo (gfx_image) with images/: mandelbrot, smiley (.png + the .h made from it);
 │   │       │                 video_player (plays a video.py .h on time with clock()) with videos/demo (.mp4 + .h);
 │   │       │                 grapher (graphing calculator: type f(x), Enter; zoom/move/view commands);
 │   │       │                 qr (QR code encoder: the repo link, then any typed text; checked with zbarimg/qrencode)
@@ -140,6 +142,8 @@ logisim-CPU-project-/
 │   │   ├── tree.c, du.c      a folder as a tree (-s sizes); disk KB of folders and files (-a)
 │   │   ├── diff.c, hexdump.c changed lines of two text files (LCS, Unix normal format); values in hex
 │   │   ├── calc.c            32-bit integer calculator (C precedence; no argument: a line at a time)
+│   │   ├── chip8.c           a CHIP-8 interpreter (all 35 instructions, 64x32 at 4x on the RGB screen, hex-text programs, `-t FRAMES` test mode); reference: tynix/chip8_ref.py, programs: tynix/chip8/*.ch8
+│   │   ├── basic.c           a home-computer BASIC: numbered lines, RUN/LIST/SAVE/LOAD, strings, arrays, float numbers, the screen (PLOT, LINE, TEXT), `basic FILE` runs a file; samples in tynix/basic/*.bas
 │   │   ├── visual_file_manager.c  a two-pane yazi-like file manager on the RGB screen (j k h l, space select, y x p, u, r d a, ~ home, q)
 │   │   └── claude.c          talk to Claude through the Claude device (0x9C): chat, `claude QUESTION`, /commands; runs
 │   │                         Claude's commands (sh -c, stdin/stdout files, timeout kill) and writes its files
@@ -147,6 +151,8 @@ logisim-CPU-project-/
 │   ├── claude_access.conf    PC paths Claude may read / write (read PATH, write PATH), besides claude/
 │   ├── claude/               Claude's folder on the PC (README.md committed, the rest git-ignored)
 │   ├── make_disk.py          tynix/disk.img (git-ignored): TFS1, /bin/sh, ed, the tools, claude and the C examples built --exe in /bin, /readme.txt, /home/user (Documents, Downloads, ...)
+│   ├── chip8_ref.py          a CHIP-8 reference interpreter in Python (the self-check compares /bin/chip8 with it); chip8/*.ch8 are the test programs
+│   ├── basic/                sample BASIC programs (fizzbuzz, primes, hello, spiral), copied to /home/user/basic
 │   └── run_with_video.sh     builds the kernel and the disk, puts video_player in /bin (a clip.h argument picks the video), starts the simulator
 │
 └── cpu_sim/
@@ -165,10 +171,11 @@ logisim-CPU-project-/
     │   │                     (every RAM store checks a map of translated words and drops RAM blocks it hits)
     │   ├── gui.py            Tk window (registers, ROM/RAM panes, C source tab + line stepping, display, live keyboard, breakpoints, speed, save/load state)
     │   ├── debuginfo.py      reads the .map (labels, C lines from .loc); step_line / step_out
+    │   ├── machine_view.py   read-only views of the running machine: frames() the call chain, heap() malloc's blocks, regions() RAM's parts (the window's Stack, Heap, Map tabs)
     │   ├── main.py           CLI: `python cpu_sim/src/main.py [rom] [--headless --steps N --trace --keys TEXT --ram IMG --screen F.png --disk IMG --screen-fps N --claude-model NAME --claude-system FILE --load-state F --save-state F]`
     │   ├── snapshot.py       save/load the whole machine (a zip: state.json, ROM/RAM chunks, the screen); digest() for the checks
     │   ├── bench.py          speed check: nine example programs in run(), MHz first/best run + end-state digest
-    │   └── selftest.py       52 checks (incl. snapshots, interrupts, translated code against step() on random code, the Claude device)
+    │   └── selftest.py       55 checks (incl. machine_view and its window tabs, snapshots, interrupts, translated code against step() on random code, the Claude device)
 ```
 
 ## Circuit hierarchy (`logisim/CPU.circ`)

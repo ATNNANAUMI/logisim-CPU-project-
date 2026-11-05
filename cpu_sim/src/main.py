@@ -30,10 +30,37 @@ def build_cpu(rom_path=None, ram_path=None, disk_path=None, claude_model=None,
     return cpu
 
 
+def parse_mouse(text: str):
+    """"x,y,buttons@step;..." -> [(step, x, y, buttons)] sorted by step: the
+    pointer is put at x,y with those buttons (bits 0-2) once `step`
+    instructions have run."""
+    script = []
+    for item in filter(None, (t.strip() for t in text.split(";"))):
+        try:
+            where, _, step = item.partition("@")
+            x, y, buttons = (int(v, 0) for v in where.split(","))
+            script.append((int(step or 0, 0), x, y, buttons))
+        except ValueError:
+            raise ValueError(f"--mouse: '{item}' is not x,y,buttons@step") from None
+    return sorted(script)
+
+
+def apply_mouse(mouse, x: int, y: int, buttons: int) -> None:
+    mouse.move(x, y)
+    for number in range(3):
+        if (buttons >> number & 1) != (mouse.buttons >> number & 1):
+            mouse.button(number, bool(buttons >> number & 1))
+
+
 def run_headless(cpu: CPU, max_steps: int, trace: bool, keys: str = "",
-                 screen: str = "") -> None:
+                 screen: str = "", mouse: str = "") -> None:
     if keys:
         cpu.bus.keyboard.type(keys)
+    script = parse_mouse(mouse)
+    for step, x, y, buttons in script:      # run up to each point, then move the pointer
+        if step > cpu.instructions:
+            cpu.run(step - cpu.instructions)
+        apply_mouse(cpu.bus.mouse, x, y, buttons)
     steps = 0
     while trace and steps < max_steps:
         step = cpu.step()
@@ -73,6 +100,9 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=100_000)
     parser.add_argument("--trace", action="store_true")
     parser.add_argument("--keys", default="", help="preload the keyboard buffer")
+    parser.add_argument("--mouse", default="", metavar="X,Y,B@STEP;...",
+                        help="headless: put the pointer at X,Y with buttons B (1 left, 2 right, 4 middle) "
+                             "once STEP instructions have run, e.g. '10,20,0@1000;10,20,1@2000'")
     parser.add_argument("--screen", default="", metavar="FILE.png",
                         help="save the RGB screen (device 0x6C) as a PNG at the end")
     parser.add_argument("--screen-fps", type=int, default=30, metavar="N",
@@ -106,7 +136,7 @@ def main() -> None:
         parser.error(str(error))
     try:
         if args.headless:
-            run_headless(cpu, args.steps, args.trace, args.keys, args.screen)
+            run_headless(cpu, args.steps, args.trace, args.keys, args.screen, args.mouse)
             if args.save_state:
                 import snapshot
                 snapshot.save(cpu, args.save_state, rom_path)

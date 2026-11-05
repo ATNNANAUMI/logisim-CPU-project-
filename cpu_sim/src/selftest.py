@@ -1272,6 +1272,198 @@ def test_claude_device_on_the_bus():
     assert len(cpu.bus.claude.history) == 2
 
 
+FACT_C = """
+#include <stdio.h>
+#include <stdlib.h>
+int depth_probe;
+int fact(int n) { if (n <= 1) { depth_probe = n; return 1; } return n * fact(n - 1); }
+int main(void) {
+    int *a = malloc(10), *b = malloc(20), *c = malloc(5);
+    free(b);
+    printf("%d %d\\n", fact(5), a != 0 && c != 0);
+    return 0;
+}
+"""
+
+
+def test_machine_view():
+    """machine_view.py: stopped in fact(1) called from fact(5), the chain is
+    fact x5, main, start with the arguments 1..5; the heap holds the blocks
+    malloc(10), malloc(20) freed, malloc(5), then the free rest; the regions
+    tile RAM from the data to its end; no map, no answers."""
+    import sys
+    import tempfile
+    from pathlib import Path
+    from debuginfo import DebugInfo
+    import machine_view as mv
+    cc = str(Path(__file__).resolve().parents[2] / "compiler" / "src" / "cc")
+    sys.path.insert(0, cc)
+    try:
+        import driver
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "fact.c").write_text(FACT_C)
+            program, _ = driver.build([str(Path(tmp) / "fact.c")])
+            (Path(tmp) / "fact.map").write_text(driver.format_map(program, "fact.rom"))
+            info = DebugInfo.load(Path(tmp) / "fact.map")
+    finally:
+        sys.path.remove(cc)
+    cpu = CPU()
+    cpu.mem.load_rom(program.rom)
+    assert mv.frames(cpu, None) == [] and mv.heap(cpu, None) == ([], None) and mv.regions(cpu, None) == []
+    assert mv.heap(cpu, info) == ([], None)                       # before the first malloc
+    probe = info.symbols["depth_probe"]
+    for _ in range(100000):
+        cpu.run(1)
+        if cpu.mem.read(probe) == 1:                               # fact(1) just stored its mark
+            break
+    chain = mv.frames(cpu, info)
+    assert [f[0] for f in chain] == ["fact"] * 5 + ["main", "start"], chain
+    assert [f[4][0] for f in chain[:5]] == [1, 2, 3, 4, 5]
+    assert chain[0][2][1] == 5 and chain[5][2][1] == 9, (chain[0][2], chain[5][2])
+    blocks, damaged = mv.heap(cpu, info)
+    assert damaged is None and [(b[1], b[2]) for b in blocks[:3]] == [(11, True), (21, False), (6, True)], blocks
+    assert blocks[3][2] is False and blocks[3][0] + blocks[3][1] == cpu.mem.read(info.symbols["_heap_end"])
+    cpu.mem.write(blocks[1][0], 0)                                 # a damaged header
+    assert mv.heap(cpu, info)[1] == blocks[1][0]
+    cpu.regs[3], cpu.esp = 0x40, 0x200
+    for text, want in (("0x10", 16), ("1000a", 0x1000A), ("R3", 0x40), ("r3+2", 0x42), ("ESP-4", 0x1FC),
+                       ("fact", info.symbols["fact"]), ("fact + 0x10 - 1", info.symbols["fact"] + 15)):
+        assert mv.resolve_address(text, cpu, info) == want, text
+    for bad in ("", "nosuch", "+3", "R3+", "fact+zz"):
+        try:
+            mv.resolve_address(bad, cpu, info)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} accepted")
+    parts = mv.regions(cpu, info)
+    assert [p[0] for p in parts] == ["data", "stack", "heap", "free"][:len(parts)] and parts[0][1] == config.RAM_BIT
+    assert all(a[2] == b[1] for a, b in zip(parts, parts[1:])) and parts[-1][2] == config.RAM_BIT + config.BANK_WORDS
+
+
+def test_window_view_panes():
+    """gui.py's Stack, Heap and Map tabs draw the machine_view answers in a
+    real window (skipped without tkinter or a display)."""
+    try:
+        import tkinter
+        import gui
+    except ImportError:
+        return
+    import tempfile
+    import machine_view
+    from pathlib import Path
+    import sys
+    cc = str(Path(__file__).resolve().parents[2] / "compiler" / "src" / "cc")
+    sys.path.insert(0, cc)
+    try:
+        import driver
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "fact.c").write_text(FACT_C)
+            program, _ = driver.build([str(Path(tmp) / "fact.c")])
+            rom = Path(tmp) / "fact.rom"
+            rom.write_text(driver.linker.format_raw(program.rom))
+            (Path(tmp) / "fact.map").write_text(driver.format_map(program, "fact.rom"))
+            cpu = CPU()
+            cpu.mem.load_rom(program.rom)
+            try:
+                window = gui.SimulatorWindow(cpu, str(rom))
+            except tkinter.TclError:                    # no display
+                return
+    finally:
+        sys.path.remove(cc)
+    try:
+        probe = window.info.symbols["depth_probe"]
+        for _ in range(100000):
+            cpu.run(1)
+            if cpu.mem.read(probe) == 1:
+                break
+        window.update()
+        for pane in window.view_panes:
+            pane.render()
+        stack, heap_pane, map_pane = window.view_panes
+        assert stack.text.get("1.0", "end").count(" fact ") == 5 and "main" in stack.text.get("1.0", "end")
+        assert "4 blocks" in heap_pane.label.cget("text") and "ESP index" in map_pane.label.cget("text")
+        stack.pick(type("E", (), {"x": 5, "y": 5})())      # a click on the first frame
+        click = type("E", (), {"x": 6 * window.screen_zoom, "y": 9 * window.screen_zoom})()
+        window._mouse_button(click, 0, True)                # a left press on the screen picture
+        assert cpu.bus.mouse.state() == (6 << 24 | 9 << 16 | 1 | 8) and cpu.bus.mouse.events
+        window._mouse_button(click, 0, False)
+        ram = window.ram_pane
+        ram.show_float.set(True)
+        ram.show_text.set(True)
+        ram.goto.insert(0, "depth_probe")
+        ram.jump_to()
+        text = ram.text.get("1.0", "end")
+        assert "<depth_probe>" in text and "<handlers>" in text and "0x1000000  00000001" in text, text[:300]
+        ram.render()
+        cpu.mem.write(window.info.symbols["depth_probe"], 7)
+        ram.render()
+        assert ram.text.tag_ranges("changed"), "a changed word is not marked"
+        ram.render()
+        assert not ram.text.tag_ranges("changed")           # marked for one redraw
+        window.refresh()
+    finally:
+        window.destroy()
+
+
+def test_mouse_device():
+    """The mouse (0xBC state, 0xBD events): the state word's layout, a button
+    event raises IRQ_MOUSE and queues, motion does not, the queue keeps 64,
+    --mouse scripts parse, and paint.c under a script draws, erases and quits."""
+    import sys
+    from pathlib import Path
+    import main as main_module
+    cpu = CPU()
+    bus, mouse = cpu.bus, cpu.bus.mouse
+    bus.in_address(config.MOUSE_STATE_ADDR)
+    assert bus.in_data() == 0
+    mouse.move(300, -4)                                       # clamped to the screen
+    assert (mouse.x, mouse.y) == (config.VIDEO_WIDTH - 1, 0) and bus.interrupts.pending == 0
+    mouse.move(0x12, 0x34)
+    mouse.button(0, True)
+    mouse.button(0, True)                                     # no change: no second event
+    mouse.button(1, True)
+    mouse.wheel(False)
+    assert bus.in_data() == 0x12340000 | 3 | 8 and bus.interrupts.pending == 1 << config.IRQ_MOUSE
+    bus.in_address(config.MOUSE_EVENT_ADDR)
+    got = [bus.in_data() for _ in range(5)]
+    assert got == [0x12340101, 0x12340103, 0x12340403, 0, 0], [hex(g) for g in got]
+    mouse.button(0, False)
+    mouse.button(1, False)
+    assert [bus.in_data() >> 8 & 0xFF for _ in range(3)] == [config.MOUSE_RELEASE] * 2 + [0]
+    for i in range(100):
+        mouse.wheel(True)
+    assert len(mouse.events) == config.MOUSE_QUEUE
+    cpu.reset()
+    assert mouse.events == type(mouse.events)() and mouse.state() == 0
+    assert main_module.parse_mouse("5,6,1@20; 1,2,0@10") == [(10, 1, 2, 0), (20, 5, 6, 1)]
+    try:
+        main_module.parse_mouse("1,2")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a bad --mouse script was accepted")
+    cc = str(Path(__file__).resolve().parents[2] / "compiler" / "src" / "cc")
+    sys.path.insert(0, cc)
+    try:
+        import driver
+        program, _ = driver.build([str(Path(__file__).resolve().parents[2] / "compiler" / "examples" / "c" / "graphics" / "paint.c")])
+    finally:
+        sys.path.remove(cc)
+    cpu = CPU()
+    cpu.mem.load_rom(program.rom)
+    script = ("40,5,0@300000;40,5,1@400000;40,5,0@450000;10,50,1@500000;60,50,1@600000;60,90,1@700000;"
+              "60,90,0@750000;100,100,2@800000;120,100,2@850000;0,0,4@900000")
+    for step, x, y, buttons in main_module.parse_mouse(script):
+        cpu.run(step - cpu.instructions)
+        main_module.apply_mouse(cpu.bus.mouse, x, y, buttons)
+    cpu.run(2_000_000)
+    pixels = cpu.bus.video.pixels
+    assert cpu.halted and cpu.bus.display.text == "painted 5\n", cpu.bus.display.text
+    red = 0xF800
+    assert [pixels[y * 256 + x] for x, y in ((40, 5), (10, 50), (35, 50), (60, 70), (60, 90))] == [red] * 5
+    assert pixels[100 * 256 + 110] == 0                      # erased with black
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:

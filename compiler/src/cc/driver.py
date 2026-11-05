@@ -390,9 +390,13 @@ def format_map(program, title):
 # ------------------------------------------------------------------ running
 
 def run_in_simulator(rom_words, keys="", max_steps=50_000_000, trace=False, disk=None,
-                     claude_model=None, claude_system=None):
+                     claude_model=None, claude_system=None, steady_clock=False):
     """Run a ROM image in the Python simulator. Returns (cpu, display text).
     disk: a disk image file for devices 0x8C/0x8D, created if missing.
+    steady_clock: the timer counts instructions (2000 to a millisecond), not the
+    computer's clock, so a kernel's time slices fall in the same places every
+    run, whatever else the computer is doing (the self-checks that compare the
+    order two programs print in).
     claude_model, claude_system: the Claude device's (0x9C) model and system
     prompt file (ValueError for an unknown model)."""
     if str(SIM_DIR) not in sys.path:
@@ -401,6 +405,10 @@ def run_in_simulator(rom_words, keys="", max_steps=50_000_000, trace=False, disk
 
     cpu = CPU()
     cpu.bus.claude.configure(claude_model, claude_system)
+    if steady_clock:
+        from devices import Timer            # cpu_sim/src
+        cpu.bus.timer = Timer(clock=lambda: cpu.instructions / 2_000_000)
+        cpu.bus.timer.reset()
     cpu.mem.load_rom(rom_words)
     if keys:
         cpu.bus.keyboard.type(keys)

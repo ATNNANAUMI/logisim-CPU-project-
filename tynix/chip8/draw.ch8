@@ -1,0 +1,27 @@
+# sprites: digits 0-3 at the top left, digit 0 drawn twice (erased, VF=1), a 60-frame wait on DT, digit 7 drawn twice
+6004   # V0 = 4  (x)
+6102   # V1 = 2  (y)
+6200   # V2 = 0  (digit)
+F229   # I = font digit V2
+D015   # draw 5 rows at (V0, V1); VF = collision
+7008   # V0 += 8
+7201   # V2 += 1
+3204   # skip if V2 == 4
+1206   # jump loop
+6300   # V3 = 0
+F329   # I = font digit 0
+6004   # V0 = 4
+D015   # draw digit 0 again at (4, 2): erases it, VF = 1
+84F0   # V4 = VF (collision)
+653C   # V5 = 3C (60)
+F515   # DT = V5: half a second
+F607   # V6 = DT
+3600   # skip if V6 == 0
+1220   # jump wait
+6720   # V7 = 20 (x)
+6810   # V8 = 10 (y)
+6907   # V9 = 7
+F929   # I = font digit V9
+D785   # draw digit 7 at (32, 16)
+D785   # draw it again at the same place: erased, VF = 1
+1232   # end: jump to itself

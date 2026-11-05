@@ -9,7 +9,7 @@ A 32-bit CPU built from logic gates in Logisim-evolution 4.1.0 (`logisim/CPU.cir
 ## Commands
 
 ```
-python run.py test                                   # five self-check suites (assembler 24, simulator 52, C compiler 20, image tool 10, disk tool 26), then check_docs.py
+python run.py test                                   # five self-check suites (assembler 25, simulator 55, C compiler 22, image tool 10, disk tool 28), then check_docs.py
 python compiler/src/asm/selftest.py                  # assembler only
 python cpu_sim/src/selftest.py                       # simulator only
 python compiler/src/cc/selftest.py                   # C compiler only (a few seconds: runs every test program)
@@ -30,18 +30,21 @@ python compiler/src/asm disasm compiler/ROM/prog.rom [--map compiler/ROM/prog.ma
 python compiler/src/asm/isa_page.py [-o isa.html]    # the ISA as one HTML page (default compiler/ROM/isa.html): bits, micro-steps, decoder, encoder
 python cpu_sim/src/main.py compiler/ROM/prog.rom                             # GUI
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps 2000000 [--trace] [--keys $'text\n'] [--screen out.png] [--disk disk.img]
+python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps N --mouse '40,5,1@300000'   # a scripted pointer (x,y,buttons@step;...) for the mouse device 0xBC/0xBD
 python cpu_sim/src/main.py compiler/ROM/prog.rom [--screen-fps 30]            # the window: the RGB screen is drawn at most this often while a program runs
 python cpu_sim/src/main.py compiler/ROM/prog.rom --headless --steps N --save-state run.state   # the whole machine at the end (snapshot.py)
 python cpu_sim/src/main.py --load-state run.state [--headless] [--disk copy.img]   # go on from a snapshot (the window: save state / load state)
 python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img [--claude-model haiku|sonnet|opus|fable] [--claude-system FILE]   # then `claude` in Tynix (pip install anthropic, a key on the PC)
 python logisim/run_rom.py logisim/CPU.circ compiler/ROM/prog.rom [--seconds N]   # real circuit, headless
 python logisim/microcode/microcode.py [--list]       # CONTROL_SECTION as a 64K x 32 microcode ROM -> logisim/microcode/microcode.rom
+python logisim/microcode/datapath_page.py [-o datapath.html]   # the datapath as an HTML page: pick an instruction, step through its micro-steps (default compiler/ROM/datapath.html)
 python logisim/microcode/verify.py [--quick]         # that ROM against the circuit's gates, every IR/step/flags (needs javac; minutes)
 
 python compiler/src/cc run prog.c [--keys $'text\n'] [--stats] [--disk disk.img] [--claude-model NAME]   # C: build + run in the simulator
 python compiler/src/cc build prog.c [more.c x.asm] [-o name.rom] [--map] [--lib x.asm]   # C: links the C library itself
 python compiler/src/cc build prog.c --exe [--region N]   # a program for the OS: prog.exe (TEX2, relocatable), for `disk put`; the kernel runs it
 python compiler/src/cc compile prog.c [-o prog.asm]                   # C -> assembly only
+python compiler/src/cc explore prog.c [-o prog.html]                  # one HTML page: C, assembly before/after the peephole passes, machine words, linked by line
 python tynix/make_disk.py [IMG] [--new] [--size MB]                  # the OS's disk: tynix/disk.img, /bin/sh (shell.c) and the C examples built --exe in /bin
 tynix/run_with_video.sh [clip.h]                     # kernel + disk with video_player in /bin (a clip from img/video.py), opens the window
 python compiler/src/cc build tynix/kernel.c && python cpu_sim/src/main.py compiler/ROM/kernel.rom --disk tynix/disk.img   # the OS (kernel, then /bin/sh)

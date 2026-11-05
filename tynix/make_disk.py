@@ -33,9 +33,9 @@ DEFAULT_IMAGE = ROOT / "tynix" / "disk.img"
 # compiler/examples/c/*/NAME.c -> /bin/NAME. Each one ends by itself, on
 # Ctrl-D or on q, so the shell gets the CPU back.
 PROGRAMS = ["echo", "hello", "primes", "structs", "guess", "gfx_demo", "image_demo",
-            "snake", "stackfall", "game_of_life", "grapher", "qr", "disk_notes", "ed", "edit",
+            "snake", "stackfall", "maze3d", "game_of_life", "grapher", "qr", "disk_notes", "ed", "edit",
             "more", "grep", "find", "tree", "du", "diff", "hexdump", "calc",
-            "visual_file_manager", "claude"]
+            "visual_file_manager", "claude", "basic", "chip8"]
 SOURCES = {"sh": "shell"}               # /bin/sh is tynix/shell.c
 REGIONS = {"diff": 0x140000}            # RAM a program asks for (cc build --exe --region):
                                         # diff's table of 1001 x 1001 words does not fit in 1M
@@ -61,6 +61,8 @@ starts the shell, /bin/sh from tynix/shell.c).
   du /bin          disk KB of each folder (-a: files too)
   diff a.txt b.txt   what changed between two text files
   hexdump /readme.txt   the values in hex
+  basic /home/user/basic/fizzbuzz.bas   a BASIC program (basic alone: type lines, RUN, LIST)
+  chip8 /home/user/chip8/draw.ch8   run a CHIP-8 program (hex text; 1234/QWER/ASDF/ZXCV, ` quits)
   calc 0x1100000 + 256   integer calculator (calc alone: a line at a time)
   ed notes.txt < edits.txt   a file as a program's input (cat < f too)
   export X=1       a variable for the programs (echo $X; set: the shell's
@@ -78,7 +80,8 @@ starts the shell, /bin/sh from tynix/shell.c).
   claude           talk to Claude (on the PC, through device 0x9C: needs
                    an API key there); claude QUESTION asks once
 
-On the RGB screen (the simulator window's tab): snake, stackfall
+On the RGB screen (the simulator window's tab): snake, maze3d (a 3D maze:
+W S A D Q E M R X), stackfall
 (falling blocks with gravity chains) and game_of_life (q quits), gfx_demo, image_demo, grapher and qr
 (Ctrl-D quits these two), and visual_file_manager (j k h l move, space
 select, y x p copy cut paste, u clear, r d a rename delete new folder,
@@ -113,6 +116,16 @@ def make_home(disk):
             disk.mkdir(folder)
     if disk.lookup("/home/user/Documents/welcome.txt") is None:
         disk.put("/home/user/Documents/welcome.txt", WELCOME.encode())
+    if disk.lookup("/home/user/basic") is None:
+        disk.mkdir("/home/user/basic")
+    if disk.lookup("/home/user/chip8") is None:
+        disk.mkdir("/home/user/chip8")
+    for sample in sorted((OS_DIR / "chip8").glob("*.ch8")):     # CHIP-8 programs (hex text): chip8 /home/user/chip8/NAME
+        if disk.lookup(f"/home/user/chip8/{sample.name}") is None:
+            disk.put(f"/home/user/chip8/{sample.name}", sample.read_bytes())
+    for sample in sorted((OS_DIR / "basic").glob("*.bas")):     # BASIC programs to run: basic /home/user/basic/NAME
+        if disk.lookup(f"/home/user/basic/{sample.name}") is None:
+            disk.put(f"/home/user/basic/{sample.name}", sample.read_bytes())
 
 
 def make_profile(disk):
