@@ -43,7 +43,7 @@ VECTORS_END = 10                # the first free ROM word
 # INDATA reads it. Sources, lower number = higher priority:
 INT_ACK_ADDR = 0xAC
 INT_ENABLE_ADDR = 0xAD
-IRQ_TIMER, IRQ_KEYBOARD = 0, 1
+IRQ_TIMER, IRQ_KEYBOARD, IRQ_MOUSE = 0, 1, 2
 # run() looks for interrupts between chunks of this many instructions (a
 # translated block is not stopped in the middle).
 INTERRUPT_CHUNK = 4096
@@ -85,6 +85,19 @@ DISK_MAX_WORDS = 1 << 30       # 4 GB, 30-bit word positions
 # 0x03 stops the reply, 0x16 a program starts using it); INDATA reads the next
 # char of the reply (0 nothing yet, 4 the turn is over, 2 a tool for the CPU).
 CLAUDE_ADDR = 0x9C
+
+# Mouse (simulator only): over the RGB screen. INDATA from MOUSE_STATE_ADDR
+# gives x in bits 31-24 and y in 23-16 (a pixel word's layout), the buttons
+# in bits 2-0 (1 left, 2 right, 4 middle) and 8 when the pointer is over the
+# screen. INDATA from MOUSE_EVENT_ADDR takes the next event off a queue of
+# 64 (0 when empty): x and y as above, the kind in bits 15-8 (MOUSE_PRESS,
+# MOUSE_RELEASE, MOUSE_WHEEL_UP, MOUSE_WHEEL_DOWN) and the buttons after the
+# event in bits 2-0. A button event or a wheel step raises IRQ_MOUSE;
+# motion does not.
+MOUSE_STATE_ADDR = 0xBC
+MOUSE_EVENT_ADDR = 0xBD
+MOUSE_PRESS, MOUSE_RELEASE, MOUSE_WHEEL_UP, MOUSE_WHEEL_DOWN = 1, 2, 3, 4
+MOUSE_QUEUE = 64
 
 # ------------------------------------------------------------------ TWEAKS
 # A flag = "RA > RB".  Signed compare (True) or unsigned magnitude (False)?

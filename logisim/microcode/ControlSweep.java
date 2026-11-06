@@ -12,7 +12,7 @@ import java.util.*;
  *
  *  java ControlSweep probe.circ out.bin [pin=hex ...]
  *
- *  Input pins start at 0; P_CLK0, P_CLK1, P_CLK2, P_STEPBIT and CLK at 1; the arguments
+ *  Input pins start at 0; P_CLK0, P_CLK1, P_CLK2, P_CLK3, P_STEPBIT and CLK at 1; the arguments
  *  override them. Writes out.bin.names (the output pins, 1-bit ones first, then the wider
  *  ones, each group by name) and out.bin: per point, in the order IR, step, flags (flags
  *  fastest, flag pins from top to bottom as bits 0..3), big-endian ints: the 1-bit outputs at
@@ -33,7 +33,7 @@ public class ControlSweep {
 
   public static void main(String[] a) throws Exception {
     Project p = ProjectActions.doOpenNoWindow(null, new File(a[0]));
-    Circuit c = p.getLogisimFile().getCircuit("CONTROL_SECTION");
+    Circuit c = p.getLogisimFile().getCircuit(System.getProperty("circuit", "CONTROL_SECTION"));
     st = CircuitState.createRootState(p, c, Thread.currentThread());
     Propagator prop = st.getPropagator();
     Map<String, Component> ins = new TreeMap<>(), outs = new TreeMap<>();
@@ -51,14 +51,16 @@ public class ControlSweep {
     }
     if (one.size() > 32) throw new RuntimeException("more than 32 one-bit outputs");
     for (Component in : ins.values()) drive(in, 0);
-    for (String k : new String[] {"P_CLK0", "P_CLK1", "P_CLK2", "P_STEPBIT", "CLK"}) drive(ins.get(k), 1);
+    for (String k : new String[] {"P_CLK0", "P_CLK1", "P_CLK2", "P_CLK3", "P_STEPBIT", "CLK"}) if (ins.get(k) != null) drive(ins.get(k), 1);
     for (int i = 2; i < a.length; i++) {
       String[] kv = a[i].split("=");
       drive(ins.get(kv[0]), Long.parseLong(kv[1], 16));
     }
-    Component irP = ins.get("pin(1020,2550)"), stepP = ins.get("P_STEP");
-    Component[] fl = {ins.get("pin(460,1970)"), ins.get("pin(460,2010)"),
-                      ins.get("pin(460,2050)"), ins.get("pin(460,2090)")};
+    Component irP = ins.containsKey("ROM_ADDR_INPUT") ? ins.get("ROM_ADDR_INPUT") : ins.get("pin(1020,2550)"), stepP = ins.get("P_STEP");
+    Component[] fl = ins.containsKey("C_F")
+        ? new Component[] {ins.get("C_F"), ins.get("A_F"), ins.get("N_F"), ins.get("Z_F")}
+        : new Component[] {ins.get("pin(460,1970)"), ins.get("pin(460,2010)"),
+                           ins.get("pin(460,2050)"), ins.get("pin(460,2090)")};
     long osc = 0;
     try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(a[1]), 1 << 20))) {
       for (int ir = 0; ir < 0x10000; ir++) {

@@ -1,0 +1,6 @@
+data bits ok
+address lines 15 to 23 ok
+arrays across 16, 20 and 23-bit boundaries ok
+top of RAM ok
+malloc, free and reuse ok
+all checks passed

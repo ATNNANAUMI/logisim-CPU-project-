@@ -1,0 +1,51 @@
+#!/bin/sh
+# trash [-e] FILE...    move files to the trash instead of deleting them; -e empties it
+#
+# The trash is $TRASH_DIR (default /home/user/trash). Each file is moved to
+# TRASHDIR/NAME (NAME.1, NAME.2 ... when that name is taken) with its full path
+# in TRASHDIR/NAME.path, so `untrash NAME` can put it back. Only files, not
+# folders. A path is made absolute by putting $PWD in front, so give paths
+# without .. or . in them. `untrash` with no name lists the trash.
+T=${TRASH_DIR:-/home/user/trash}
+mkp() {
+    local rest=${1#/} acc= part
+    while [ -n "$rest" ]; do
+        part=${rest%%/*}
+        acc=$acc/$part
+        [ -d "$acc" ] || mkdir "$acc" || return 1
+        case $rest in */*) rest=${rest#*/} ;; *) rest= ;; esac
+    done
+}
+if [ $# -eq 0 ]; then
+    echo "usage: trash [-e] FILE..."
+    exit 2
+fi
+if [ "$1" = -e ]; then
+    n=0
+    for f in "$T"/*; do
+        [ -f "$f" ] || continue
+        rm "$f"
+        case $f in *.path) ;; *) n=$((n + 1)) ;; esac
+    done
+    echo "trash emptied: $n files"
+    exit 0
+fi
+mkp "$T" || exit 1
+status=0
+for f in "$@"; do
+    if [ ! -f "$f" ]; then
+        echo "trash: $f: not a file"
+        status=1
+        continue
+    fi
+    case $f in /*) full=$f ;; *) full=$PWD/$f ;; esac
+    base=${f##*/}
+    name=$base
+    i=1
+    while [ -e "$T/$name" ]; do
+        name=$base.$i
+        i=$((i + 1))
+    done
+    mv "$f" "$T/$name" && echo "$full" > "$T/$name.path" && echo "trashed $full" || status=1
+done
+exit $status

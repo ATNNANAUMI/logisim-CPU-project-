@@ -83,7 +83,11 @@ Built into the shell:
 Programs in /bin (`help` lists them):
   more, grep [-i] [-n] [-v] text [path...] (no path: stdin), find [dir] text,
   tree [-s] [dir], du [-a] [path...], diff from to, hexdump file...,
-  calc EXPR (32-bit integer calculator), ed FILE (line editor, commands
+  backup/restore/trash/untrash FILE, wc, head, tail, nl, uniq, touch, cleantmp, changed DIR DIR
+  (shell scripts in /home/user/bin; no pipes needed to use them), chip8 FILE (a CHIP-8 emulator on the RGB screen: do not run it, it takes the keyboard),
+  calc EXPR (32-bit integer calculator), basic FILE (runs a BASIC program: write it with
+  a file tool or `cat > f.bas`, then `basic f.bas`; plain `basic` waits for the keyboard,
+  so do not run it), ed FILE (line editor, commands
   on stdin: p, a, i, c, d, s/old/new/, w, q), echo, hello, primes,
   structs, disk_notes.
 

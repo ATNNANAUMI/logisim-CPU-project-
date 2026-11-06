@@ -1,0 +1,48 @@
+#!/bin/sh
+# changed DIR1 DIR2    what differs between two folders, going into the folders inside them
+#
+# Prints "differs: PATH" for a file whose text differs (see `diff A B` for how),
+# "only in DIR: NAME" for a name that one folder has and the other does not,
+# and "type: PATH" where one is a file and the other a folder. Exit status 0
+# when the folders are the same, 1 when not. Files must be text of at most 1000
+# lines, as diff's are; others are reported as "differs" if diff refuses them.
+if [ $# -ne 2 ] || [ ! -d "$1" ] || [ ! -d "$2" ]; then
+    echo "usage: changed DIR1 DIR2"
+    exit 2
+fi
+found=0
+tmp=/tmp/changed.$$
+compare() {
+    local a=$1 b=$2 f name
+    for f in "$a"/*; do
+        [ -e "$f" ] || continue
+        name=${f##*/}
+        if [ ! -e "$b/$name" ]; then
+            echo "only in $a: $name"
+            found=1
+        elif [ -d "$f" ] && [ -d "$b/$name" ]; then
+            compare "$f" "$b/$name"
+        elif [ -f "$f" ] && [ -f "$b/$name" ]; then
+            if diff "$f" "$b/$name" > "$tmp"; then
+                :
+            else
+                echo "differs: $a/$name"
+                found=1
+            fi
+        else
+            echo "type: $a/$name"
+            found=1
+        fi
+    done
+    for f in "$b"/*; do
+        [ -e "$f" ] || continue
+        name=${f##*/}
+        if [ ! -e "$a/$name" ]; then
+            echo "only in $b: $name"
+            found=1
+        fi
+    done
+}
+compare "$1" "$2"
+[ -f "$tmp" ] && rm "$tmp"
+exit $found

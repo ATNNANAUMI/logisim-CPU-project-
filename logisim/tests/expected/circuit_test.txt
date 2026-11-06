@@ -1,0 +1,21 @@
+int mul/div/mod ok
+unsigned div/mod ok
+shift by constant ok
+shift by variable ok
+bitwise not of a register ok
+signed compare ok
+unsigned compare ok
+float math ok
+float conversion ok
+NaN compares false ok
+struct by value ok
+recursion ok
+function pointers ok
+variadic ok
+switch ok
+big frame ok
+arrays and globals ok
+pointers into a local array ok
+bit-fields ok
+variable changed inside a call's arguments ok
+all checks passed

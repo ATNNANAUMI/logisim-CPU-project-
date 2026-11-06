@@ -553,7 +553,7 @@ def check_spawn():
         heap_end = next(sym.address for sym in kernel.symbols if sym.name == "_heap_end")
         assert kernel.rom[heap_end] == linker.PROGRAM_BASE, hex(kernel.rom[heap_end])
         cpu, text = driver.run_in_simulator(kernel.rom, "spawner\nold\njobs\nhalt\n", 40_000_000,
-                                            disk=image)
+                                            disk=image, steady_clock=True)
     expect = ("Tynix shell: help lists the commands\n/> spawner\n"
               "1 0 2 /work: prog a (at 0x1400000)\n-> 2\n"
               "1 0 3 /work: prog b c (at 0x1400000)\n-> 43\n"
@@ -1900,6 +1900,7 @@ SCRIPT_KEYS = ("/s.sh 'a b' c d; echo \"status $?\"\n"
                "fi\n"
                "echo 'a\n"
                "b'\n"
+               "p=/a/b/c.txt; echo ${p##*/} ${p%/*} ${p#/} ${p%%/*}.x ${p%.txt} ${p#nomatch} ${p%*.c} \"${q%x}\"\n"
                "ls /tmp\n"
                "halt\n")
 
@@ -1964,6 +1965,8 @@ continued
 > b'
 a
 b
+/> p=/a/b/c.txt; echo ${p##*/} ${p%/*} ${p#/} ${p%%/*}.x ${p%.txt} ${p#nomatch} ${p%*.c} "${q%x}"
+c.txt /a/b a/b/c.txt .x /a/b/c /a/b/c.txt /a/b/c.txt 
 /> ls /tmp
 /> halt
 CPU halted
@@ -2225,6 +2228,234 @@ def check_snapshot():
     return ", ".join(notes)
 
 
+def check_basic():
+    """/bin/basic under the kernel: `basic FILE` runs the sample FizzBuzz and
+    exits; typed at the prompt it keeps numbered lines, RUN, LIST, INPUT, SAVE
+    and LOAD (a text file on the disk), and reports a runtime error with its
+    line; the status of a failing `basic FILE` is 1 ($? in the shell)."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+
+    image = os.path.join(TMP.name, "basic.img")
+    make_disk.make(image, programs=["basic"], new=True, size_mb=1, log=lambda _: None)
+    with FileSystem(image) as disk:
+        disk.put("/fizz.bas", (root / "tynix" / "basic" / "fizzbuzz.bas").read_bytes())
+        disk.put("/bad.bas", b"10 PRINT 1\n20 PRINT 1 / 0\n")
+    keys = ("basic /fizz.bas\n"
+            "basic /bad.bas\n"
+            "echo status $?\n"
+            "basic\n"
+            "10 INPUT N$ : PRINT \"hi \"; N$\n"
+            "20 PRINT LEN(N$) * 2\n"
+            "LIST\n"
+            "RUN\n"
+            "Ada\n"
+            "SAVE \"/t.bas\"\n"
+            "NEW\n"
+            "LIST\n"
+            "LOAD \"/t.bas\"\n"
+            "LIST\n"
+            "BYE\n"
+            "halt\n")
+    cpu, text = driver.run_in_simulator(_kernel().rom, keys, 200_000_000, disk=image)
+    assert cpu.halted, text
+    out = text[text.index("/> basic /fizz.bas"):]
+    assert "\n1 \n2 \nFizz\n4 \nBuzz\n" in out and "FizzBuzz\n" in out and out.count("Fizz") >= 10, out
+    assert "1 \n?DIVISION BY ZERO IN 20\n" in out and "status 1" in out, out
+    assert "10 INPUT N$ : PRINT \"hi \"; N$\n20 PRINT LEN(N$) * 2\n" in out, out
+    assert "hi Ada\n6 \n" in out, out
+    with FileSystem(image) as disk:
+        assert disk.get("/t.bas").decode() == '10 INPUT N$ : PRINT "hi "; N$\n20 PRINT LEN(N$) * 2\n'
+        assert disk.check() == [], disk.check()
+    return f"{cpu.instructions} instructions"
+
+
+def check_chip8():
+    """/bin/chip8 under the kernel against tynix/chip8_ref.py: each of the three
+    test programs (tynix/chip8/*.ch8: arithmetic and flags, sprites and the
+    delay timer, BCD, store/load, call and return, BNNN, CXNN) run for 80
+    frames prints the same state and screen as the Python reference, and the
+    reference gives the values the programs' headers promise; a missing file
+    and an empty one are reported with status 1."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+    import chip8_ref                    # tynix/
+
+    image = os.path.join(TMP.name, "chip8.img")
+    make_disk.make(image, programs=["chip8"], new=True, size_mb=1, log=lambda _: None)
+    names = ("arith", "draw", "memory")
+    with FileSystem(image) as disk:
+        for name in names:
+            disk.put(f"/{name}.ch8", (root / "tynix" / "chip8" / f"{name}.ch8").read_bytes())
+        disk.put("/empty.ch8", b"# nothing\n")
+    keys = "".join(f"chip8 -t 80 < /{n}.ch8\n" for n in names)
+    keys += "chip8 /nosuch.ch8\necho status $?\nchip8 /empty.ch8\nchip8\nhalt\n"
+    cpu, text = driver.run_in_simulator(_kernel().rom, keys, 200_000_000, disk=image, steady_clock=True)
+    assert cpu.halted, text
+    state = {}
+    for name in names:
+        want = chip8_ref.run((root / "tynix" / "chip8" / f"{name}.ch8").read_text(), 80)
+        start = text.index(f"/> chip8 -t 80 < /{name}.ch8\n") + len(f"/> chip8 -t 80 < /{name}.ch8\n")
+        got = text[start:start + len(want)]
+        assert got == want, (name, got, want)
+        state[name] = want.splitlines()[1].split()
+    a, d, m = state["arith"], state["draw"], state["memory"]
+    assert a[:15] == "0C 0A 00 01 F0 20 00 40 80 FF 0F 03 0A 01 82".split() and a[15] == "01", a
+    assert d[4:6] == ["01", "3C"] and d[15] == "01", d                      # the erase set VF
+    assert m[:5] == "11 22 33 44 0A".split() and m[6] == "00", m             # V6 was skipped by BNNN
+    assert "chip8: cannot read /nosuch.ch8" in text and "status 1" in text
+    assert "chip8: /empty.ch8 has no program" in text and "usage: chip8 FILE" in text
+    return f"{cpu.instructions} instructions"
+
+
+SCRIPTS_KEYS = (
+    "cd /home/user\n"
+    "echo hi > rel.txt\n"
+    "backup rel.txt /lines.txt /nosuch\n"
+    "restore\n"
+    "rm rel.txt; restore rel.txt; cat rel.txt\n"
+    "trash /home/user/rel.txt /lines.txt; untrash\n"
+    "untrash lines.txt; untrash lines.txt; untrash\n"
+    "wc /lines.txt; wc -l /lines.txt /rep.txt; wc -w < /lines.txt\n"
+    "head -n 3 /lines.txt; head /rep.txt | head -n 2\n"
+    "tail -n 3 /lines.txt; tail -n 2 /rep.txt; tail -n 500 /rep.txt\n"
+    "nl /rep.txt\n"
+    "uniq /rep.txt; uniq -c /rep.txt; cat /rep.txt | uniq -c\n"
+    "changed /d1 /d2; echo status $?\n"
+    "changed /d1 /d1; echo status $?\n"
+    "touch /t1.txt /t1.txt; wc /t1.txt\n"
+    "touch /tmp/x1; mkdir /tmp/sub; touch /tmp/sub/y; cleantmp -n; cleantmp\n"
+    "halt\n")
+
+
+def check_scripts():
+    """The shell scripts of tynix/scripts/ (put in /home/user/bin by
+    make_disk): backup and restore (a file back where it was, from a folder
+    that is made again), trash and untrash (the same, a second name kept, a
+    name taken from the list), wc, head, tail, nl, uniq (with -c, from a file
+    and from a pipe), changed (two folders: a file that differs, a name only
+    in one, the status), touch and cleantmp (a dry run, then the real one,
+    nothing left in /tmp); and the disk is consistent after."""
+    import sys
+    root = HERE.parent.parent.parent
+    sys.path.append(str(root / "tynix"))
+    sys.path.append(str(HERE.parent / "cc"))
+    import driver                       # compiler/src/cc
+    import make_disk                    # tynix/
+
+    image = os.path.join(TMP.name, "scripts.img")
+    make_disk.make(image, programs=["diff"], new=True, size_mb=4, log=lambda _: None, home=True)
+    with FileSystem(image) as disk:
+        disk.put("/lines.txt", b"one\ntwo two\n\nthree three three\nfour\nfive\nsix\nseven\neight\nnine\nten\neleven\ntwelve\n")
+        disk.put("/rep.txt", b"a\na\nb\na\na\na\nc\n")
+        for d in ("/d1", "/d2", "/d1/sub", "/d2/sub"):
+            disk.mkdir(d)
+        disk.put("/d1/a.txt", b"same\nx\n")
+        disk.put("/d2/a.txt", b"same\nx\n")
+        disk.put("/d1/sub/b.txt", b"p\nq\n")
+        disk.put("/d2/sub/b.txt", b"p\nr\n")
+        disk.put("/d1/c.txt", b"only\n")
+    cpu, text = driver.run_in_simulator(_kernel().rom, SCRIPTS_KEYS, 400_000_000, disk=image, steady_clock=True)
+    assert cpu.halted, text
+    got = text[text.index("/> cd /home/user"):]
+    assert got == SCRIPTS_OUTPUT, got
+    with FileSystem(image) as disk:
+        assert disk.check() == [], disk.check()
+        assert [n.name for n in disk.entries(disk.lookup("/tmp"))] == []
+    return f"{cpu.instructions} instructions"
+
+
+SCRIPTS_OUTPUT = """\
+/> cd /home/user
+/home/user> echo hi > rel.txt
+/home/user> backup rel.txt /lines.txt /nosuch
+backed up /home/user/rel.txt
+backed up /lines.txt
+backup: /nosuch: not a file
+[backup: exit status 1]
+/home/user> restore
+lines.txt  ->  /lines.txt
+rel.txt  ->  /home/user/rel.txt
+/home/user> rm rel.txt; restore rel.txt; cat rel.txt
+restored /home/user/rel.txt
+hi
+/home/user> trash /home/user/rel.txt /lines.txt; untrash
+trashed /home/user/rel.txt
+trashed /lines.txt
+lines.txt  ->  /lines.txt
+rel.txt  ->  /home/user/rel.txt
+/home/user> untrash lines.txt; untrash lines.txt; untrash
+restored /lines.txt
+untrash: lines.txt: not in the trash
+[untrash: exit status 1]
+rel.txt  ->  /home/user/rel.txt
+/home/user> wc /lines.txt; wc -l /lines.txt /rep.txt; wc -w < /lines.txt
+13 15 80 /lines.txt
+13 /lines.txt
+7 /rep.txt
+20 total
+15
+/home/user> head -n 3 /lines.txt; head /rep.txt | head -n 2
+one
+two two
+
+a
+a
+/home/user> tail -n 3 /lines.txt; tail -n 2 /rep.txt; tail -n 500 /rep.txt
+ten
+eleven
+twelve
+a
+c
+tail: at most 100 lines
+[tail: exit status 2]
+/home/user> nl /rep.txt
+     1  a
+     2  a
+     3  b
+     4  a
+     5  a
+     6  a
+     7  c
+/home/user> uniq /rep.txt; uniq -c /rep.txt; cat /rep.txt | uniq -c
+a
+b
+a
+c
+2 a
+1 b
+3 a
+1 c
+2 a
+1 b
+3 a
+1 c
+/home/user> changed /d1 /d2; echo status $?
+only in /d1: c.txt
+differs: /d1/sub/b.txt
+[changed: exit status 1]
+status 1
+/home/user> changed /d1 /d1; echo status $?
+status 0
+/home/user> touch /t1.txt /t1.txt; wc /t1.txt
+0 0 0 /t1.txt
+/home/user> touch /tmp/x1; mkdir /tmp/sub; touch /tmp/sub/y; cleantmp -n; cleantmp
+would remove /tmp/sub/y
+would remove /tmp/x1
+removed 3 items from /tmp
+/home/user> halt
+CPU halted
+"""
+
+
 CHECKS = [
     check_format,
     check_text_round_trip,
@@ -2250,6 +2481,9 @@ CHECKS = [
     check_batch,
     check_scripting,
     check_environment,
+    check_basic,
+    check_scripts,
+    check_chip8,
     check_snapshot,
     check_claude,
 ]

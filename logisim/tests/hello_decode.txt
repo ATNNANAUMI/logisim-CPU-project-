@@ -1,0 +1,106 @@
+hello.rom (compiler/ROM/tests24_nossp/hello.rom), instruction by instruction
+ROM address = IR[14:8] <<9 | IR[6:4] <<6 | step <<2 | JF <<1 | JNF;  flags as C=8 A=4 N=2 Z=1
+
+== IAR 0x0: IR = 0x0400  RJMP +1 (offset word 0x00000001)
+   IR[14:8]=0x04  IR[6:4]=0  IR[3:0]=0x0
+   step 0: ROM addr 0x0800 -> word 0x80800401  MAR IAR_E BUS_OUT STEP0
+   step 1: ROM addr 0x0804 -> word 0x0040080C  IAR_INC IR RAM BUS_IN
+   step 2: ROM addr 0x0808 -> word 0x00800411  MAR TMP IAR_E BUS_OUT
+   step 3: ROM addr 0x080C -> word 0x10400824  IAR_INC ACC_S RAM BUS_IN ALU
+   step 4: ROM addr 0x0810 -> word 0x00601002  IAR ACC STEP_RST BUS_IN
+
+== IAR 0x2: IR = 0x0302  DATA R2,0x5C   (immediate word 0x0000005C)
+   IR[14:8]=0x03  IR[6:4]=0  IR[3:0]=0x2
+   step 0: ROM addr 0x0601 -> word 0x80800401  MAR IAR_E BUS_OUT STEP0
+   step 1: ROM addr 0x0605 -> word 0x0040080C  IAR_INC IR RAM BUS_IN
+   step 2: ROM addr 0x0609 -> word 0x00800401  MAR IAR_E BUS_OUT
+   step 3: ROM addr 0x060D -> word 0x00440800  RAM BUS_IN W=RB
+   step 4: ROM addr 0x0611 -> word 0x00200004  IAR_INC STEP_RST
+
+== IAR 0x4: IR = 0x0832  COMM OUTADDR,R2  (device 0x5C = the display)
+   IR[14:8]=0x08  IR[6:4]=3  IR[3:0]=0x2
+   step 0: ROM addr 0x10C1 -> word 0x80800401  MAR IAR_E BUS_OUT STEP0
+   step 1: ROM addr 0x10C5 -> word 0x0040080C  IAR_INC IR RAM BUS_IN
+   step 2: ROM addr 0x10C9 -> word 0x00B00200  IO_S STEP_RST BUS_OUT R=RB
+
+== IAR 0x5: IR = 0x0301  DATA R1,0x13   (R1 = address of the string)
+   IR[14:8]=0x03  IR[6:4]=0  IR[3:0]=0x1
+   step 0: ROM addr 0x0601 -> word 0x80800401  MAR IAR_E BUS_OUT STEP0
+   step 1: ROM addr 0x0605 -> word 0x0040080C  IAR_INC IR RAM BUS_IN
+   step 2: ROM addr 0x0609 -> word 0x00800401  MAR IAR_E BUS_OUT
+   step 3: ROM addr 0x060D -> word 0x00440800  RAM BUS_IN W=RB
+   step 4: ROM addr 0x0611 -> word 0x00200004  IAR_INC STEP_RST
+
+== IAR 0x7: IR = 0x0302  DATA R2,0      (R2 = index)
+   IR[14:8]=0x03  IR[6:4]=0  IR[3:0]=0x2
+   step 0: ROM addr 0x0601 -> word 0x80800401  MAR IAR_E BUS_OUT STEP0
+   step 1: ROM addr 0x0605 -> word 0x0040080C  IAR_INC IR RAM BUS_IN
+   step 2: ROM addr 0x0609 -> word 0x00800401  MAR IAR_E BUS_OUT
+   step 3: ROM addr 0x060D -> word 0x00440800  RAM BUS_IN W=RB
+   step 4: ROM addr 0x0611 -> word 0x00200004  IAR_INC STEP_RST
+
+== IAR 0x9: IR = 0x0C12  ALD R1,R2      (R0 = mem[R1+R2] = "h")
+   IR[14:8]=0x0C  IR[6:4]=1  IR[3:0]=0x2
+   step 0: ROM addr 0x1841 -> word 0x80800401  MAR IAR_E BUS_OUT STEP0
+   step 1: ROM addr 0x1845 -> word 0x0040080C  IAR_INC IR RAM BUS_IN
+   step 2: ROM addr 0x1849 -> word 0x00880001  MAR BUS_OUT R=RA
+   step 3: ROM addr 0x184D -> word 0x00902100  STACK_S ARR_E BUS_OUT R=RB
+   step 4: ROM addr 0x1851 -> word 0x00660800  RAM STEP_RST BUS_IN W=R0
+
+== IAR 0xA: IR = 0x1E00  TEST R0        (flags from R0; Z=0 for "h")
+   IR[14:8]=0x1E  IR[6:4]=0  IR[3:0]=0x0
+   step 0: ROM addr 0x3C00 -> word 0x80800401  MAR IAR_E BUS_OUT STEP0
+   step 1: ROM addr 0x3C04 -> word 0x0040080C  IAR_INC IR RAM BUS_IN
+   step 2: ROM addr 0x3C08 -> word 0x00100010  TMP R=RB
+   step 3: ROM addr 0x3C0C -> word 0x20080060  ACC_S FLAG OP R=RA
+   step 4: ROM addr 0x3C10 -> word 0x00261000  ACC STEP_RST W=R0
+
+== IAR 0xB: IR = 0x0501  RJF Z,+6       (mask Z: not taken while R0 != 0)
+   IR[14:8]=0x05  IR[6:4]=0  IR[3:0]=0x1
+   step 0: ROM addr 0x0A01 -> word 0x80800401  MAR IAR_E BUS_OUT STEP0
+   step 1: ROM addr 0x0A05 -> word 0x0040080C  IAR_INC IR RAM BUS_IN
+   step 2: ROM addr 0x0A09 -> word 0x00800411  MAR TMP IAR_E BUS_OUT
+   step 3: ROM addr 0x0A0D -> word 0x10400824  IAR_INC ACC_S RAM BUS_IN ALU
+   step 4: ROM addr 0x0A11 -> word 0x00200000  STEP_RST
+
+== IAR 0xD: IR = 0x0820  COMM OUTDATA,R0 (send R0 to the display)
+   IR[14:8]=0x08  IR[6:4]=2  IR[3:0]=0x0
+   step 0: ROM addr 0x1080 -> word 0x80800401  MAR IAR_E BUS_OUT STEP0
+   step 1: ROM addr 0x1084 -> word 0x0040080C  IAR_INC IR RAM BUS_IN
+   step 2: ROM addr 0x1088 -> word 0x00B00200  IO_S STEP_RST BUS_OUT R=RB
+
+== IAR 0xE: IR = 0x1B02  ++ R2          (R0 = R2 + 1)
+   IR[14:8]=0x1B  IR[6:4]=0  IR[3:0]=0x2
+   step 0: ROM addr 0x3601 -> word 0x80800401  MAR IAR_E BUS_OUT STEP0
+   step 1: ROM addr 0x3605 -> word 0x0040080C  IAR_INC IR RAM BUS_IN
+   step 2: ROM addr 0x3609 -> word 0x00100010  TMP R=RB
+   step 3: ROM addr 0x360D -> word 0x20080060  ACC_S FLAG OP R=RA
+   step 4: ROM addr 0x3611 -> word 0x00261000  ACC STEP_RST W=R0
+
+== IAR 0xF: IR = 0x0E02  CPY R0,R2      (R2 = R0)
+   IR[14:8]=0x0E  IR[6:4]=0  IR[3:0]=0x2
+   step 0: ROM addr 0x1C01 -> word 0x80800401  MAR IAR_E BUS_OUT STEP0
+   step 1: ROM addr 0x1C05 -> word 0x0040080C  IAR_INC IR RAM BUS_IN
+   step 2: ROM addr 0x1C09 -> word 0x002C0000  STEP_RST W=RB R=RA
+
+== IAR 0x10: IR = 0x0400  RJMP -8       (offset word 0xFFFFFFF8, back to 0x9)
+   IR[14:8]=0x04  IR[6:4]=0  IR[3:0]=0x0
+   step 0: ROM addr 0x0800 -> word 0x80800401  MAR IAR_E BUS_OUT STEP0
+   step 1: ROM addr 0x0804 -> word 0x0040080C  IAR_INC IR RAM BUS_IN
+   step 2: ROM addr 0x0808 -> word 0x00800411  MAR TMP IAR_E BUS_OUT
+   step 3: ROM addr 0x080C -> word 0x10400824  IAR_INC ACC_S RAM BUS_IN ALU
+   step 4: ROM addr 0x0810 -> word 0x00601002  IAR ACC STEP_RST BUS_IN
+
+== IAR 0xB: IR = 0x0501  RJF Z,+6 at the end (R0 = 0 so Z = 1: TAKEN, to 0xC + 6 = 0x12, the HALT)
+   IR[14:8]=0x05  IR[6:4]=0  IR[3:0]=0x1
+   step 0: ROM addr 0x0A02 -> word 0x80800401  MAR IAR_E BUS_OUT STEP0
+   step 1: ROM addr 0x0A06 -> word 0x0040080C  IAR_INC IR RAM BUS_IN
+   step 2: ROM addr 0x0A0A -> word 0x00800411  MAR TMP IAR_E BUS_OUT
+   step 3: ROM addr 0x0A0E -> word 0x10400824  IAR_INC ACC_S RAM BUS_IN ALU
+   step 4: ROM addr 0x0A12 -> word 0x00601002  IAR ACC STEP_RST BUS_IN
+
+== IAR 0x12: IR = 0x0F00  HALT
+   IR[14:8]=0x0F  IR[6:4]=0  IR[3:0]=0x0
+   step 0: ROM addr 0x1E00 -> word 0x80800401  MAR IAR_E BUS_OUT STEP0
+   step 1: ROM addr 0x1E04 -> word 0x0040080C  IAR_INC IR RAM BUS_IN
+   step 2: ROM addr 0x1E08 -> word 0x40200000  STEP_RST HALT_SET

@@ -44,6 +44,11 @@ def main(argv=None):
     p.add_argument("-o", "--output", help="output file (default: compiler/ROM/<source>.asm)")
     add_common(p)
 
+    p = commands.add_parser("explore", help="write an HTML page that shows what the compiler does to a .c file")
+    p.add_argument("source")
+    p.add_argument("-o", "--output", help="output file (default: compiler/ROM/<source>.html)")
+    add_common(p)
+
     for name, help_text in (("build", "compile, assemble and link into a ROM image"),
                             ("run", "build, then run in the simulator (no window)")):
         p = commands.add_parser(name, help=help_text)
@@ -85,6 +90,13 @@ def main(argv=None):
             out = driver.output_path(args.output, args.source, ".asm")
             out.write_text(text, encoding="utf-8")
             print(f"{out}: {text.count(chr(10))} lines of assembly")
+            return 0
+
+        if args.command == "explore":
+            import explore
+            out = driver.output_path(args.output, args.source, ".html")
+            out.write_text(explore.render(args.source, args.include, args.define), encoding="utf-8")
+            print(f"{out}: the compiler explorer page")
             return 0
 
         exe = args.command == "build" and args.exe

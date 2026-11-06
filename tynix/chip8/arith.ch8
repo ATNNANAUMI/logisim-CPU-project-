@@ -1,0 +1,39 @@
+# arithmetic, flags, shifts, skips: V0=0C V2=00 V4=F0 V6=00 V7=40 V8=80 V9=FF VB=03 VC=0A VD=01 VE=82 VF=1, I=012D
+6005   # V0 = 5
+6107   # V1 = 7
+8014   # V0 += V1 -> 0C, VF 0
+62FF   # V2 = FF
+6301   # V3 = 1
+8234   # V2 += V3 -> 00, VF 1 (carry)
+6410   # V4 = 10
+6520   # V5 = 20
+8455   # V4 -= V5 -> F0, VF 0 (borrow)
+6620   # V6 = 20
+8655   # V6 -= V5 -> 00, VF 1
+6781   # V7 = 81
+8706   # V7 >>= 1 -> 40, VF 1
+68C0   # V8 = C0
+880E   # V8 <<= 1 -> 80, VF 1
+69F0   # V9 = F0
+6A0F   # VA = 0F
+89A1   # V9 |= VA -> FF
+6B3C   # VB = 3C
+8BA2   # VB &= VA -> 0C
+8BA3   # VB ^= VA -> 03
+6C05   # VC = 05
+8CA7   # VC = VA - VC (8XY7) -> 0A, VF 1
+6D00   # VD = 0
+6E7F   # VE = 7F
+7E03   # VE += 3 (no flag) -> 82
+300C   # skip next if V0 == 0C
+6DFF   # (skipped) VD = FF
+400C   # skip next if V0 != 0C
+7D01   # VD += 1 -> 01 (runs)
+5000   # skip next if V0 == V0
+6DFF   # (skipped) VD = FF
+9010   # skip next if V0 != V1 (9XY0)
+6DFF   # (skipped) VD = FF
+A123   # I = 123
+610A   # V1 = 10
+F11E   # I += V1 -> 12D
+124A   # end: jump to itself

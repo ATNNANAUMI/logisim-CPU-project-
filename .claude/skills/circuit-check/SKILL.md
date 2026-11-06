@@ -10,7 +10,7 @@ The circuit (`logisim/CPU.circ`) is the ground truth; the simulator was written 
 
 ## 1. Write a diagnostic program
 
-Create `compiler/examples/asm/tests/diagNN.asm` with the next free number (look at the existing `diag*.asm`). Follow `diag11.asm`:
+Create `logisim/tests/diagNN.asm` with the next free number (look at the existing `diag*.asm`). Follow `diag11.asm`:
 
 - A header listing every result line: its RAM address, what it measures, and the value expected under each competing hypothesis (e.g. "truncates" vs "rounds"), so the output can be read off directly.
 - Store each result in a `.ram` `.space` area and also print it with `print_hex` + `print_newline` from the stdlib. Link the diag file **first** so its RAM data starts at `0x1000000` (`0x10000` on the 16-bit circuit, which `run_rom.py` won't run until it is widened: TECHNICAL 2.4).
@@ -22,7 +22,7 @@ Create `compiler/examples/asm/tests/diagNN.asm` with the next free number (look 
 ## 2. Build and run on the simulator
 
 ```
-python compiler/src/asm build compiler/examples/asm/tests/diagNN.asm compiler/examples/asm/stdlib/stdlib.asm
+python compiler/src/asm build logisim/tests/diagNN.asm compiler/examples/asm/stdlib/stdlib.asm
 python cpu_sim/src/main.py compiler/ROM/diagNN.rom --headless --steps 2000000
 ```
 

@@ -12,4 +12,6 @@ Each file is one program, built with `cc build --exe` by `tynix/make_disk.py` an
 | `tree`, `du` | a folder as a tree; disk use in KB |
 | `diff`, `hexdump` | the lines that differ between two files; a file in hex |
 | `calc` | 32-bit integer calculator |
+| `basic` | a home-computer BASIC: numbered lines, `RUN`/`LIST`/`SAVE`/`LOAD`, strings, arrays, the screen; `basic FILE` runs a file (samples in `tynix/basic/`) |
+| `chip8` | a CHIP-8 emulator on the RGB screen (programs are hex text, samples in `tynix/chip8/`; `-t FRAMES` is a test mode) |
 | `claude` | talk to Claude through the Claude device (`cpu_sim/src/claude.py`) |

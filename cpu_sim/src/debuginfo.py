@@ -20,8 +20,10 @@ _GENERATED = re.compile(r"^_(K|L|S|F|C|G|A|T_|I_|V\d+_|crt0_|init_)")
 
 
 class DebugInfo:
-    def __init__(self, labels=(), lines=()):
-        """labels: (address, name); lines: (address, file, line)."""
+    def __init__(self, labels=(), lines=(), symbols=None):
+        """labels: (address, name); lines: (address, file, line); symbols:
+        name -> address of every label, ROM and RAM (machine_view.py)."""
+        self.symbols = symbols or {}
         rom = sorted((a, n) for a, n in labels if a < config.RAM_BIT and not _GENERATED.match(n))
         self.func_addrs = [a for a, _ in rom]
         self.func_names = [n for _, n in rom]
@@ -36,7 +38,7 @@ class DebugInfo:
         path = Path(map_path)
         if not path.is_file():
             return None
-        labels, lines = [], []
+        labels, lines, symbols = [], [], {}
         in_lines = False
         for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
             if raw.startswith("# source lines"):
@@ -50,9 +52,11 @@ class DebugInfo:
                     lines.append((int(m.group(1), 16), m.group(3), int(m.group(2))))
             else:
                 m = _LABEL_RE.match(raw.strip())
-                if m and m.group(2) == "rom" and not m.group(3).startswith("("):
-                    labels.append((int(m.group(1), 16), m.group(3)))
-        return cls(labels, lines)
+                if m and not m.group(3).startswith("("):
+                    symbols.setdefault(m.group(3), int(m.group(1), 16))
+                    if m.group(2) == "rom":
+                        labels.append((int(m.group(1), 16), m.group(3)))
+        return cls(labels, lines, symbols)
 
     @classmethod
     def for_rom(cls, rom_path):

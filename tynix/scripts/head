@@ -1,0 +1,35 @@
+#!/bin/sh
+# head [-n N] [FILE...]    the first N lines (default 10) of each file, or of stdin
+#
+# With several files each starts with a line "==> NAME <==". Leading spaces and
+# tabs of a line are lost: `read` takes them off (a limit of doing it in sh).
+n=10
+if [ "$1" = -n ]; then
+    n=$2
+    shift 2
+fi
+case $n in
+    ''|*[!0-9]*) echo "head: bad number: $n"; exit 2 ;;
+esac
+first() {
+    local c=0 line
+    while [ $c -lt $n ] && read -r line; do
+        echo "$line"
+        c=$((c + 1))
+    done
+}
+if [ $# -eq 0 ]; then
+    first
+    exit 0
+fi
+status=0
+for f in "$@"; do
+    if [ ! -f "$f" ]; then
+        echo "head: $f: not a file"
+        status=1
+        continue
+    fi
+    [ $# -gt 1 ] && echo "==> $f <=="
+    first < "$f"
+done
+exit $status

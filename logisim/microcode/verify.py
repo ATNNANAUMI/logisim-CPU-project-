@@ -1,6 +1,14 @@
 """Check microcode.py's ROM against the gates of CONTROL_SECTION in CPU.circ.
 
     python logisim/microcode/verify.py [--circ logisim/CPU.circ] [--jar path] [--quick]
+    python logisim/microcode/verify.py --circ logisim/CPU_microcode.circ --circuit control_section_microcode
+
+With --circuit NAME the same sweeps run on another circuit with CONTROL_SECTION's pins (here the
+test circuit that has the microcode ROM instead of the decoder gates). It needs the pins of
+CONTROL_SECTION (the IR input labelled ROM_ADDR_INPUT, the flags C_F A_F N_F Z_F), CLOCK and the
+stepper at the same places, and two 1-bit output pins labelled P_HALTSET (ROM bit 30) and P_STEP0
+(ROM bit 31). A 32-bit output pin ROM_ADDR is allowed and not compared. If the stepper's
+reset input is wired to ROM bit 21, that wire is the one compared with STEP_RST.
 
 Makes a copy of the circuit in which CONTROL_SECTION's CLOCK and stepper are
 replaced by pins (so the three clock phases, the step count and the stepper's
@@ -35,7 +43,8 @@ from run_rom import default_jar
 CLOCK_AT, STEPPER_AT = "(320,30)", "(630,30)"
 PINS = [((340, 20), 1, "input", "P_CLK0"),      # CLOCK outputs: clk_s,
         ((340, 30), 1, "input", "P_CLK1"),      # the stepper's clock,
-        ((340, 40), 1, "input", "P_CLK2"),      # clk_e
+        ((340, 40), 1, "input", "P_CLK2"),      # clk_e,
+        ((340, 50), 1, "input", "P_CLK3"),      # the 4-phase CLOCK's phase 3 (gates STEP_RST; no wire on the old CLOCK)
         ((310, 30), 1, "output", "P_CLKIN"),    # CLOCK input
         ((690, 30), 1, "input", "P_STEPBIT"),   # stepper outputs: step decoder enable,
         ((690, 40), 4, "input", "P_STEP"),      # the count
@@ -50,10 +59,11 @@ SWEEPS = [("all phases on", [], dict()),
           ("stepper disabled", ["P_STEPBIT=0"], dict(stepbit=0))]
 
 
-def probe_circuit(src, dst):
+def probe_circuit(src, dst, circuit="CONTROL_SECTION"):
     tree = ET.parse(src)
-    cs = [c for c in tree.getroot().findall("circuit") if c.get("name") == "CONTROL_SECTION"][0]
+    cs = [c for c in tree.getroot().findall("circuit") if c.get("name") == circuit][0]
     found = set()
+    has_rom = any(c.get("name") == "ROM" for c in cs.findall("comp"))
     for comp in list(cs.findall("comp")):
         if (comp.get("name"), comp.get("loc")) in (("CLOCK", CLOCK_AT), ("stepper", STEPPER_AT)):
             cs.remove(comp)
@@ -62,6 +72,8 @@ def probe_circuit(src, dst):
         sys.exit(f"CLOCK at {CLOCK_AT} / stepper at {STEPPER_AT} not found in CONTROL_SECTION: "
                  "the circuit changed, update PINS in verify.py")
     for (x, y), width, kind, label in PINS:
+        if has_rom and label in ("P_HALTSET", "P_STEP0"):
+            continue                  # a circuit with the ROM has its own pins on those nets
         e = ET.SubElement(cs, "comp", {"lib": "0", "loc": f"({x},{y})", "name": "Pin"})
         for k, v in (("facing", "east" if kind == "input" else "west"), ("label", label),
                      ("type", kind), ("width", str(width))):
@@ -69,10 +81,11 @@ def probe_circuit(src, dst):
     tree.write(dst, xml_declaration=True, encoding="UTF-8")
 
 
-def compare(path, words, gate):
+def compare(path, words, gate, n_wide=4):
     names = open(path + ".names").read().split()
-    n1 = len(names) - 4
+    n1 = len(names) - n_wide
     wide = names[n1:]
+    wcmp = [i for i, n in enumerate(wide) if n != "ROM_ADDR"]      # ROM_ADDR is the ROM's own output
     rec = struct.Struct(f">{2 + len(wide)}i")
     checked = [i for i, n in enumerate(names[:n1]) if n not in NOT_COMPARED]
     cmask = sum(1 << i for i in checked)
@@ -89,6 +102,7 @@ def compare(path, words, gate):
     # flag index f (pin bits top to bottom = C A N Z) -> C<<3 | A<<2 | N<<1 | Z
     fval = [sum((f >> (3 - i) & 1) << i for i in range(4)) for f in range(16)]
     errors, unreached, shown = 0, 0, 0
+    by_op = {}                    # IR[15:8] -> {step: differences}
     with open(path, "rb") as fh:
         for ir in range(0x10000):
             block = fh.read(256 * rec.size)
@@ -102,43 +116,63 @@ def compare(path, words, gate):
                 if exp is None:
                     o = mc.outputs(w, ir, flags, **gate)
                     ones = sum(1 << i for i in checked if o[names[i]])
-                    exp = cache[w] = (ones, tuple(o[n] for n in wide))
-                if got[1] & cmask == 0 and got[0] & cmask == exp[0] and tuple(got[2:]) == exp[1]:
+                    exp = cache[w] = (ones, tuple(o[wide[i]] for i in wcmp))
+                if got[1] & cmask == 0 and got[0] & cmask == exp[0] and tuple(got[2 + i] for i in wcmp) == exp[1]:
                     continue
                 if step >= reach[op7, ra3, jf << 1 | jnf]:
                     unreached += 1
                     continue
                 errors += 1
+                d = by_op.setdefault(ir >> 8, {})
+                d[step] = d.get(step, 0) + 1
                 if shown < 10:
                     shown += 1
                     bad = [names[i] for i in checked if (got[0] >> i ^ exp[0] >> i) & 1 or got[1] >> i & 1]
-                    bad += [f"{n}={g} (ROM {e})" for n, g, e in zip(wide, got[2:], exp[1]) if g != e]
+                    bad += [f"{wide[i]}={got[2 + i]} (ROM {e})" for i, e in zip(wcmp, exp[1]) if got[2 + i] != e]
                     print(f"    IR={ir:04x} step {step} flags {flags:x}: {', '.join(bad)}")
+    for op, d in sorted(by_op.items())[:12]:
+        print(f"    IR[15:8]={op:02x}: differences by step {d}")
+    if len(by_op) > 12:
+        print(f"    ... and {len(by_op) - 12} more IR[15:8] values")
     return errors, unreached
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--circ", default=os.path.join(HERE, "..", "CPU.circ"))
+    ap.add_argument("--circuit", default="CONTROL_SECTION", help="the circuit to check (default CONTROL_SECTION)")
     ap.add_argument("--jar", default=default_jar())
     ap.add_argument("--quick", action="store_true", help="only the sweep with all phases on")
     args = ap.parse_args()
     words = mc.table()
     total = 0
+    cs = [c for c in ET.parse(args.circ).getroot().findall("circuit") if c.get("name") == args.circuit]
+    if not cs:
+        sys.exit(f"no circuit named {args.circuit} in {args.circ}")
+    pins = [{a.get("name"): a.get("val") for a in k.findall("a")} for k in cs[0].findall("comp") if k.get("name") == "Pin"]
+    if any(k.get("name") == "ROM" for k in cs[0].findall("comp")):     # the microcode version
+        have = {p.get("label") for p in pins}
+        need = {"ROM_ADDR_INPUT", "C_F", "A_F", "N_F", "Z_F"}
+        if need - have:
+            sys.exit(f"pins missing in {args.circuit}: {', '.join(sorted(need - have))}")
+        for n in ("P_HALTSET", "P_STEP0"):
+            if n not in have:
+                print(f"WARNING: no output pin {n} in {args.circuit}: ROM bit {30 if n == 'P_HALTSET' else 31} is not checked")
+    n_wide = sum(1 for p in pins if p.get("type") == "output" and int(p.get("width", 1)) > 1)
     with tempfile.TemporaryDirectory() as tmp:
         probe = os.path.join(tmp, "probe.circ")
-        probe_circuit(args.circ, probe)
+        probe_circuit(args.circ, probe, args.circuit)
         subprocess.run(["javac", "-cp", args.jar, "-d", tmp, os.path.join(HERE, "ControlSweep.java")],
                        check=True)
         for title, pins, gate in SWEEPS[:1] if args.quick else SWEEPS:
             out = os.path.join(tmp, "sweep.bin")
-            r = subprocess.run(["java", "-Xss64m", "-cp", f"{args.jar}{os.pathsep}{tmp}", "ControlSweep",
+            r = subprocess.run(["java", "-Xss64m", f"-Dcircuit={args.circuit}", "-cp", f"{args.jar}{os.pathsep}{tmp}", "ControlSweep",
                                 probe, out] + pins, capture_output=True, text=True)
             if r.returncode:
                 sys.exit(r.stderr[-3000:])
             osc = r.stdout.strip().splitlines()[-1]
             print(f"{title}: ({osc})")
-            errors, unreached = compare(out, words, gate)
+            errors, unreached = compare(out, words, gate, n_wide)
             print(f"  {errors} differences, {unreached} more at steps that never run")
             total += errors
     print("OK: the ROM matches CONTROL_SECTION" if total == 0 else f"FAILED: {total} differences")

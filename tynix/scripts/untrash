@@ -1,0 +1,52 @@
+#!/bin/sh
+# untrash [-f] [NAME...]    put files back from the trash (see trash)
+#
+# NAME is as the list shows it (a name like notes.txt.1 when several files of
+# one name were trashed). Each goes back where it was; a folder that is gone is
+# made again; a file already there is not replaced unless -f is given. With no
+# name it lists the trash: NAME and the path it came from.
+T=${TRASH_DIR:-/home/user/trash}
+force=
+if [ "$1" = -f ]; then
+    force=1
+    shift
+fi
+mkp() {
+    local rest=${1#/} acc= part
+    while [ -n "$rest" ]; do
+        part=${rest%%/*}
+        acc=$acc/$part
+        [ -d "$acc" ] || mkdir "$acc" || return 1
+        case $rest in */*) rest=${rest#*/} ;; *) rest= ;; esac
+    done
+}
+if [ $# -eq 0 ]; then
+    n=0
+    for f in "$T"/*; do
+        case $f in *.path) continue ;; esac
+        [ -f "$f" ] || continue
+        read p < "$f.path"
+        echo "${f##*/}  ->  $p"
+        n=$((n + 1))
+    done
+    [ $n -eq 0 ] && echo "the trash is empty"
+    exit 0
+fi
+status=0
+for name in "$@"; do
+    if [ ! -f "$T/$name" ] || [ ! -f "$T/$name.path" ]; then
+        echo "untrash: $name: not in the trash"
+        status=1
+        continue
+    fi
+    read p < "$T/$name.path"
+    if [ -e "$p" ] && [ -z "$force" ]; then
+        echo "untrash: $p exists (-f replaces it)"
+        status=1
+        continue
+    fi
+    dir=${p%/*}
+    [ -n "$dir" ] || dir=/
+    mkp "$dir" && mv "$T/$name" "$p" && rm "$T/$name.path" && echo "restored $p" || status=1
+done
+exit $status

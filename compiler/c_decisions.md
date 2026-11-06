@@ -481,7 +481,7 @@ Phase 8, Claude from the CPU's keyboard (2026-11-02):
   stack slot `i` is RAM word `i` (`0x10000 + i` on the 16-bit circuit, `0x1000000 + i` now), `FCMP`'s A flag is a float compare.
 * `diag14`/`diag15`: float special cases (division by zero, NaN, INT out of
   range); see `TECHNICAL.md` section 8.
-* `compiler/examples/c/tests/circuit_test.c` passes on the circuit, and eight of
+* `logisim/tests/circuit_test.c` passes on the circuit, and eight of
   the test programs print exactly gcc's output there (2026-10-11).
 * `diag16`/`diag17` (2026-10-13): N and Z after `DIV`, `MOD` and `NOT`, and
   after `MULT`/`SHL` with a negative result, describe R0, and so do they

@@ -29,7 +29,7 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-BANK_BITS = 24          # the toolchain's bank width (compiler/src/asm/linker.py)
+BANK_BITS = int(os.environ.get("LOGISIM_BANK_BITS", 24))   # same variable as the linker (compiler/src/asm/linker.py)
 SYSTEM_JAR = Path("/usr/share/java/logisim-evolution/logisim-evolution.jar")
 
 

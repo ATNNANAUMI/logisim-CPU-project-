@@ -65,6 +65,8 @@
 #define INT_ACK_DEVICE 0xAC
 #define INT_ENABLE_DEVICE 0xAD
 #define CLAUDE_DEVICE 0x9C
+#define MOUSE_STATE_DEVICE 0xBC
+#define MOUSE_EVENT_DEVICE 0xBD
 
 #define CLAUDE_SEND 0           /* the Claude device's control chars */
 #define CLAUDE_TOOL 2
@@ -80,6 +82,13 @@
 #define INT_FAULT 3
 #define IRQ_TIMER 1             /* bit masks of the controller's sources */
 #define IRQ_KEYBOARD 2
+#define IRQ_MOUSE 4
+
+/* mouse_event()'s kinds; the buttons are 1 left, 2 right, 4 middle */
+#define MOUSE_PRESS 1
+#define MOUSE_RELEASE 2
+#define MOUSE_WHEEL_UP 3
+#define MOUSE_WHEEL_DOWN 4
 
 /* what key_pressed() and wait_key() return besides printable ASCII, '\n'
    (Enter), '\b' (Backspace) and '\t' (Tab): the arrows, and Ctrl-A ...
@@ -99,6 +108,14 @@ void show_hex(unsigned int value);
 int key_pressed(void);
 int wait_key(void);
 void wait_ms(unsigned int ms);
+
+/* the mouse over the RGB screen (simulator only): mouse_state() gives the
+   buttons (bit 3 set when the pointer is over the screen) and fills *x, *y
+   (0-255); mouse_event() takes the next press, release or wheel step off a
+   queue of 64 and returns its kind, 0 when empty, with the position in *x, *y
+   and the buttons after it in *buttons */
+int mouse_state(int *x, int *y);
+int mouse_event(int *x, int *y, int *buttons);
 
 void interrupts_on(void);
 void interrupts_off(void);

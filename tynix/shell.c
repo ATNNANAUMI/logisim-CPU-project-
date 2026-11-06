@@ -45,7 +45,11 @@
  * NAME=value` (the environment, which every program started afterwards
  * gets: getenv), `unset`, `env`. $NAME, ${NAME} and $? (the last command's
  * status) expand in words and "...", not in '...'; so do ${#NAME} (its
- * length), ${NAME:-word} (word when NAME is empty), ${NAME:=word} (and set
+ * length), ${NAME#pat} ${NAME##pat} ${NAME%pat} ${NAME%%pat} (NAME without
+ * its shortest, or doubled longest, prefix or suffix that matches the
+ * pattern: with the pattern "star, slash" the ## form gives the file name
+ * of a path and the % form of "slash, star" its folder),
+ * ${NAME:-word} (word when NAME is empty), ${NAME:=word} (and set
  * it), ${NAME:+word}, $$ (this shell's pid) and $! (the last program put in
  * the background). A plain command name is looked for in the folders of
  * $PATH (default /bin) in order. At start the shell sets PATH, HOME and PWD
@@ -1984,6 +1988,37 @@ static void bad_subst(const char *s, const char *e)
     exp_error = 1;
 }
 
+static int gmatch(const char *p, const char *s);
+
+/* ${NAME#pat} ${NAME##pat} ${NAME%pat} ${NAME%%pat}: v without its shortest
+   (or, doubled, longest) prefix (#) or suffix (%) that matches the pattern */
+static void trimmed(struct exp *x, const char *v, const char *pat, char op, int longest, int quoted)
+{
+    int len = strlen(v), i, cut = -1;
+    if (op == '#') {
+        char *t = strdup(v);
+        for (i = longest ? len : 0; i >= 0 && i <= len && cut < 0; i += longest ? -1 : 1) {
+            char c = t[i];
+            t[i] = 0;
+            if (gmatch(pat, t))
+                cut = i;
+            t[i] = c;
+        }
+        free(t);
+        value(x, v + (cut > 0 ? cut : 0), quoted);
+    } else {
+        char *t;
+        for (i = longest ? 0 : len; i >= 0 && i <= len && cut < 0; i += longest ? 1 : -1)
+            if (gmatch(pat, v + i))
+                cut = i;
+        t = strdup(v);
+        if (cut >= 0)
+            t[cut] = 0;
+        value(x, t, quoted);
+        free(t);
+    }
+}
+
 /* ${...} between s and e */
 static void braced(struct exp *x, const char *s, const char *e, int quoted)
 {
@@ -2011,6 +2046,18 @@ static void braced(struct exp *x, const char *s, const char *e, int quoted)
     }
     if (n == e) {
         param(x, s, len, quoted);
+        return;
+    }
+    if (*n == '#' || *n == '%') {       /* ${NAME#pat} and the others: trim a prefix or a suffix */
+        char op = *n++, *pat;
+        int longest = n < e && *n == op;
+        if (longest)
+            n++;
+        if ((pat = expand_one(n, e)) == 0)
+            return;
+        v = *s == '@' || *s == '*' ? 0 : param_value(s, len);
+        trimmed(x, v ? v : "", pat, op, longest, quoted);
+        free(pat);
         return;
     }
     if (*n == ':') {

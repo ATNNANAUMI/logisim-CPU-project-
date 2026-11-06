@@ -6,7 +6,7 @@ instruction: its syntax, effect and size (parsed from the tables of section
 drawn from a word the assembler really writes, the flags it changes, and
 its micro-steps, read from logisim/microcode/microcode.py (the control
 section of the circuit). The group 0x2 instructions (interrupts, Phase 6)
-are marked as not on the circuit yet: the microcode has no steps for them.
+are marked as not on the circuit yet, except GSP SSP GBP SBP SLIM: the microcode has no steps for the others.
 
 Below the table, a decoder (a hex word -> the instruction, by the same rules
 as cpu_sim/src/isa.py) and an encoder (an instruction and its registers ->
@@ -144,8 +144,8 @@ def form(syntax):
 
 def steps(word):
     """The microcode's steps for this word: [(condition, text)], or None
-    (group 0x2: not on the circuit)."""
-    if word >> 12 & 7 == 2:
+    (group 0x2 but GSP SSP GBP SBP SLIM: not on the circuit)."""
+    if word >> 12 & 7 == 2 and (word >> 8 & 0xF) not in microcode.GROUP2_BUILT:
         return None
     op7, ra3 = word >> 8 & 0x7F, word >> 4 & 7
     out = []
@@ -192,7 +192,7 @@ def instructions():
             "encoding": (row.get("encoding") or row.get("encoding (reg / imm)", "")).replace("`", ""),
             "forms": forms, "flags": flags_changed(name, row),
             "steps": steps(word), "imm_steps": steps(forms[1]["example_words"][0]) if len(forms) > 1 else None,
-            "circuit": word >> 12 & 7 != 2,
+            "circuit": word >> 12 & 7 != 2 or (word >> 8 & 0xF) in microcode.GROUP2_BUILT,
         })
     return out
 
