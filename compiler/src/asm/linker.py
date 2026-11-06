@@ -39,13 +39,16 @@ A library nothing refers to is left out entirely, RAM included.
 """
 
 import bisect
+import os
 from dataclasses import dataclass
 
 import encoding as enc
 from errors import AsmError, AsmErrors
 
 MASK = 0xFFFFFFFF
-BANK_BITS = 24
+# shortcut: LOGISIM_BANK_BITS (16..24) only for testing a half-widened circuit (logisim/tests); the stdlib heap and libc stay 24-bit
+BANK_BITS = int(os.environ.get("LOGISIM_BANK_BITS", 24))
+assert 16 <= BANK_BITS <= 24, "LOGISIM_BANK_BITS must be 16..24"
 ROM_SIZE = 1 << BANK_BITS                  # words of ROM
 RAM_BASE = 1 << BANK_BITS                  # RAM word i is at address RAM_BASE + i
 STACK_WORDS = 0x4000                       # the stack link() reserves after the data (16K words)
@@ -358,8 +361,13 @@ def _header(table, start, stack_index, limit_index, errors):
     rom = [ENTRY_WORD, enc.jump_offset(STARTUP, 1)]
     for vector in (2, 4, 6, 8):
         rom += [ENTRY_WORD, enc.jump_offset(targets[vector], vector + 1)]
-    rom += [DATA_R1, stack_index, SSP_R1, SBP_R1,          # ESP = EBP = the stack's first word
-            DATA_R1, limit_index, SLIM_R1,                 # the stack limit
+    ssp, sbp, slim = SSP_R1, SBP_R1, SLIM_R1
+    if BANK_BITS < 24:        # old circuit: no SSP/SBP/SLIM, ESP = EBP = 0 at reset (2.6)
+        ssp = sbp = slim = 0  # NOP
+        if stack_index:
+            errors.append(AsmError("a 16-bit build can't have RAM data: the old circuit's stack starts at RAM 0"))
+    rom += [DATA_R1, stack_index, ssp, sbp,          # ESP = EBP = the stack's first word
+            DATA_R1, limit_index, slim,                 # the stack limit
             DATA_R1, 0,                                    # R1 back to 0
             ENTRY_WORD, enc.jump_offset(start.address, STARTUP + 10) if start else 0,
             RTI_WORD, HALT_WORD]
