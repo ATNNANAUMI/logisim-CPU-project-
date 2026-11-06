@@ -35,12 +35,26 @@ logisim-CPU-project-/
 ├── logisim/
 │   ├── CPU.circ              THE CIRCUIT. Top-level circuit = "PC" (RGB Video fed by RGB_Display)
 │   ├── run_rom.py            patches a .rom into the ROM inside subcircuit "RAM", runs Logisim headless, prints TTY
-│   ├── microcode/            CONTROL_SECTION as a 64K x 32 microcode ROM (not wired into CPU.circ yet; TECHNICAL 2.5)
+│   ├── tests/                programs that measure or check the circuit: io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
+│   │                         diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag), diag14, diag15 (float division by zero, NaN, INT out of range),
+│   │                         diag16, diag17 (STK SET/GET wrap, NOT, MOD by 0, float opcodes, rounding), diag18 (flags after OR/XOR, NOT as assembled now),
+│   │                         circuit_test.c (self-checking C program for the compiler's tricky code paths), probe_addr (every address bit and the RA+RB carries),
+│   │                         probe_stack (SSP SBP GSP GBP, a stack above 16 bits),
+│   │                         mem_test.c (data bits, 24 address lines, carries, top of RAM, malloc), alu_test.c (ALU and float unit by identities),
+│   │                         stack_test.c (deep recursion, big frames, setjmp), screen_test.c (the RGB screen: look at it), keys_test.c (the keyboard: type on it); expected/ (the simulator's output for each, to compare with the circuit's),
+│   │                         baseline_16bit.txt (the 16-bit circuit's hello), hello_decode.txt (hello.rom step by step, microcode words)
+│   ├── claude/               Claude through the circuit's Telnet component: claude_term.c (the CPU's terminal program, no OS), bridge.py (the PC side),
+│   │                         system.md (the prompt for this machine), port_test.c + port_test.py (check the port: an echo program and the PC side), test.py (self-check,
+│   │                         FakeBackend and a fake port), README.md (the port's wiring; TECHNICAL 2.7)
+│   ├── microcode/            CONTROL_SECTION as a 64K x 32 microcode ROM (in CPU.circ since 2026-11-05; TECHNICAL 2.5)
 │   │   ├── microcode.py      the table (steps per instruction, bit layout) -> microcode.rom; --list prints it
 │   │   ├── microcode.rom     the generated image ("v2.0 raw")
 │   │   ├── datapath_page.py  the datapath as one HTML page: pick an instruction, step through its micro-steps (control lines, not values)
-│   │   ├── verify.py         runs CONTROL_SECTION's gates through Logisim for every IR/step/flags, compares with the ROM
-│   │   └── ControlSweep.java the sweep verify.py compiles and runs (needs javac + the Logisim jar)
+│   │   ├── verify.py         runs CONTROL_SECTION (or --circuit NAME) through Logisim for every IR/step/flags, compares with the table
+│   │   ├── ControlSweep.java the sweep verify.py compiles and runs (needs javac + the Logisim jar)
+│   │   ├── check_limit.py    the stack limit register and comparator, through the whole CPU (runs LimitProbe.java)
+│   │   ├── LimitProbe.java   runs the circuit PC until HALT and prints the limit, EBP, ESP and LIMIT_HIT of the RAM subcircuit
+│   │   └── check_address.py  the ROM's wiring in a test circuit with a ROM_ADDR pin (used while building it)
 │   └── old_notes/            old notes: stack micro-steps, personal TODO
 │
 ├── compiler/
@@ -101,11 +115,6 @@ logisim-CPU-project-/
 │   │   │   ├── stdlib/       stdlib.asm (standard library: I/O, strings, memory, math, conversion); stdlib_demo (every function but input),
 │   │   │   │                 stdlib_input_demo (read_line / read_int / read_float / read_char), stdlib_more_demo (the functions added 2026-10-03)
 │   │   │   ├── two_files/    main.asm, lib.asm: multi-file linking example
-│   │   │   └── tests/        circuit diagnostics: io_test (keyboard), diag10 (INT below 1), diag11 (INT, STK GET/SET edge cases),
-│   │   │                     diag12 (ESP/EBP tricks, flags, MULT, DIV), diag13 (carry flag),
-│   │   │                     diag14, diag15 (float division by zero, NaN, INT out of range),
-│   │   │                     diag16, diag17 (STK SET/GET wrap, NOT, MOD by 0, float opcodes, rounding),
-│   │   │                     diag18 (flags after OR/XOR, NOT as assembled now)
 │   │   └── c/                C
 │   │       ├── basics/       hello, primes (sieve + hex display), structs (structs, qsort, malloc),
 │   │       │                 interrupts (WAIT, a timer IRQ and a key IRQ served by a C handler)
@@ -115,7 +124,7 @@ logisim-CPU-project-/
 │   │       │                 video_player (plays a video.py .h on time with clock()) with videos/demo (.mp4 + .h);
 │   │       │                 grapher (graphing calculator: type f(x), Enter; zoom/move/view commands);
 │   │       │                 qr (QR code encoder: the repo link, then any typed text; checked with zbarimg/qrencode)
-│   │       ├── tests/        circuit_test (self-checking, for the circuit); benchmark (twelve square roots, Quake III and Newton,
+│   │       ├── tests/        benchmark (twelve square roots, Quake III and Newton,
 │   │       │                 timed and checked against sqrt()); sqrt_benchmark (library sqrt vs the old bit-by-bit one)
 │   │       └── os/           programs for the disk and the OS: loader (build --exe; runs /bin programs with spawnv), echo (build --exe),
 │   │                         disk_notes (files on the disk: shows /notes.txt, adds typed lines; --disk FILE)
@@ -184,14 +193,14 @@ logisim-CPU-project-/
 ```
 PC (top)                  has the output pin `halt` that ends headless runs at HALT
 ├── CPU
-│   ├── CONTROL_SECTION   decoder/sequencer (gates); uses CLOCK (clk, clk_s, clk_e via "buffer" delay) and stepper (4-bit)
+│   ├── CONTROL_SECTION   decoder/sequencer: a 64K×32 microcode ROM + gates (TECHNICAL 2.5); uses CLOCK (a 2-bit phase counter: clk, clk_s, clk_e, ph3) and stepper (4-bit)
 │   ├── CPU_REG           16 × REGISTER (32-bit), one-hot set/enable selects
 │   ├── ALU → FPU         integer ops + float unit (hand-built IEEE-754 path + Logisim FP components)
 │   ├── ACC, TMP          ALU latches
 │   ├── FLAG_REG          C A N Z
-│   ├── IAR               17-bit counter (T flip-flops); the toolchain now wants 25 (TECHNICAL 2.4)
+│   ├── IAR               25-bit counter (T flip-flops)
 │   └── INTRUCTION_REGISTER  16-bit
-├── RAM                   memory system: MAR(17), ROM 64K×32 (PROGRAM LIVES HERE), RAM 64K×32, ESP/EBP (14-bit); still 16-bit banks
+├── RAM                   memory system: MAR(25), ROM 16M×32 (PROGRAM LIVES HERE), RAM 16M×32, ESP/EBP (24-bit), stack limit register + LIMIT_HIT
 ├── display               text TTY at 0x5C
 ├── NUMBER_DISPLAY        8 hex digits at 0x3C
 ├── KEYBOARD              keyboard at 0xF0
@@ -208,9 +217,9 @@ The design follows the "But How Do It Know?" style: a single bus,
   bank: bit 24 = RAM. ROM `0x0000000–0x0FFFFFF` (read-only; the vectors are
   its first 10 words), RAM linker data from `0x1000000`, then the stack, end of RAM
   `0x1FFFFFF`. The memory map lives in `linker.py` and `config.py` (and
-  `malloc.c`/`stdlib.asm` write down the end of RAM). **The circuit still
-  has the 16-bit map** (bit 16 = RAM, 64K words per bank) and can't run
-  these programs until it is widened (TECHNICAL 2.4); `run_rom.py` refuses.
+  `malloc.c`/`stdlib.asm` write down the end of RAM). The circuit has the
+  same map since 2026-11-05 (TECHNICAL 2.4); `run_rom.py` refuses a circuit with
+  fewer than 24 ROM address bits unless `LOGISIM_BANK_BITS` is set.
 * Instruction: `bit14 IMM | bit13 FLOAT | bit12 ALU | 11..8 opcode | 7..4 RA | 3..0 RB`.
   Groups: `0x0` system, `0x1` int ALU, `0x3` float ALU, `0x5`/`0x7` = with an
   immediate (the next word).
@@ -382,7 +391,7 @@ pypy3 cpu_sim/src/bench.py [life sqrt ...]                          # simulator 
   itself. Deleting `compiler/ROM/` is always safe.
 * The circuit runs about 160 instructions a second: a C program for the
   circuit should avoid `printf` in loops (a float `printf` costs thousands of
-  instructions). `compiler/examples/c/tests/circuit_test.c` takes about 15 000.
+  instructions). `logisim/tests/circuit_test.c` takes about 15 000.
 * Tynix (Phase 7): a program for the OS shares the CPU, so a busy loop costs
   the others; `key_pressed()` is a system call (~390 instructions). Two opens
   of one file are kept in step by the kernel after each write, but writes to

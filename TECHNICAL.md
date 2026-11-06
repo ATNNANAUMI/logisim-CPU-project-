@@ -27,7 +27,7 @@ file has the details.
 | `IAR` | 25 bits | instruction address register (program counter) |
 | `IR` | 16 bits | instruction register (low 16 bits of the fetched word) |
 | flags | 4 bits | `C A N Z` (bit 3 … bit 0) |
-| `ESP`, `EBP` | 24 bits each | stack pointer and frame pointer: indices into RAM (RAM word `i` is at `0x1000000 + i`), so the stack can be anywhere. **The circuit still has 14-bit ones** (2.6 lists the change) |
+| `ESP`, `EBP` | 24 bits each | stack pointer and frame pointer: indices into RAM (RAM word `i` is at `0x1000000 + i`), so the stack can be anywhere (on the circuit too since 2026-11-05) |
 | stack limit | 24 bits | `SLIM`: a `PUSH`/`CALL` with `ESP` at or past it is not executed, it takes the FAULT vector (1.8). Reset value: the last RAM word |
 | enable latch, in-NMI latch | 1 bit each | interrupts on/off (`EI`, `DI`; off at reset) and "inside the NMI handler" (1.8) |
 | `MAR` | 25 bits | memory address register (inside the `RAM` subcircuit) |
@@ -47,10 +47,12 @@ chooses the bank:
 0x1200000 ─ 0x1FFFFFF   RAM  (Tynix) the regions of the programs the kernel runs (TEX2, 11)
 ```
 
-**The circuit is still the 16-bit version** (17-bit bus, bit 16 = RAM, 64K
-words per bank: ROM `0x00000–0x0FFFF`, RAM `0x10000–0x1FFFF`). The toolchain
-and the simulator use the 24-bit map above; 2.4 lists what the circuit needs
-before it can run these programs, and `logisim/run_rom.py` refuses until then.
+**The circuit has the same map since 2026-11-05** (25-bit bus, bit 24 = RAM,
+16M words per bank); until then it was 16 bits (17-bit bus, bit 16 = RAM,
+ROM `0x00000–0x0FFFF`, RAM `0x10000–0x1FFFF`). 2.4 lists what was widened.
+`logisim/run_rom.py` still stops on a circuit whose ROM has fewer than 24
+address bits, unless `LOGISIM_BANK_BITS` says the programs are built for fewer
+(7.2).
 
 * Reads work on both banks. Writes to ROM are dropped (the circuit raises a
   "tried writing in ROM" error line; the simulator ignores the write and notes
@@ -273,7 +275,7 @@ be 1).
 ### 1.8 Interrupts, the stack registers and the stack limit (Phase 6)
 
 Built in the simulator and the toolchain (self-checks, the C library, the
-shell); **not on the circuit yet**: 2.6 is the list of what to build there.
+shell); **on the circuit so far**: the stack registers and the limit register (2.6); not the interrupts.
 Nothing in this section has been measured on the circuit, it is the
 specification.
 
@@ -402,7 +404,7 @@ bus, a stepper, `ACC`/`TMP`, `MAR`, `IAR`, `IR`, and control lines named
 ```
 PC  (top level: the "computer")
 ├── CPU
-│   ├── CONTROL_SECTION ── CLOCK ── buffer (delay line)
+│   ├── CONTROL_SECTION ── CLOCK (a 2-bit phase counter)
 │   │                   └─ stepper
 │   ├── CPU_REG ── 16 × REGISTER
 │   ├── ALU ── FPU
@@ -432,7 +434,8 @@ Logisim `Clock` component. Exposes the bus to `PC` (to the `RAM` subcircuit
 and the I/O devices) together with the control lines they need.
 
 **CONTROL_SECTION** — the instruction decoder and sequencer, built from gates
-(≈100 AND, ≈50 OR, decoders and demultiplexers). Inputs: the 16-bit `IR`,
+(until 2026-11-05 ≈100 AND, ≈50 OR, decoders and demultiplexers; now a
+64K × 32 microcode ROM and a few gates, 2.5). Inputs: the 16-bit `IR`,
 the flags, `CLK`, `HALT`, `RESET`, `RESUME`, `BREAK`. It decodes the group
 bits (3-to-8 demultiplexers), the opcode and the stepper count (4-to-16
 decoders) and drives:
@@ -448,10 +451,19 @@ decoders) and drives:
 * two one-hot 16-bit register selects (register A side and register B side),
   plus the `R0` line that routes every ALU result into `R0`
 
-**CLOCK** — turns the raw clock into the three phases the control section
-needs: `clk`, `clk_s` (AND of the clock and a delayed copy: the short "set"
-pulse) and `clk_e` (OR: the long "enable" window). The delay comes from the
-`buffer` subcircuit, a chain of 60 buffers.
+**CLOCK** — turns the raw clock into what the control section needs: `clk`
+(the stepper's clock), `clk_s` (the short "set" pulse), `clk_e` (the long
+"enable" window) and `ph3`. A 2-bit counter on the raw clock gives four phases
+per step: phase 0 `clk` rises (the stepper counts, the ROM word changes, no
+line is on), phases 1, 2, 3 `clk_e` (the enable lines drive the bus), phase 2
+also `clk_s` (the set pulse, with the enables on), phase 3 `ph3` (the stepper's
+reset, `STEP_RST AND ph3`, so the last step is not cut short). Until
+2026-11-05 `clk_s` was the clock ANDed with a delayed copy and `clk_e` the
+clock ORed with it, the delay a chain of 60 buffers (the `buffer` subcircuit,
+no longer used by `CLOCK`); the ROM's delay made the old word overlap the next
+step's windows (`ALD` added the address twice), and a longer chain only traded
+speed for it. The counter circuit runs about four times faster than the
+original gates (10 kHz against 2.5 kHz in Logisim).
 
 **stepper** — a 4-bit counter (steps 0–15) with two D flip-flops that
 synchronise its reset; the control section restarts it at the end of every
@@ -461,7 +473,7 @@ instruction.
 controlled output buffer). Two 16-bit one-hot inputs choose which register
 latches the bus and which one drives it.
 
-**IAR** — a 17-bit counter made from 17 T flip-flops and gate logic, with
+**IAR** — a 25-bit counter made from 25 T flip-flops and gate logic, with
 `enable` (drive the bus), `set` (load from the bus), `reset` and `clock`.
 Incrementing happens inside the counter, so the ALU is not needed to step to
 the next word.
@@ -490,17 +502,21 @@ FLOAT TO INT, NEGATE, SHIFT (0-left / 1-right), ADD/SUB, MULT/DIV, COMP.
 
 **RAM** (the memory system, instantiated in `PC`):
 
-* `MAR`, a 17-bit register; bit 16 selects the RAM or the ROM
-* a 64K × 32 `RAM` and a 64K × 32 `ROM`. **The ROM component here is the one
+* `MAR`, a 25-bit register; bit 24 selects the RAM or the ROM
+* a 16M × 32 `RAM` and a 16M × 32 `ROM`. **The ROM component here is the one
   that holds the program** (`run_rom.py` writes into it)
-* `ESP` and `EBP`, two 14-bit registers, with a 14-bit subtractor (`ESP − 1`)
-* a 17-bit adder for `EBP + index` (stack `SET`/`GET`) and `RA + RB`
+* `ESP` and `EBP`, two 24-bit registers, with a 24-bit subtractor (`ESP − 1`)
+* a 25-bit adder for `EBP + index` (stack `SET`/`GET`) and `RA + RB`
   (`ALD`/`AST`)
-* a 4-to-16 demultiplexer that decodes `STACK_OP`
-* the stack index is padded to 16 bits with two grounded bits, which is what
-  places the stack in RAM `0x0000–0x3FFF`
+* a 4-to-16 demultiplexer that decodes `STACK_OP`, its input the line `STK_E`
+  (`STACK_E`); codes 1–9 are the stack operations, 10 `GSP`, 11 `GBP`, 12 `SSP`,
+  13 `SBP`, 14 `SLIM`; a load is the output ANDed with `STK_S`, so the
+  register latches on the set pulse and not as the enables come on
+* the stack limit: a 24-bit register that holds the limit inverted (so the
+  reset's clear gives all ones), a 24-bit comparator `ESP ≥ limit` and the
+  output pin `LIMIT_HIT`; nothing uses the pin yet (2.6 item 3)
 * a "RAISE ERROR / TRIED WRITING IN ROM" output
-* a 17-bit comparator against the constant `0x287` (a debugging watch on one
+* a comparator against the constant `0x287` (a debugging watch on one
   address)
 
 **display** — address decoder for `0x5C`, a 7-bit ASCII output and a write
@@ -544,15 +560,15 @@ remembers whether it is selected (a D flip-flop), and only reacts to
   clock in `PC`.
 * **Headless:** `logisim/run_rom.py` (section 7.2).
 
-### 2.4 Widening the circuit to 24-bit banks (not done yet)
+### 2.4 Widening the circuit to 24-bit banks (done 2026-11-05)
 
-The toolchain and the simulator use 24-bit banks (1.2); the circuit is still
-16-bit, so programs built now can't run on it. These are the parts that carry
+The toolchain and the simulator use 24-bit banks (1.2); the circuit was
+16-bit until 2026-11-05. These were the parts that carry
 an address (found by width in `CPU.circ`; the 16-bit parts of
 `CONTROL_SECTION`, `CPU_REG` and `INTRUCTION_REGISTER` are the instruction,
 not an address, and stay):
 
-| subcircuit | part | now | needed |
+| subcircuit | part | was | now |
 | --- | --- | --- | --- |
 | `IAR` | the counter: 17 T flip-flops with their carry gates, and its two 17-bit splitters (bus in, bus out) | 17 bits | 25: eight more bit cells |
 | `RAM` | `MAR` register and the splitters that take its bank bit | 17 bits, bit 16 = RAM | 25 bits, bit 24 = RAM |
@@ -562,10 +578,14 @@ not an address, and stay):
 | `RAM` | the stack index padding (14-bit `ESP`/`EBP` + grounded bits) | 2 grounded bits | 10, so the stack stays at RAM `0x0000–0x3FFF` |
 | `RAM` | the debugging comparator against `0x287` | 17 bits | 25, or remove it (9) |
 
-`ESP`/`EBP` (14 bits) and the 32-bit data paths don't change. Once the ROM
-has 24 address bits, `run_rom.py` runs programs again (it writes the
-matching `addr/data` header itself). Relative jumps need nothing new: the
-offset is added in 32 bits and the IAR keeps its low 25.
+`ESP`/`EBP` were widened afterwards (2.6 item 1); the 32-bit data paths did not
+change. With 24 address bits in the ROM, `run_rom.py` runs programs again (it
+writes the matching `addr/data` header itself). Relative jumps needed nothing
+new: the offset is added in 32 bits and the IAR keeps its low 25. Checked on
+the circuit with `hello`, `circuit_test.c`, `diag10`–`diag15`, `diag18`,
+`logisim/tests/probe_addr.asm` (every address bit and the carries of `RA + RB`),
+`probe_stack.asm` (a stack above 16 bits) and the C programs `mem_test.c`,
+`alu_test.c`, `stack_test.c` (listed in 5.3).
 
 ### 2.5 The control section as a microcode ROM (`logisim/microcode/`)
 
@@ -574,8 +594,15 @@ step through its micro-steps, with the part that drives the bus lit orange and t
 parts that latch from it blue (control lines only; no values on the bus, which needs
 a micro-step executor, `PLAN.md` item 15, not written).
 
-A replacement for `CONTROL_SECTION`'s decoding gates, for a faster copy of
-the circuit; `CPU.circ` itself doesn't use it yet. `microcode.py` holds the
+`CPU.circ` uses it since 2026-11-05: `CONTROL_SECTION` has the ROM (loaded
+from `microcode.rom`, 16 address bits and 32 data bits) instead of the
+decoding gates. A 32-bit multiplexer with the stepper's enable output (0 when
+it is low) sits between the ROM and the lines, which go on to the AND gates with
+`clk_s`/`clk_e` as before. `JF`/`JNF` are two 4-bit ANDs with `BitFinder`s and
+are gated with "IR is a jump" (`IR[14:12] = 000`, `IR[11:10] = 01`), so the
+address does not depend on the flags for any other instruction (an undefined
+flag, as after the undefined float opcodes, would otherwise make the whole
+control word undefined). `microcode.py` holds the
 table (one list of steps per instruction, read off the circuit) and writes
 `microcode.rom`, a 64K × 32 image in the "v2.0 raw" format (load it into a
 Logisim `ROM` with 16 address bits and 32 data bits). Its docstring has the
@@ -622,10 +649,17 @@ around to the next fetch.
 ---
 
 
-### 2.6 Phase 6 on the circuit: what to build (not done yet)
+### 2.6 Phase 6 on the circuit: what to build (partly built)
 
-Everything in 1.8 exists in the simulator only. To build it on the circuit
-(after 2.4, which widens the banks) the list below is all: Tynix's
+Built on the circuit (2026-11-05): items 1 and 2, and the register and
+comparator of item 3 (the output pin `LIMIT_HIT` is not used: the abort of
+`PUSH`/`CALL` needs the FAULT request of items 4 and 5). Not built: items 4 to
+9. Group 0x2's rows are in `microcode.py`: `GSP SSP GBP SBP SLIM` use
+`STACK_OP` codes 10–14 (2.2) with `STACK_E` and `STACK_S` both asserted like
+every `STK` step, `RTI EI DI TRAP WAIT` are placeholders that only end the
+instruction. Checked with `probe_stack.asm` and `microcode/check_limit.py`.
+
+The list below is the plan: Tynix's
 multitasking (Phase 7, 11) is software on it and asked for no more hardware
 (the timer of item 8 is what it needs most):
 
@@ -671,12 +705,45 @@ multitasking (Phase 7, 11) is software on it and asked for no more hardware
    for `INDATA` at `0x7C`, a period register for `OUTDATA`, a comparator
    that raises source 0 and restarts the count), the keyboard (a key typed
    sets source 1), and the NMI button (a Logisim Button labelled `NMI`).
-9. **Microcode**: the new instructions need their own steps; the table in
-   `logisim/microcode/microcode.py` has no room (all 32 control bits are used),
-   so they go in a second ROM selected by `FLOAT = 1, ALU = 0`, with
-   its control lines (stack-register enables, limit load, latch controls,
-   vector select) and the interrupt state inputs added to the address.
-   `verify.py` does not know the group yet.
+9. **Microcode**: `GSP SSP GBP SBP SLIM` are rows of the table (they reuse
+   `STACK_OP`, no new control line). `RTI EI DI TRAP WAIT` need lines the
+   table has no bit for (all 32 are used): latch controls, vector select, the
+   interrupt state as inputs. They would go in a second ROM read at the same
+   address, and `verify.py` would compare its pins like the others.
+
+### 2.7 Claude through the Telnet component (`logisim/claude/`)
+
+Claude cannot run on the CPU and the circuit cannot reach a network, so as in
+the simulator (11.5) the CPU is a terminal: `claude_term.c` reads the keyboard,
+sends the line to a port device (`0x9C`, the same protocol as the simulator's
+Claude device: chars, a 0 to send, 0x18 new conversation, 0x03 stop; the reply
+comes back a char at a time, 4 at its end) and prints the reply wrapped at the
+display's 64 columns (a space in the last 12 columns is the line break; the display wraps
+the rest), straight to the display device, 21 instructions a char against 140
+through `putchar`: the circuit runs a few hundred instructions a second. It uses
+the text display, the keyboard and the port only:
+no timer, no interrupts, no disk, no OS.
+
+The port is Logisim's own `Telnet` component, a TCP server (attributes Port,
+Buffer, Telnet Mode) that the circuit does not have yet. Its pins, as read from
+the Logisim jar (not tried on the circuit): `IN` and `OUT` (8 bits), `CLK`, `WR`,
+`RD`, `AVAIL`; on a rising `CLK` it sends `IN` to the connected client if `WR`
+is 1 and drops the oldest received byte if `RD` is 1; `OUT` shows that oldest
+byte while `RD` is 1; `AVAIL` is 1 when a byte is waiting. A device at `0x9C`
+built like `KEYBOARD` (address decoder, select flip-flop, a controlled buffer
+onto the bus, the read strobe) and like `display` (the write strobe) is enough:
+`OUTDATA` puts `bus[7:0]` on `IN` with `WR` and a `CLK` pulse; `INDATA` puts
+`AVAIL ? OUT : 0` on the bus, with `RD` and the strobe popping the byte.
+
+`bridge.py` is the other end on the PC: it connects to the component, feeds the
+bytes to the simulator's `ClaudeDevice` (`cpu_sim/src/claude.py`, no tools, a
+short system prompt for this machine) and sends the reply at `--cps` chars a
+second so the component's buffer does not overflow while the CPU prints.
+`port_test.c` with `port_test.py` checks the port itself (an echo program that
+flips the case of letters and counts bytes, and a PC script that sends a sentence,
+every printable byte and a burst). `test.py` checks all of it without the circuit
+or the network: `claude_term.c` with `FakeBackend`, `serve()` over a socket pair, and
+`port_test` over a fake port at 0x9C. See `logisim/claude/README.md`.
 
 ## 3. The simulator (`cpu_sim/src/`)
 
@@ -1302,7 +1369,7 @@ Assembly is under `asm/` (`programs/`, `stdlib/`, `two_files/`, `tests/` for cir
 | `asm/programs/guess.asm` | guess-the-number game with the stdlib (needs typing) |
 | `asm/programs/untested.asm` | `show_hex` and `try_read_char`, the two stdlib functions not yet run on the circuit (needs typing) |
 | `asm/two_files/main.asm`, `lib.asm` | two files, `.extern`/`.global`, `CALL` inside a call, a RAM variable |
-| `asm/tests/io_test.asm` | minimal keyboard → display loop for probing the circuit |
+| `logisim/tests/io_test.asm` | minimal keyboard → display loop for probing the circuit |
 | `c/basics/hello.c` | C: `printf("hello, world\n")` |
 | `c/basics/primes.c` | C: a sieve, `printf` with a width, the hex display (`cpu.h`) |
 | `c/basics/interrupts.c` | C: the CPU's interrupts (simulator only): `main` sleeps with `wait_for_interrupt()` while a C handler serves a 100 ms timer IRQ and the keyboard IRQ (`irq_enable`, `irq_ack`, `timer_interrupt_every`, `set_interrupt_handler`); prints the keys typed (`--keys abc`), five ticks, and that the stack pointer came back. Takes half a second of real time |
@@ -1323,16 +1390,21 @@ Assembly is under `asm/` (`programs/`, `stdlib/`, `two_files/`, `tests/` for cir
 | `c/os/loader.c` | C: runs programs from the disk: type a name and arguments, it runs `/bin/<name>` with `spawnv()` and shows the exit status; an empty line lists `/bin`. The first step towards the OS's shell, `tynix/shell.c` (11); since Phase 7 a program for the OS itself (`--exe`, run from Tynix's shell) |
 | `c/os/echo.c` | C: a program for the OS (`cc build --exe`, then `disk put` into `/bin`): prints its arguments, like Unix `echo` |
 | `c/os/disk_notes.c` | C: files on the disk (simulator only, `--disk FILE` on a disk made by `python compiler/src/disk format`): prints `/notes.txt`, then adds each typed line to it (`!help` lists the commands: `!show`, `!ls`, `!clear`, `!quit`), so the next run shows them again |
-| `c/tests/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, `~` on registers, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
-| `asm/tests/diag10.asm` | `INT` on floats below 1 (diagnostic, resolved: they give 0) |
-| `asm/tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x1000000`; they are also printed in hex |
-| `asm/tests/diag12.asm` | what the C compiler relies on: reading and setting `ESP`/`EBP` with `STK CALL`/`STK RET`, stack slot `i` being RAM word `i` (address `0x1000000 + i` now, `0x10000 + i` on the 16-bit circuit), the carry flag after `CMP`/`SUB`/`ADD`, the `A` flag after `FCMP` (a float compare), `MULT`'s low 32 bits, `DIV` by `0x80000000`. Link it first; 30 results from `0x1000000`, also printed |
-| `asm/tests/diag13.asm` | the carry flag (and A N Z) after `SUB`, `--`, `++`, `NEG`, `SHL`, `SHR`, `MULT`, `ADD`, `AND`, `TEST`: on the circuit `SUB` sets C on a borrow and `CMP`/`--`/`NEG`/`MULT` never set it. Link it first; 24 results from `0x1000000`, also printed |
-| `asm/tests/diag14.asm` | float special cases: division by ±0, NaN, infinity, `INT` out of range, overflow, subnormals. Link it first; 22 results from `0x1000000`, also printed |
-| `asm/tests/diag15.asm` | more of the same after diag14: `INT` of -infinity and of large values, the remaining divisions by zero. Link it first; 15 results from `0x1000000`, also printed |
-| `asm/tests/diag16.asm` | where `STK SET/GET` put `EBP + RB` (on the 16-bit circuit it wraps at 16 bits, across all of RAM), R0 and flags after `DIV`, `MOD` and `NOT` (`MOD` by 0 gives 0; `NOT` inverts RA), the float opcodes with no defined result, float rounding (to nearest, ties to even). Link it first; 52 results from `0x1000000`, also printed |
-| `asm/tests/diag17.asm` | follow-up to diag16: `NOT` encoded with RA and RB both set (it inverts RA, not RB), `DIV`/`MOD` by 0 and `0x80000000` by -1, float opcodes 4, 5, B, C with other inputs (4 doubles RB). Link it first; 30 results from `0x1000000`, also printed |
-| `asm/tests/diag18.asm` | the flags after `OR` and `XOR`, and `NOT` as the assembler writes it now (register in both fields: `~Rx`, `A` = 0); all as the simulator. Link it first; 16 results from `0x1000000`, also printed |
+| `logisim/tests/circuit_test.c` | C: self-checking program for the compiler's tricky code paths (unsigned division, shifts, `~` on registers, compares, floats, NaN, struct copies, jump tables, big frames); prints ok/FAIL per check, passes on the circuit |
+| `logisim/tests/mem_test.c` | C (this compiler only: absolute addresses): data bits, address lines 15–23 (one word at `0x1000000 \| 1 << k` each, read back together), arrays across the 16, 20 and 23-bit boundaries, the top of RAM, `malloc`; ok/FAIL per group, 29K instructions |
+| `logisim/tests/alu_test.c` | C: the integer and float units by identities over edge values (`a + b - b == a`, `a / b * b + a % b == a`, shifts by 0–31, bit counts, float round trips); ok/FAIL per group, gcc agrees, 104K instructions |
+| `logisim/tests/stack_test.c` | C: deep and mutual recursion, ten arguments, 150-word frames, structures by value, function pointers, `setjmp`/`longjmp`; ok/FAIL per group, gcc agrees, 66K instructions |
+| `logisim/tests/screen_test.c` | C: the RGB screen, to look at: four corner pixels, a frame, a diagonal, an F (orientation), colour bars, three gradients; says `screen test done` on the text display, 140K instructions |
+| `logisim/tests/keys_test.c` | C: the keyboard, to type on: prints each typed character as two hex digits and the line's length (`abc 123` gives `61 62 63 20 31 32 33`, 7) |
+| `logisim/tests/diag10.asm` | `INT` on floats below 1 (diagnostic, resolved: they give 0) |
+| `logisim/tests/diag11.asm` | measures `STK SET/GET` with a negative index while `EBP = 0` (on the circuit it reaches the last word of RAM), checks that `STK GET` leaves `RB` alone, and `INT` for positive and negative values (it truncates). Link it **first** (with the stdlib) so its 16 results sit in RAM from `0x1000000`; they are also printed in hex |
+| `logisim/tests/diag12.asm` | what the C compiler relies on: reading and setting `ESP`/`EBP` with `STK CALL`/`STK RET`, stack slot `i` being RAM word `i` (address `0x1000000 + i` now, `0x10000 + i` on the 16-bit circuit), the carry flag after `CMP`/`SUB`/`ADD`, the `A` flag after `FCMP` (a float compare), `MULT`'s low 32 bits, `DIV` by `0x80000000`. Link it first; 30 results from `0x1000000`, also printed |
+| `logisim/tests/diag13.asm` | the carry flag (and A N Z) after `SUB`, `--`, `++`, `NEG`, `SHL`, `SHR`, `MULT`, `ADD`, `AND`, `TEST`: on the circuit `SUB` sets C on a borrow and `CMP`/`--`/`NEG`/`MULT` never set it. Link it first; 24 results from `0x1000000`, also printed |
+| `logisim/tests/diag14.asm` | float special cases: division by ±0, NaN, infinity, `INT` out of range, overflow, subnormals. Link it first; 22 results from `0x1000000`, also printed |
+| `logisim/tests/diag15.asm` | more of the same after diag14: `INT` of -infinity and of large values, the remaining divisions by zero. Link it first; 15 results from `0x1000000`, also printed |
+| `logisim/tests/diag16.asm` | where `STK SET/GET` put `EBP + RB` (on the 16-bit circuit it wraps at 16 bits, across all of RAM), R0 and flags after `DIV`, `MOD` and `NOT` (`MOD` by 0 gives 0; `NOT` inverts RA), the float opcodes with no defined result, float rounding (to nearest, ties to even). Link it first; 52 results from `0x1000000`, also printed. On the microcode circuit it hangs in the group of undefined float opcodes (their flags come out as Logisim's error value): undefined on purpose, not meant to run on the circuit |
+| `logisim/tests/diag17.asm` | follow-up to diag16: `NOT` encoded with RA and RB both set (it inverts RA, not RB), `DIV`/`MOD` by 0 and `0x80000000` by -1, float opcodes 4, 5, B, C with other inputs (4 doubles RB). Link it first; 30 results from `0x1000000`, also printed. Hangs on the microcode circuit for the same reason as diag16 |
+| `logisim/tests/diag18.asm` | the flags after `OR` and `XOR`, and `NOT` as the assembler writes it now (register in both fields: `~Rx`, `A` = 0); all as the simulator. Link it first; 16 results from `0x1000000`, also printed |
 
 All of these build and run correctly in the simulator. The `c/` programs
 are C: build them with `python compiler/src/cc build <file>` (or `run`,
@@ -1396,8 +1468,11 @@ python logisim/run_rom.py logisim/CPU.circ --dump-rom current.rom
 
 It parses the `.circ` XML and finds the single `ROM` component inside the
 `RAM` subcircuit. If that ROM has fewer than 24 address bits it stops with a
-message: programs are now laid out for 24-bit banks and the circuit is still
-16-bit (2.4). Otherwise it replaces the ROM's contents with the image
+message: programs are laid out for 24-bit banks and this circuit has fewer
+(2.4), unless the environment variable `LOGISIM_BANK_BITS` (16 to 24, the same
+one `linker.py` reads) says the program was built for fewer: a 16-bit build
+has no RAM data and a start-up code without `SSP`/`SBP`/`SLIM`, which only
+an old circuit can run. Otherwise it replaces the ROM's contents with the image
 (`addr/data: <the ROM's width> 32` header, 8 words per line) and writes
 `CPU__patched.circ` to the current directory (or to `--keep`). Then it runs
 `java -Djava.awt.headless=true -jar <jar> <patched> --toplevel-circuit PC -t tty,halt`
@@ -2007,7 +2082,7 @@ outside Tynix (the old `spawn.c`/`spawn.asm` loaded one program over
   compiler and compares their output; programs gcc's sanitizer objects to
   are skipped, one that differs is saved in `compiler/ROM/fuzz/`. 246
   programs with floats and pointers agreed on 2026-10-11.
-* `compiler/examples/c/tests/circuit_test.c` runs the compiler's tricky code
+* `logisim/tests/circuit_test.c` runs the compiler's tricky code
   paths on the circuit (all lines `ok` on 2026-10-10, again on 2026-10-11
   after the call changes, and on 2026-10-13 with the new "bitwise not of a
   register" line, which says FAIL on the circuit when `NOT` is encoded the
@@ -2529,8 +2604,8 @@ again with it); that is gone. The self-check `tools` drives it through the shell
 file in `edit` with typed keys and coming back with the clipboard, `Enter` on a
 program) and reads the disk back with `fs.py`; it does not look at pixels
 beyond the screen being blank after `q`, and the screen layout was checked by
-eye from a saved screenshot, not on the circuit (the circuit cannot run these
-programs yet: 16-bit banks).
+eye from a saved screenshot, not on the circuit (the circuit could not run these
+programs then; since 2026-11-05 it has the 24-bit banks).
 
 ### 11.5 Claude: the device and `claude` (`cpu_sim/src/claude.py`, `tynix/bin/claude.c`)
 
