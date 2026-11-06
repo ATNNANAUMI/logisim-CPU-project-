@@ -1,0 +1,10 @@
+Baseline on the 16-bit circuit (CPU.circ before the 24-bit widening, branch circuit-24bit, 2026-11-05)
+
+build:  LOGISIM_BANK_BITS=16 python compiler/src/asm build compiler/examples/asm/programs/hello.asm -o hello16.rom
+          -> 54 words of ROM, 16384 words of RAM (same words as the 24-bit build)
+run:    LOGISIM_BANK_BITS=16 python logisim/run_rom.py logisim/CPU.circ hello16.rom
+output: hello, world
+        --- halted at HALT ---
+sim:    python cpu_sim/src/main.py hello16.rom --headless --steps 100000  -> hello, world
+
+Not yet run on the circuit: io_test, diag10-18, circuit_test.c (most need the stdlib or the C library, which a 16-bit build cannot use).

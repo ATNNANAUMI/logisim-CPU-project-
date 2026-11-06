@@ -1,0 +1,11 @@
+add and subtract ok
+bitwise ok
+compares ok
+multiply ok
+unsigned divide and modulo ok
+signed multiply, divide and modulo ok
+shifts by 0 to 31 ok
+bit counts ok
+float add, subtract, multiply, divide, compare ok
+int to float and back ok
+all checks passed

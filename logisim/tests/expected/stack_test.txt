@@ -1,0 +1,12 @@
+recursion 400 deep ok
+mutual recursion 200 deep ok
+ackermann(2, 3) ok
+ten arguments ok
+a 150-word frame ok
+40-word frames 20 deep ok
+structures by value ok
+structure result ok
+function pointers ok
+setjmp and longjmp 30 frames ok
+stack intact after longjmp ok
+all checks passed

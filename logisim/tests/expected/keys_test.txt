@@ -1,0 +1,5 @@
+type a line and press Enter (an empty line ends)
+abc 123
+61 62 63 20 31 32 33 
+7 characters
+done
