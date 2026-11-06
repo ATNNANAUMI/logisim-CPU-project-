@@ -5,7 +5,7 @@
 ; other values out of range, and the remaining divisions by zero.
 ;
 ; From the project root:
-;   python compiler/src/asm build compiler/examples/asm/tests/diag15.asm
+;   python compiler/src/asm build logisim/tests/diag15.asm
 ;          compiler/examples/asm/stdlib/stdlib.asm
 ;   python logisim/run_rom.py logisim/CPU.circ compiler/ROM/diag15.rom
 ;

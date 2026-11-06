@@ -4,7 +4,7 @@
 ; the A flag after FCMP, MULT's low bits, DIV by 0x80000000
 ;
 ; From the project root:
-;   python compiler/src/asm build compiler/examples/asm/tests/diag12.asm
+;   python compiler/src/asm build logisim/tests/diag12.asm
 ;          compiler/examples/asm/stdlib/stdlib.asm
 ;   python logisim/run_rom.py logisim/CPU.circ compiler/ROM/diag12.rom
 ;

@@ -4,7 +4,7 @@
 ; opcodes that have no defined result, and how the float unit rounds.
 ;
 ; From the project root:
-;   python compiler/src/asm build compiler/examples/asm/tests/diag16.asm
+;   python compiler/src/asm build logisim/tests/diag16.asm
 ;          compiler/examples/asm/stdlib/stdlib.asm
 ;   python logisim/run_rom.py logisim/CPU.circ compiler/ROM/diag16.rom --seconds 600
 ;

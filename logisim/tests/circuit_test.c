@@ -1,10 +1,10 @@
 /* circuit_test.c - checks the code the C compiler makes, on the real circuit
  *
  * Build and run (from the project root):
- *   python compiler/src/cc build compiler/examples/c/tests/circuit_test.c
+ *   python compiler/src/cc build logisim/tests/circuit_test.c
  *   python logisim/run_rom.py logisim/CPU.circ compiler/ROM/circuit_test.rom
  * or in the simulator:
- *   python compiler/src/cc run compiler/examples/c/tests/circuit_test.c
+ *   python compiler/src/cc run logisim/tests/circuit_test.c
  *
  * Each line names a check and says ok or FAIL; the last line counts the
  * failures. Every line should say ok (gcc's build of this file agrees).

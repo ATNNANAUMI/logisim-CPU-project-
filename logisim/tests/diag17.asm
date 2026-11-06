@@ -6,7 +6,7 @@
 ; and RB both set (the assembler always puts RA = 0 for one-operand ops).
 ;
 ; From the project root:
-;   python compiler/src/asm build compiler/examples/asm/tests/diag17.asm
+;   python compiler/src/asm build logisim/tests/diag17.asm
 ;          compiler/examples/asm/stdlib/stdlib.asm
 ;   python logisim/run_rom.py logisim/CPU.circ compiler/ROM/diag17.rom --seconds 600
 ;

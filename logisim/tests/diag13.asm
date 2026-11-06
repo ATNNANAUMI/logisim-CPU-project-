@@ -4,7 +4,7 @@
 ; never sets C and that SUB 3, 5 sets it, so C may mean "borrow".
 ;
 ; From the project root:
-;   python compiler/src/asm build compiler/examples/asm/tests/diag13.asm
+;   python compiler/src/asm build logisim/tests/diag13.asm
 ;          compiler/examples/asm/stdlib/stdlib.asm
 ;   python logisim/run_rom.py logisim/CPU.circ compiler/ROM/diag13.rom
 ;

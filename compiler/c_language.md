@@ -485,5 +485,5 @@ python compiler/src/cc/tests/difftest.py --update   # rewrite the .expected file
 python compiler/src/cc/tests/fuzz.py --count 50     # random programs, gcc against tiny C (needs gcc)
 ```
 
-`compiler/examples/c/tests/circuit_test.c` checks the compiler's tricky code
+`logisim/tests/circuit_test.c` checks the compiler's tricky code
 paths on the circuit itself: every line must say `ok`.

@@ -4,7 +4,7 @@
 ; The C library needs to know these; the simulator gave 0.0/0.0 = +inf.
 ;
 ; From the project root:
-;   python compiler/src/asm build compiler/examples/asm/tests/diag14.asm
+;   python compiler/src/asm build logisim/tests/diag14.asm
 ;          compiler/examples/asm/stdlib/stdlib.asm
 ;   python logisim/run_rom.py logisim/CPU.circ compiler/ROM/diag14.rom
 ;

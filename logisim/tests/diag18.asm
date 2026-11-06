@@ -5,7 +5,7 @@
 ; the RA and RB fields).
 ;
 ; From the project root:
-;   python compiler/src/asm build compiler/examples/asm/tests/diag18.asm
+;   python compiler/src/asm build logisim/tests/diag18.asm
 ;          compiler/examples/asm/stdlib/stdlib.asm
 ;   python logisim/run_rom.py logisim/CPU.circ compiler/ROM/diag18.rom --seconds 600
 ;

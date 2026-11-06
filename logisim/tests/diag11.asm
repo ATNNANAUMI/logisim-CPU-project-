@@ -2,7 +2,7 @@
 ; diag11.asm - three behaviours never measured, plus INT once more
 ;
 ; From the project root:
-;   python compiler/src/asm build compiler/examples/asm/tests/diag11.asm
+;   python compiler/src/asm build logisim/tests/diag11.asm
 ;          compiler/examples/asm/stdlib/stdlib.asm
 ;   python logisim/run_rom.py logisim/CPU.circ compiler/ROM/diag11.rom --jar <logisim jar>
 ;
