@@ -59,6 +59,13 @@ is IR[5]. Kept as gates: CLOCK, the stepper, the halt flip-flop and the OR that
 makes halt_output (HALT pin, RESET, flip-flop), the clock gate in front of
 CLOCK, and the IAR reset gate.
 
+Group 0x2 (IR[14:12] = 010: IMM = 0, FLOAT = 1, ALU = 0) is the Phase 6 group (GROUP2 below). Its five
+stack-register instructions use no new control line: they are STACK_OP codes 10-14 for the stack unit
+in the RAM subcircuit (the table below uses 1-9). Like every STK step they assert both STACK_E and
+STACK_S; the stack unit's circuit decides which one a code needs (10 and 11 put ESP or EBP on the bus,
+12 to 14 load ESP, EBP or the limit from it). RTI EI DI TRAP WAIT and the unused opcodes 0xA-0xF are placeholders that
+only end the instruction.
+
 Each instruction is a list of steps after the two fetch steps; a step is a
 string of the names above, plus W=RA/RB/R0, R=RA/RB/R0 and STK=n. Steps after
 STEP_RST never run, so the table leaves them empty (verify.py does not
@@ -148,9 +155,23 @@ SUB_NAMES = {0x8: ["INDATA", "INADDR / OUTDATA / OUTADDR"],
              0xB: "PUSH POP CALL RET SET GET (6) (7)".split()}
 
 
+# group 0x2, opcode -> (name, steps); STK=n is the stack unit's operation
+GROUP2 = {0x5: ("GSP", ["STACK_E STACK_S STK=10 BUS_IN W=RB STEP_RST"]),     # RB = ESP
+          0x6: ("SSP", ["STACK_E STACK_S STK=12 BUS_OUT R=RB STEP_RST"]),    # ESP = RB
+          0x7: ("GBP", ["STACK_E STACK_S STK=11 BUS_IN W=RB STEP_RST"]),     # RB = EBP
+          0x8: ("SBP", ["STACK_E STACK_S STK=13 BUS_OUT R=RB STEP_RST"]),    # EBP = RB
+          0x9: ("SLIM", ["STACK_E STACK_S STK=14 BUS_OUT R=RB STEP_RST"])}   # stack limit = RB
+GROUP2_BUILT = set(GROUP2)
+GROUP2_NAMES = "RTI EI DI TRAP WAIT".split()
+
+
 def program(op7, ra3):
     """(name, steps 2...) of the instruction IR[14:8] = op7."""
     imm, alu, opcode = op7 >> 6 & 1, op7 >> 4 & 1, op7 & 0xF
+    if op7 & 0x70 == 0x20:                              # group 0x2
+        if opcode in GROUP2:
+            return GROUP2[opcode]
+        return (f"{GROUP2_NAMES[opcode] if opcode < 5 else f'0x2{opcode:X}'} (not built)"), ["STEP_RST"]
     if imm:
         return f"{ALU_NAMES[opcode]} imm", ALU_IMM
     if alu:
